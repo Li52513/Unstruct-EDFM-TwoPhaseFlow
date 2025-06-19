@@ -89,6 +89,7 @@ public:
 		return object;
 	}
 
+	
 	friend Variable3D<variableType> operator + (const Variable3D<variableType>& var0, const Variable3D<variableType>& var1)
 	{
 		Variable3D<variableType> object;
@@ -167,6 +168,7 @@ public:
 		return var0.m_x * var1.m_x + var0.m_y * var1.m_y + var0.m_z * var1.m_z;
 	}
 	
+	//template<class variableType>
 	friend Variable3D<variableType> operator & (const Variable3D<variableType>& var0, const Variable3D<variableType>& var1)
 	{
 		Variable3D<variableType> object;
@@ -263,7 +265,6 @@ public:
 	}
 
 };
-
 
 
 #endif

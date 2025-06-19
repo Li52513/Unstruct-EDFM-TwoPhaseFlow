@@ -361,3 +361,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/2D-Unstr-Quadrilateral-EDFM.vcxproj
+/2D-Unstr-Quadrilateral-EDFM.vcxproj.filters
+/2D-Unstr-Quadrilateral-EDFM.sln

@@ -1,0 +1,56 @@
+%% visualize_EDFM.m  ––  更易读的 EDFM 网格 + 裂缝可视化
+% 读取导出的四个 txt
+nodes = readmatrix('mesh_nodes.txt','FileType','text','NumHeaderLines',1);
+faces = readmatrix('mesh_faces.txt','FileType','text','NumHeaderLines',1);
+cells = readmatrix('mesh_cells.txt','FileType','text','NumHeaderLines',1);
+segs  = readmatrix('fractures_fractureSegments.txt','FileType','text','NumHeaderLines',1);
+
+figure('Color','w'); hold on; axis equal off;
+title('EDFM: Mesh & Fracture segments','FontWeight','bold');
+
+%% ▼— 可调的视觉参数 —▼
+psz_node   = 18;      % 节点散点大小
+psz_cell   = 36;      % Cell 中心散点大小
+f_line_w   = 0.7;     % 网格边线宽
+seg_line_w = 1.5;     % 裂缝段线宽
+dx_node    = 0.01;    % 节点标签 x 偏移 (相对网格长度 1)
+dy_node    = 0.01;    % 节点标签 y 偏移
+dx_cell    = 0.01;    % Cell 标签偏移
+dy_cell    = 0.01;
+%% ▲———————————————————▲
+
+% ▼1. 画节点
+scatter(nodes(:,2), nodes(:,3), psz_node, 'k','filled');
+text(nodes(:,2)+dx_node, nodes(:,3)+dy_node, string(nodes(:,1)), ...
+     'FontSize',10,'Color',[.2 .2 .2],'FontWeight','bold');
+
+% ▼2. 画面（Face）
+for i = 1:size(faces,1)
+    n1 = faces(i,2); n2 = faces(i,3);
+    x  = [ nodes(n1,2), nodes(n2,2) ];
+    y  = [ nodes(n1,3), nodes(n2,3) ];
+    plot(x,y,'k-','LineWidth',f_line_w);
+    % face ID 放到边中点上方一点
+    mx = faces(i,4); my = faces(i,5);
+    text(mx, my+0.015, "F"+string(faces(i,1)), ...
+         'FontSize',15,'Color','r');
+end
+
+% ▼3. 画 Cell 中心
+scatter(cells(:,2), cells(:,3), psz_cell, 'b','filled');
+text(cells(:,2)+dx_cell, cells(:,3)+dy_cell, string(cells(:,1)), ...
+     'FontSize',8,'Color','b','FontWeight','bold');
+
+% ▼4. 画裂缝段（红色实线）
+for i = 1:size(segs,1)
+    x1 = segs(i,3); y1 = segs(i,4);
+    x2 = segs(i,5); y2 = segs(i,6);
+    midx = segs(i,7); midy = segs(i,8);
+    plot([x1,x2],[y1,y2],'r-','LineWidth',seg_line_w);
+    % 标签：fid.segID
+    txt = string(segs(i,1)) + "." + string(segs(i,2));
+    text(midx, midy, txt, 'FontSize',15,'Color','r','FontWeight','bold');
+end
+
+legend({'Nodes','Faces','Cell centers','Frac Segs'}, ...
+       'Location','bestoutside');
