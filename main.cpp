@@ -101,7 +101,7 @@ int main()
     mgr.printCISourceTerms();
 
     cout << "Finished initial setup and property assignment.\n";
-	cout << "Mesh and fracture properties initialized successfully.\n";
+	
     return 0; 
 
     //
