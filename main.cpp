@@ -101,6 +101,7 @@ int main()
     mgr.printCISourceTerms();
 
     cout << "Finished initial setup and property assignment.\n";
+	cout << "gitHub test" << endl;
     return 0; 
 
     //
