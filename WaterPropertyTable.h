@@ -3,6 +3,7 @@
 #include <string>
 #include <stdexcept>
 #include "PropertiesSummary.h"
+#include <functional>
 using namespace std;
 
 /**
@@ -28,6 +29,28 @@ private:
 
     /// data_[iP][iT] 存放 pressures_[iP], temps_[iT] 对应的 WaterProperties
     vector<vector<WaterProperties>> data_;
+
+    // 单纯量 clamp (兼容任意 C++ 标准)
+    static double clamp(double v, double lo, double hi)
+    {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    // Cubic Hermite 插值——声明为私有静态成员
+    static double cubicHermite(double y0, double y1, double y2, double y3, double t);
+
+    // Bicubic Catmull–Rom 插值，针对任意字段的通用接口
+    static double bicubicInterpolate
+    (
+        const std::vector<std::vector<WaterProperties>>& data,
+        const std::vector<double>& X,
+        const std::vector<double>& Y,
+        size_t i, size_t j,
+        double xFrac, double yFrac,
+        const std::function<double(const WaterProperties&)>& field
+    );
 };
+
+
 
 

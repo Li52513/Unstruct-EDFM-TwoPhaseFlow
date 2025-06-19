@@ -82,57 +82,74 @@ void WaterPropertyTable::load(const std::string& filename)
     }
 }
 
+double WaterPropertyTable::cubicHermite(double y0, double y1, double y2, double y3, double t) {
+    double m1 = 0.5 * (y2 - y0);
+    double m2 = 0.5 * (y3 - y1);
+    double t2 = t * t, t3 = t2 * t;
+    return (2 * y1 - 2 * y2 + m2 + m1) * t3
+        + (-3 * y1 + 3 * y2 - 2 * m1 - m2) * t2
+        + m1 * t
+        + y1;
+}
+
+double WaterPropertyTable::bicubicInterpolate(
+    const std::vector<std::vector<WaterProperties>>& data,
+    const std::vector<double>& X,
+    const std::vector<double>& Y,
+    size_t i, size_t j,
+    double xFrac, double yFrac,
+    const std::function<double(const WaterProperties&)>& field)
+{
+    double arr[4];
+    // 沿 Y 对 4 行做 Hermite
+    for (int di = -1; di <= 2; ++di) {
+        int ii = int(clamp(double(i + di), 0.0, double(X.size() - 1)));
+        double v[4];
+        for (int dj = -1; dj <= 2; ++dj) {
+            int jj = int(clamp(double(j + dj), 0.0, double(Y.size() - 1)));
+            v[dj + 1] = field(data[ii][jj]);
+        }
+        arr[di + 1] = cubicHermite(v[0], v[1], v[2], v[3], yFrac);
+    }
+    // 再沿 X 对 4 个结果做一次 Hermite
+    return cubicHermite(arr[0], arr[1], arr[2], arr[3], xFrac);
+}
+
 WaterProperties WaterPropertyTable::getProperties(const double& P, const double& T) const
 {
     if (P < pressures_.front() || P > pressures_.back()
-        || T < temps_.front() || T > temps_.back()) 
+        || T < temps_.front() || T > temps_.back())
     {
         throw std::out_of_range("WaterPropertyTable: (P,T) outside bounds");
     }
 
-    // 找 P0, P1 的索引
+    // 找压力区间 iP0,iP1 与分数 xFrac
     auto itP1 = std::upper_bound(pressures_.begin(), pressures_.end(), P);
     size_t iP1 = itP1 - pressures_.begin(), iP0 = iP1 - 1;
     double P0 = pressures_[iP0], P1 = pressures_[iP1];
+    double xFrac = (P - P0) / (P1 - P0);
 
-    // 找 T0, T1 的索引
+    // 找温度区间 iT0,iT1 与分数 yFrac
     auto itT1 = std::upper_bound(temps_.begin(), temps_.end(), T);
     size_t iT1 = itT1 - temps_.begin(), iT0 = iT1 - 1;
     double T0 = temps_[iT0], T1 = temps_[iT1];
+    double yFrac = (T - T0) / (T1 - T0);
 
-    // 四角物性
-    const auto& W00 = data_[iP0][iT0]; // at (P0, T0)
-    const auto& W01 = data_[iP0][iT1]; // at (P0, T1)
-    const auto& W10 = data_[iP1][iT0]; // at (P1, T0)
-    const auto& W11 = data_[iP1][iT1]; // at (P1, T1)
+    WaterProperties R;
+    // 对每个字段分别做 bicubicInterpolate
+    R.rho = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
+        [&](const WaterProperties& w) { return w.rho; });
+    R.mu = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
+        [&](const WaterProperties& w) { return w.mu;  });
+    R.cp = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
+        [&](const WaterProperties& w) { return w.cp;  });
+    R.cv = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
+        [&](const WaterProperties& w) { return w.cv;  });
+    R.h = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
+        [&](const WaterProperties& w) { return w.h;   });
+    R.k = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
+        [&](const WaterProperties& w) { return w.k;   });
 
-    // 先沿 P 方向做一次插值（得到关于 T 的两个中间状态）
-    double pFrac = (P - P0) / (P1 - P0);
-    WaterProperties R0, R1;
-    R0.rho = W00.rho + (W10.rho - W00.rho) * pFrac;
-    R0.cp = W00.cp + (W10.cp - W00.cp) * pFrac;
-    R0.cv = W00.cv + (W10.cv - W00.cv) * pFrac;
-    R0.k = W00.k + (W10.k - W00.k) * pFrac;
-    R0.mu = W00.mu + (W10.mu - W00.mu) * pFrac;
-    R0.h = W00.h + (W10.h - W00.h) * pFrac;
-
-    R1.rho = W01.rho + (W11.rho - W01.rho) * pFrac;
-    R1.cp = W01.cp + (W11.cp - W01.cp) * pFrac;
-    R1.cv = W01.cv + (W11.cv - W01.cv) * pFrac;
-    R1.k = W01.k + (W11.k - W01.k) * pFrac;
-    R1.mu = W01.mu + (W11.mu - W01.mu) * pFrac;
-    R1.h = W01.h + (W11.h - W01.h) * pFrac;
-
-    // 再沿 T 方向插值
-    double tFrac = (T - T0) / (T1 - T0);
-    WaterProperties result;
-    result.rho = R0.rho + (R1.rho - R0.rho) * tFrac;
-    result.cp = R0.cp + (R1.cp - R0.cp) * tFrac;
-    result.cv = R0.cv + (R1.cv - R0.cv) * tFrac;
-    result.k = R0.k + (R1.k - R0.k) * tFrac;
-    result.mu = R0.mu + (R1.mu - R0.mu) * tFrac;
-    result.h = R0.h + (R1.h - R0.h) * tFrac;
-
-    return result;
+    return R;
 }
 
