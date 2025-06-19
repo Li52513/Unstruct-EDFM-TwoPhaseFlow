@@ -3,6 +3,7 @@
 #include <sstream>
 #include <algorithm>
 
+
 CO2PropertyTable& CO2PropertyTable::instance() 
 {
     static CO2PropertyTable inst("D:/dataBase_MatrialProperties/CO2_SpanWagner.txt");
@@ -21,28 +22,29 @@ void CO2PropertyTable::load(const std::string& filename)
     std::ifstream in(filename);
     if (!in) throw std::runtime_error("Cannot open CO2 property file: " + filename);
 
+    // 跳表头，直到含 “Density” 
     std::string line;
-    // 跳过 header（假定含有 "T"、"P"、"rho"）
     while (std::getline(in, line)) {
-        if (line.find("T") != std::string::npos
-            && line.find("P") != std::string::npos
-            && line.find("rho") != std::string::npos)
+        if (line.find("Density") != std::string::npos &&
+            line.find("Viscosity") != std::string::npos) {
             break;
+        }
     }
 
     struct Row { double P{ 0.0 }, T{ 0.0 }; CO2Properties w{}; };
     std::vector<Row> rows;
 
-    // 逐行读取：P  T  rho  cp  cv  k  mu  h
+    // 逐行读取：P  T  rho  mu  cp  cv  h  k
     while (std::getline(in, line)) 
     {
         if (line.empty()) continue;
         std::istringstream iss(line);
         Row r;
         if (iss >> r.P >> r.T
-            >> r.w.rho >> r.w.cp >> r.w.cv
-            >> r.w.k >> r.w.mu >> r.w.h) 
+            >> r.w.rho >> r.w.mu >> r.w.cp
+            >> r.w.cv >> r.w.h >> r.w.k) 
         {
+           
             rows.push_back(r);
         }
     }

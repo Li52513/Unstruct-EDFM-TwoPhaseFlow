@@ -24,27 +24,28 @@ void WaterPropertyTable::load(const std::string& filename)
     std::ifstream in(filename);
     if (!in) throw std::runtime_error("Cannot open water property file: " + filename);
 
+    // 跳表头，直到遇到含 “Density” 的那行
     std::string line;
-    // 跳过到 header 行（包含 "T"、"P"、"rho"）
-    static const char* keys[] = { "P","T","rho","cp","cv","k","mu","h" };
-    while (std::getline(in, line))
-    {
-        int hit = 0;
-        for (auto k : keys) if (line.find(k) != std::string::npos) ++hit;
-        if (hit >= 5) break;   // 5 个以上关键字命中 → 基本可判定为表头
+    while (std::getline(in, line)) {
+        if (line.find("Density") != std::string::npos &&
+            line.find("Viscosity") != std::string::npos) {
+            break;
+        }
     }
 
     struct Row { double P{ 0.0 }, T{ 0.0 }; WaterProperties w{}; };
     std::vector<Row> rows;
 
-    // 逐行读取：P  T  rho  cp  cv  k  mu  h
-    while (std::getline(in, line)) {
+    // 逐行读取：P  T  rho  miu  cp  cv  h  k
+    while (std::getline(in, line)) 
+    {
         if (line.empty()) continue;
         std::istringstream iss(line);
         Row r;
         if (iss >> r.P >> r.T
-            >> r.w.rho >> r.w.cp >> r.w.cv
-            >> r.w.k >> r.w.mu >> r.w.h) {
+            >> r.w.rho >> r.w.mu >> r.w.cp
+            >> r.w.cv >> r.w.h >> r.w.k) 
+        {
             rows.push_back(r);
         }
     }

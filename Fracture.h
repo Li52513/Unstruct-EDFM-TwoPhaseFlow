@@ -125,8 +125,8 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     double aP_fr = 0.0;   ///< 本段总离散系数 aW+aE+b
 
     // —————— 待求解变量 ——————  （仍待补充 T 和 s）
-    double p_fr = 5.5e6;   ///< 裂缝段压力
-	double T_fr = 383.15;   ///< 裂缝段温度
+    double p_fr = 6.621e6;   ///< 裂缝段压力
+	double T_fr = 487.55;   ///< 裂缝段温度
 	double s_water_fr = 0.8;   ///< 裂缝段水相饱和度
 	double s_CO2_fr = 0.2;   ///< 裂缝段气相饱和度
 
