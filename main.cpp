@@ -101,6 +101,7 @@ int main()
     mgr.printCISourceTerms();
 
     cout << "Finished initial setup and property assignment.\n";
+	cout << "Press Enter to exit...\n";
     return 0; 
 
     //
