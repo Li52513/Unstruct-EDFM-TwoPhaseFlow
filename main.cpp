@@ -61,7 +61,7 @@ int main()
         mgr,
         {
             // 高渗区
-            { Cell::RegionType::High, 
+            { Cell::RegionType::High,
         {
                 {0.0, 0.5, 0.0},
                 {0.0, 1.0, 0.0},
@@ -69,7 +69,7 @@ int main()
             }
             },
         // 低渗区
-        { Cell::RegionType::Low, 
+        { Cell::RegionType::Low,
         {
             {0.5, 0.0, 0.0},
             {0.0, 1.0, 0.0},
@@ -79,29 +79,18 @@ int main()
         },
         /* defaultRegion = */ Cell::RegionType::Medium
     );
-
 	ppm.classifyFractureElementsByGeometry(mgr, 0, { 0.1, 0.2, 0 }, { 0.3, 0.9, 0 }, FractureElementType::Blocking, FractureElementType::Conductive);
-
     //初始化固相、液相和气相参数（基岩和裂缝内：初始温度为303.15K，初始压力为1e6，初始水相饱和度为0.8，初始CO2饱和度为0.2） 目前的初始化温度是通过构造函数初始化的
     ppm.InitializeRockMatrixProperties(mgr);
     ppm.InitializeFractureElementsProperties(mgr);
-
-	//因为有了classifyRockRegionsByGeometry，这里的classifyRockRegions函数就不需要了,而是再Updata 后再更新分类
-    //ppm.classifyRockRegions(mgr, /*poroLow=*/0.1, /*poroHigh=*/0.3,/*permLow=*/1e-13, /*permHigh=*/1e-11); //在未自适应区域之前，默认为Medium区域
-    //ppm.classifyFractureElements(mgr,/*permThreshold=*/1e-11); //在未为自适应区域之前，默认为Conductive区域
-
-
     /****************** 调试 & 输出 ******************/
     // 打印所有 Cell 和 FractureElement 的当前物性
     ppm.debugPrintProperties(mgr);
-
     // 导出网格、裂缝信息
     mgr.exportMesh("mesh");
     mgr.exportFractures("fractures");
     mgr.printCISourceTerms();
-
     cout << "Finished initial setup and property assignment.\n";
-	
     return 0; 
 
     //

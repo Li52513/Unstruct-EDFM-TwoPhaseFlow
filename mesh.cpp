@@ -396,7 +396,6 @@ void Mesh::CreateSolidMatrixGhostCells()
     }
 }
 
-
 void Mesh::printMeshInfo()
 {
     cout << "总节点数: " << nodes.size() << endl;
@@ -437,17 +436,6 @@ void Mesh::printMeshInfo()
     }
 
 }
-
-//void Mesh::assignRockProperties(const Matrix& matrix) 
-//{
-//    // 遍历每个单元并分配物性参数
-//    for (auto& cell : cells) 
-//    {
-//        if (cell.id < 0) continue;
-//        // 将 Matrix 中的物性参数分配给每个单元
-//        cell.materialProps.setProperties(matrix.matrix_Porosity, matrix.matrix_Permeability, matrix.matrix_Beta);
-//    }
-//}
 
 double Mesh::getCellArea(int cellID) const
 {
@@ -537,6 +525,16 @@ void Mesh::exportToTxt(const std::string& prefix) const
     exportGhostInfo(prefix);
 }
 
+//void Mesh::assignRockProperties(const Matrix& matrix) 
+//{
+//    // 遍历每个单元并分配物性参数
+//    for (auto& cell : cells) 
+//    {
+//        if (cell.id < 0) continue;
+//        // 将 Matrix 中的物性参数分配给每个单元
+//        cell.materialProps.setProperties(matrix.matrix_Porosity, matrix.matrix_Permeability, matrix.matrix_Beta);
+//    }
+//}
 
 //void Mesh::reindexIDs()
 //{

@@ -161,48 +161,6 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
 
     intersections = move(cleaned);
 }
- //   intersections.clear();
- //   int interId = 1;
- //   for (const auto& face : meshFaces) 
- //   {
-	//	//获取网格面节点坐标
- //       if (face.nodeCoords.size() < 2) continue;
- //       Vector A = face.nodeCoords[0];
- //       Vector B = face.nodeCoords[1];
- //       Vector ip;
-	//	//判断裂缝线段与网格面是否相交
- //       if (lineSegmentIntersection(start, end, A, B, ip)) 
- //       {
- //           Vector diff = end - start; 
-	//		double segLen = diff.Mag(); // 计算裂缝线段长度
-	//		double t = (segLen > 1e-8) ? (ip - start).Mag() / segLen : 0.0; //计算归一化参数，用于后面排序
- //           intersections.emplace_back(-1, ip, face.id, t/*, false,0*/);  //这里因为是裂缝与面的交点所以默认isFF为false 和0
- //       }
- //   }
-	//// 检查并强制加入裂缝起点和终点为交点
- //   bool startIncluded = false, endIncluded = false;
- //   for (const auto& inter : intersections) 
- //   {
- //       if ((inter.point - start).Mag() < 1e-6) startIncluded = true;
- //       if ((inter.point - end).Mag() < 1e-6) endIncluded = true;
- //   }
- //   if (!startIncluded)
- //       intersections.emplace_back(-1, start, -1, 0.0);
- //   if (!endIncluded)
- //       intersections.emplace_back(-1, end, -1, 1.0);
-	////对交点按归一化参数 param 排序（从起点到终点）
- //   sort(intersections.begin(), intersections.end(),
- //       [](const FractureIntersectionPoint& a, const FractureIntersectionPoint& b) 
- //       {
- //           return a.param < b.param;
- //       });
- //   
- //   for (auto& inter : intersections)
- //   {
-	//	inter.id = interId++; // 重新对裂缝交点进行编号
- //   }
-
-
 /*==根据裂缝交点划分裂缝单元，并计算每个单元的长度（computeSegmentLength）、所属网格单元（findContainingCell）以及平均距离（computeDistanceFromCenter&computeAverageDistanceFromNodes）===*/
 void Fracture::subdivide(const vector<Cell>& meshCells, const map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
 {
@@ -337,68 +295,6 @@ void Fracture::computeGeometryCouplingCoefficientgeomCIandgeomAlpha()
 
 // -----------------------------------------------------------------------------
 
-
-////  Fracture::computeFractureDiscreteCoefficients
-////      • 端面导流系数 aW/aE           : 2ρ kf w / μ(Li+Lj)
-////      • 有效渗透率 k_eff             : (Af φf + Ac φm) / (Af φf/kf + Ac φm/km)
-////      • 裂缝-基岩连接指数 CI (b_fr)  : (kf/μ) Af / d      ← 文献Tingyu师兄公式 ΘA/d 单位：[m³⋅Pa⁻¹⋅s⁻¹]
-////      现在处理的是裂缝在不同位置保持开度相同的情况，如果以后每段开度不同，只需把 aperture 换成 elem.aperture_i 即可。
-//// -----------------------------------------------------------------------------
-//
-//
-//
-//void Fracture::computeFractureDiscreteCoefficients(const FluidProperties& water,
-//    const Matrix& matrix,
-//    Mesh& mesh)
-//{
-//    computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
-//    constexpr double eps_d = 1e-6;
-//
-//    constexpr double eps_mu = 1e-30;
-//
-//
-//    // 物理 θ_phys = k_f / μ
-//    double theta_phys = permeability / (fluid.fluid_viscosity + eps_mu);
-//	cout << "物理 θ_phys = k_f / μ = " << theta_phys << endl;
-//    // 物理流动 coef_phys = 2·ρ·k_f·w / μ （用于 aW/aE）
-//    double coef_phys = 2.0 * fluid.fluid_rho * permeability * aperture
-//        / (fluid.fluid_viscosity + eps_mu);
-//    for (size_t i = 0; i < elements.size(); ++i) {
-//        auto& elem = elements[i];
-//        // —— 1. 端面导流系数 aW/aE ——  
-//        double L = elem.length;
-//        double Lp = (i > 0) ? elements[i - 1].length : 0.0;
-//        double Ln = (i + 1 < elements.size()) ? elements[i + 1].length : 0.0;
-//        if (i == 0) {
-//            elem.aW_fr = coef_phys / L;
-//            elem.aE_fr = coef_phys / (L + Ln);
-//        }
-//        else if (i + 1 == elements.size()) {
-//            elem.aE_fr = coef_phys / L;
-//            elem.aW_fr = coef_phys / (L + Lp);
-//        }
-//        else {
-//            elem.aW_fr = coef_phys / (L + Lp);
-//            elem.aE_fr = coef_phys / (L + Ln);
-//        }
-//        // —— 2. 物性 CI：CI_phys = θ_phys * geomCI ——  
-//        elem.b_fr = theta_phys * elem.geomCI;
-//        // —— 3. 总系数 aP ——  
-//        elem.aP_fr = elem.aW_fr + elem.aE_fr + elem.b_fr;
-//        // —— 4. 物理 α_phys（TI 用）——  
-//        elem.alpha_fr = 2.0 * permeability * aperture
-//            / (fluid.fluid_viscosity * elem.length + eps_mu);
-//        // —— 5. 写回宿主单元，只存物性 CI_phys ——  
-//        auto it = mesh.cellId2index.find(elem.cellID);
-//        if (it != mesh.cellId2index.end()) {
-//            Cell& host = mesh.cells[it->second];
-//            host.CI.push_back(elem.b_fr);
-//            host.CI_belongFraction.push_back(elem.id);
-//            host.fracturePressure.push_back(elem.p_fr);
-//        }
-//    }
-// 
-//}
 /*====点到线段的距离（pointToSegmentDistance）====*/
 double Fracture::pointToSegmentDistance(const Vector& p, const Vector& s, const Vector& e) {
     Vector se = e - s;
@@ -512,3 +408,66 @@ void Fracture::sortAndRenumberIntersections()
     int nid = 1;
     for (auto& I : intersections) I.id = nid++;
 }
+
+
+////  Fracture::computeFractureDiscreteCoefficients
+////      • 端面导流系数 aW/aE           : 2ρ kf w / μ(Li+Lj)
+////      • 有效渗透率 k_eff             : (Af φf + Ac φm) / (Af φf/kf + Ac φm/km)
+////      • 裂缝-基岩连接指数 CI (b_fr)  : (kf/μ) Af / d      ← 文献Tingyu师兄公式 ΘA/d 单位：[m³⋅Pa⁻¹⋅s⁻¹]
+////      现在处理的是裂缝在不同位置保持开度相同的情况，如果以后每段开度不同，只需把 aperture 换成 elem.aperture_i 即可。
+//// -----------------------------------------------------------------------------
+//
+//
+//
+//void Fracture::computeFractureDiscreteCoefficients(const FluidProperties& water,
+//    const Matrix& matrix,
+//    Mesh& mesh)
+//{
+//    computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
+//    constexpr double eps_d = 1e-6;
+//
+//    constexpr double eps_mu = 1e-30;
+//
+//
+//    // 物理 θ_phys = k_f / μ
+//    double theta_phys = permeability / (fluid.fluid_viscosity + eps_mu);
+//	cout << "物理 θ_phys = k_f / μ = " << theta_phys << endl;
+//    // 物理流动 coef_phys = 2·ρ·k_f·w / μ （用于 aW/aE）
+//    double coef_phys = 2.0 * fluid.fluid_rho * permeability * aperture
+//        / (fluid.fluid_viscosity + eps_mu);
+//    for (size_t i = 0; i < elements.size(); ++i) {
+//        auto& elem = elements[i];
+//        // —— 1. 端面导流系数 aW/aE ——  
+//        double L = elem.length;
+//        double Lp = (i > 0) ? elements[i - 1].length : 0.0;
+//        double Ln = (i + 1 < elements.size()) ? elements[i + 1].length : 0.0;
+//        if (i == 0) {
+//            elem.aW_fr = coef_phys / L;
+//            elem.aE_fr = coef_phys / (L + Ln);
+//        }
+//        else if (i + 1 == elements.size()) {
+//            elem.aE_fr = coef_phys / L;
+//            elem.aW_fr = coef_phys / (L + Lp);
+//        }
+//        else {
+//            elem.aW_fr = coef_phys / (L + Lp);
+//            elem.aE_fr = coef_phys / (L + Ln);
+//        }
+//        // —— 2. 物性 CI：CI_phys = θ_phys * geomCI ——  
+//        elem.b_fr = theta_phys * elem.geomCI;
+//        // —— 3. 总系数 aP ——  
+//        elem.aP_fr = elem.aW_fr + elem.aE_fr + elem.b_fr;
+//        // —— 4. 物理 α_phys（TI 用）——  
+//        elem.alpha_fr = 2.0 * permeability * aperture
+//            / (fluid.fluid_viscosity * elem.length + eps_mu);
+//        // —— 5. 写回宿主单元，只存物性 CI_phys ——  
+//        auto it = mesh.cellId2index.find(elem.cellID);
+//        if (it != mesh.cellId2index.end()) {
+//            Cell& host = mesh.cells[it->second];
+//            host.CI.push_back(elem.b_fr);
+//            host.CI_belongFraction.push_back(elem.id);
+//            host.fracturePressure.push_back(elem.p_fr);
+//        }
+//    }
+// 
+//}

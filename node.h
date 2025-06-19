@@ -10,9 +10,9 @@ public:
     int id;         // 节点编号
     Vector coord;   // 节点坐标
 
-	Node(int id, const Vector& coord) : id(id), coord(coord) {}// 构造函数及参数初始化列表
+	Node(int id, const Vector& coord) : id(id), coord(coord) {}// 有参构造函数
 
-    Node() : id(-1), coord(0.0, 0.0, 0.0) {}// 默认构造函数
+    Node() : id(-1), coord(0.0, 0.0, 0.0) {}// 初始化列表
 
  
 };

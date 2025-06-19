@@ -4,7 +4,6 @@
 #include "Node.h"
 #include "Face.h"
 #include "Cell.h"
-#include "Matrix.h"  
 #include <fstream>
 
 
@@ -26,14 +25,7 @@ public:
     void BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int ny, int nz,bool usePrism, bool useQuadBase);
     void ClassifySolidMatrixCells();
     void printMeshInfo();
-    void exportToTxt(const std::string& prefix) const;
-
-	////------------------基岩物性参数----------------------//
- //   void assignRockProperties(const Matrix& matrix); //代替换输入参数
- //   Matrix matrixProperties;
- //   //---------------------------------------------------//
-   
-    
+    void exportToTxt(const std::string& prefix) const;   
     
     double getCellArea(int cellID)  const;
     //记录边界面的ID

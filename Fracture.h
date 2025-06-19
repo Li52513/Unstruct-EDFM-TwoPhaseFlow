@@ -64,9 +64,6 @@ enum class IntersectionOrigin
     FracEnd         // 裂缝终点
 };
 
-
-
-
 struct FractureIntersectionPoint  //// 用于描述裂缝与基岩网格边界交点的结构体
 {
 	int id; // 交点编号
@@ -77,7 +74,6 @@ struct FractureIntersectionPoint  //// 用于描述裂缝与基岩网格边界�
     int     globalFFID;   // <<< 新增：全局 FF 交点的 ID（face 交点填 0）
     IntersectionOrigin origin;   ///交点的“来源”
     
-
     FractureIntersectionPoint(int _id,
         const Vector& _pt,
         int _edgeID,
@@ -111,12 +107,6 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     double geomAlpha = 0.0;   ///< 纯几何 α_geom = 2·w / L  可以进一步修正
 
     //——————裂缝段类型———————
-  //  enum class Type
-  //  {
-  //      Blocking,
-		//Conductive
-  //  };
-  //  Type type = Type::Conductive;
     FractureElementType type = FractureElementType::Conductive;
 	///< 裂缝段类型（阻塞/导流）
 	
@@ -176,8 +166,7 @@ public:
 	
 	/*===裂缝编号===*/ 
 	int id  ; // 裂缝编号
-
-    
+        
     /*===裂缝起点终点信息===*/
     Vector start; // 裂缝起点坐标
 	Vector end;   // 裂缝终点坐标
@@ -191,8 +180,6 @@ public:
      /*==裂缝与基岩交点计算====*/
     void DetectFracturetoMeshFaceIntersections(const vector<Face>& meshFaces, const std::vector<Cell>& meshCells, const std::map<int, Node>& meshNodes);
   
-
-
  /*=====构造函数=====*/
     Fracture(const Vector& s, const Vector& e);
 
@@ -201,17 +188,12 @@ public:
 /// geomCI   = (段长 * aperture) / avgDistance
 /// geomAlpha= 2 * aperture / 段长
     void computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
-
-    
+        
     /*==裂缝段离散====*/
     void subdivide(const vector<Cell>& meshCells, const map<int, Node>& meshNodes,  bool useCenterDistance = false);    
 
-
-
     /*== 给定 param，定位它属于哪一段====*/
     int locateSegment(double param) const;
-
-
 
     static bool lineSegmentIntersection(const Vector& p, const Vector& q, const Vector& r, const Vector& s, Vector& ip);
     void sortAndRenumberIntersections();
