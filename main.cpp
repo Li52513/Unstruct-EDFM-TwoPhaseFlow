@@ -17,6 +17,7 @@
 
 
 
+#include <chrono>
 #include <iostream>
 #include "Mesh.h"
 #include "FractureNetwork.h"
@@ -43,18 +44,52 @@ int main()
     /**************************网格设置模块******************************/
     /*----------------------------------------------------------------------*/
     // 1) 构造并预处理网格
+	auto t0 = std::chrono::high_resolution_clock::now(); // 计时开始
     MeshManager mgr(lengthX, lengthY, lengthZ, sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
     mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection); //这里输入面法矢量修正方法；其中MinimumCorrection-最小修正值法；OrthogonalCorrection-正交修正法；OverRelaxed-超松弛修正法
+	auto t1 = std::chrono::high_resolution_clock::now(); // 计时结束
+	auto ms0 = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+	std::cout << "MatrixMesh built in " << ms0 << " ms.\n";
 
 	// 2) 添加裂缝 & 裂缝网格划分 & 计算几何耦合系数
-    mgr.addFracture({ 0.1,0.2,0 }, { 0.3,0.9,0 });
+   /* mgr.addFracture({ 0.1,0.2,0 }, { 0.3,0.9,0 });
     mgr.addFracture({ 0.7,0.1,0 }, { 0.1,0.8,0 });
-    mgr.addFracture({ 0.0725,0.1825,0 }, { 0.4025,0.3925,0 });
+    mgr.addFracture({ 0.0725,0.1825,0 }, { 0.4025,0.3925,0 });*/
+
+    //@brief 生成随机 DFN 裂缝网络
+ /**
+  * @brief 基于 DFN 方法随机生成裂缝
+  * @param N            要生成的裂缝数量
+  * @param minPoint     裂缝中心坐标下限 (x,y,z)
+  * @param maxPoint     裂缝中心坐标上限 (x,y,z)
+  * @param Lmin         裂缝最小长度
+  * @param Lmax         裂缝最大长度
+  * @param alpha        长度幂律指数 (p(L) ∝ L^{-α})
+  * @param kappa        von Mises 浓度 (κ≈0→均匀取向)
+  * @param avoidOverlap 是否简单避让已有裂缝重叠
+  */
+	auto t2 = std::chrono::high_resolution_clock::now(); // 计时开始
+    mgr.fracture_network().setRandomSeed(12345);
+    mgr.fracture_network().generateDFN
+    (
+        /*N=*/30,
+        /*min=*/{ 0.0,0.0,0.0 },
+        /*max=*/{ 1.0,1.0,0.0 },
+        /*Lmin=*/0.5,
+        /*Lmax=*/1.4,
+        /*alpha=*/0,
+        /*kappa=*/0,
+        /*avoidOverlap=*/true 
+    );
     mgr.DetectAndSubdivideFractures();
     mgr.ComputeFractureGeometryCouplingCoefficient();
+	auto t3 = std::chrono::high_resolution_clock::now(); // 计时结束
+	auto ms1 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+	std::cout << "FractureNetwork built in " << ms1 << " ms.\n";
 
     /**************************物性参数设置模块******************************/
     /*----------------------------------------------------------------------*/
+	auto t4 = std::chrono::high_resolution_clock::now(); // 计时开始
     PhysicalPropertiesManager ppm;
     ppm.classifyRockRegionsByGeometry
     (
@@ -83,6 +118,9 @@ int main()
     //初始化固相、液相和气相参数（基岩和裂缝内：初始温度为303.15K，初始压力为1e6，初始水相饱和度为0.8，初始CO2饱和度为0.2） 目前的初始化温度是通过构造函数初始化的
     ppm.InitializeRockMatrixProperties(mgr);
     ppm.InitializeFractureElementsProperties(mgr);
+	auto t5 = std::chrono::high_resolution_clock::now(); // 计时结束
+	auto ms2 = std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
+	std::cout << "Physical properties initialized in " << ms2 << " ms.\n";
     /****************** 调试 & 输出 ******************/
     // 打印所有 Cell 和 FractureElement 的当前物性
     ppm.debugPrintProperties(mgr);

@@ -10,7 +10,131 @@
 #include <numeric>      // accumulate
 #include <cmath>
 
-//
+
+
+// 自定义 PI
+static constexpr double PI = 3.14159265358979323846;
+
+// Helpers ------------------------------------------------------------------
+
+// uniform [0,1)
+static double uniformRand() {
+    return double(std::rand()) / double(RAND_MAX);
+}
+
+// von Mises (Best–Fisher), mean=0
+static double sampleVonMises(double kappa) {
+    if (kappa < 1e-6) {
+        return uniformRand() * 2.0 * PI;
+    }
+    double a = 1.0 + std::sqrt(1.0 + 4.0 * kappa * kappa);
+    double b = (a - std::sqrt(2.0 * a)) / (2.0 * kappa);
+    double r = (1.0 + b * b) / (2.0 * b);
+    while (true) {
+        double u1 = uniformRand();
+        double u2 = uniformRand();
+        double z = std::cos(PI * u1);
+        double f = (1.0 + r * z) / (r + z);
+        double c = kappa * (r - f);
+        if (u2 < c * (2.0 - c) || std::log(u2) <= c - 1.0) 
+        {
+            double u3 = uniformRand();
+            double theta = std::acos(f);
+            return (u3 > 0.5 ? theta : 2.0 * PI - theta);
+        }
+    }
+}
+
+// 2D segment–segment intersection test
+static bool segmentsIntersect(const Vector& a1, const Vector& a2,
+    const Vector& b1, const Vector& b2) {
+    auto cross = [](double x1, double y1, double x2, double y2) {
+        return x1 * y2 - y1 * x2;
+        };
+    Vector r{ a2.m_x - a1.m_x, a2.m_y - a1.m_y, 0.0 };
+    Vector s{ b2.m_x - b1.m_x, b2.m_y - b1.m_y, 0.0 };
+    double denom = cross(r.m_x, r.m_y, s.m_x, s.m_y);
+    if (std::fabs(denom) < 1e-12) return false;
+    Vector d{ b1.m_x - a1.m_x, b1.m_y - a1.m_y, 0.0 };
+    double t = cross(d.m_x, d.m_y, s.m_x, s.m_y) / denom;
+    double u = cross(d.m_x, d.m_y, r.m_x, r.m_y) / denom;
+    return (t >= 0.0 && t <= 1.0 && u >= 0.0 && u <= 1.0);
+}
+
+void FractureNetwork::setRandomSeed(unsigned seed)
+{
+	std::srand(seed);
+}
+
+// ----------------------------------------------------------------------------
+void FractureNetwork::generateDFN(
+    int N,
+    const Vector& minPoint,
+    const Vector& maxPoint,
+    double Lmin,
+    double Lmax,
+    double alpha,
+    double kappa,
+    bool avoidOverlap
+) {
+    // helper: power-law length
+    auto sampleLength = [&]() {
+        double u = uniformRand();
+        double c0 = std::pow(Lmin, 1.0 - alpha);
+        double c1 = std::pow(Lmax, 1.0 - alpha);
+        return std::pow(c0 + u * (c1 - c0), 1.0 / (1.0 - alpha));
+        };
+
+    int created = 0, attempts = 0, maxAttempts = N * 10;
+    while (created < N && attempts < maxAttempts) {
+        ++attempts;
+        // 1) center
+        double cx = minPoint.m_x + uniformRand() * (maxPoint.m_x - minPoint.m_x);
+        double cy = minPoint.m_y + uniformRand() * (maxPoint.m_y - minPoint.m_y);
+        double cz = minPoint.m_z + uniformRand() * (maxPoint.m_z - minPoint.m_z);
+        Vector C{ cx,cy,cz };
+
+        // 2) length & orientation
+        double L = sampleLength();
+        double theta = sampleVonMises(kappa);
+
+        // 3) endpoints
+        double dx = 0.5 * L * std::cos(theta),
+            dy = 0.5 * L * std::sin(theta);
+        Vector s{ C.m_x + dx, C.m_y + dy, C.m_z };
+        Vector e{ C.m_x - dx, C.m_y - dy, C.m_z };
+
+        // 4) boundary check
+        if (s.m_x<minPoint.m_x || s.m_x>maxPoint.m_x ||
+            s.m_y<minPoint.m_y || s.m_y>maxPoint.m_y ||
+            e.m_x<minPoint.m_x || e.m_x>maxPoint.m_x ||
+            e.m_y<minPoint.m_y || e.m_y>maxPoint.m_y)
+            continue;
+
+        // 5) optional overlap avoidance
+        if (avoidOverlap) {
+            bool bad = false;
+            for (auto const& F : fractures) {
+                if (!F.intersections.empty()) {
+                    Vector a1 = F.intersections.front().point;
+                    Vector a2 = F.intersections.back().point;
+                    if (segmentsIntersect(s, e, a1, a2)) { bad = true; break; }
+                }
+            }
+            if (bad) continue;
+        }
+
+        // 6) finally add
+        addFracture(s, e);
+        ++created;
+    }
+
+    if (created < N) {
+        std::cerr << "[Warning] only " << created
+            << " of " << N << " fractures.\n";
+    }
+}
+
 void FractureNetwork::addFracture(const Vector& s, const Vector& e)
 {
     fractures.emplace_back(s, e);           // 1. 先放进容器
@@ -152,7 +276,6 @@ void FractureNetwork::DistributeFracture_FractureIntersectionsToGlobalInersectio
     }
 }
 
-
 /// 对裂缝与裂缝的交点进行去重并编号
 void FractureNetwork::DeduplicateAndRenumberFractureToFractureIntersections()
 {
@@ -173,9 +296,6 @@ void FractureNetwork::DeduplicateAndRenumberFractureToFractureIntersections()
     }
     globalFFPts.swap(uniquePts);
 }
-
-
-
 
 /// 判断两个点是否在给定的公差范围内相等
 bool FractureNetwork::isClose(const Vector& a, const Vector& b, double tol) const
@@ -254,8 +374,6 @@ void FractureNetwork::printFractureInfo() const
     }
 }
 
-
-/* -------------------------------------------------------------------------- */
 void FractureNetwork::exportToTxt(const std::string& prefix) const
 {
     /*================ 1. 裂缝段端点文件  ================*/
