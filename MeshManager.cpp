@@ -31,7 +31,7 @@ void MeshManager::DetectAndSubdivideFractures()
     frNet_.DetectFracturetoFractureIntersections();
 	// 2) 然后找裂缝–网格面的交点
     for (auto& F : frNet_.fractures)
-        F.DetectFracturetoMeshFaceIntersections(mesh_.faces, mesh_.cells, mesh_.nodesMap);
+        F.DetectFracturetoMeshFaceIntersections(mesh_.getFaces(), mesh_.getCells(), mesh_.getNodesMap());
    
     // 3) 给全局裂缝–裂缝交点去重并编号
     frNet_.DeduplicateAndRenumberFractureToFractureIntersections();
@@ -43,7 +43,7 @@ void MeshManager::DetectAndSubdivideFractures()
     for (auto& F : frNet_.fractures)
     {
         F.sortAndRenumberIntersections();
-        F.subdivide(mesh_.cells, mesh_.nodesMap);
+        F.subdivide(mesh_.getCells(), mesh_.getNodesMap());
     }
 }
 
@@ -82,10 +82,11 @@ void MeshManager::printFractureInfo() const {
     frNet_.printFractureInfo();
 }
 
-void MeshManager::printCISourceTerms() const 
+void MeshManager::printCISourceTerms()  
 {
     std::cout << "\n=== 检查基岩–裂缝 CI 源项 ===\n";
-    for (const auto& cell : mesh_.cells) {
+    for (auto& cell : mesh_.getCells())
+    {
         if (cell.id < 0) continue;               // 跳过 Ghost
         if (cell.CI.empty())     continue;       // 没有 fracture 交互就跳过
 

@@ -45,7 +45,7 @@ static bool pointInConvexPolygon(const Vector& p, const vector<Vector>& verts)
 void PhysicalPropertiesManager::classifyRockRegionsByGeometry(MeshManager& mgr, const vector<RegionGeometry>& regionGeoms, Cell::RegionType defaultRegion = Cell::RegionType::Medium)
 {
 	auto& mesh = mgr.mesh();
-	for (auto& cell : mesh.cells)
+	for (auto& cell : mesh.getCells())
 	{
 		if (cell.id < 0) continue; 
 		Cell::RegionType region = defaultRegion; // 默认区域
@@ -109,7 +109,7 @@ void PhysicalPropertiesManager::classifyFractureElementsByGeometry(MeshManager& 
 void PhysicalPropertiesManager::classifyRockRegions(MeshManager& mgr, double poroLow, double poroHigh, double permLow, double permHigh)    //输入低渗孔隙率、渗透率阈值&高渗孔隙率、渗透率，现在这个函数功能还不能自适应
 {
 	auto& mesh = mgr.mesh();
-	for (auto& cell : mesh.cells)
+	for (auto& cell : mesh.getCells())
 	{
 		if (cell.id < 0) continue; // 跳过 Ghost Cell
 		const auto& solidproperties = cell.SolidMaterialProps;
@@ -156,7 +156,7 @@ void PhysicalPropertiesManager::InitializeRockMatrixProperties(MeshManager& mgr)
 	auto& waterTable = WaterPropertyTable::instance();
 	auto& co2Table = CO2PropertyTable::instance(); //目前采用的SpanWagner方法 ，如果需要采用其他方法，将D:\dataBase_MatrialProperties中其他方法的,txt文件传进去
 
-	for (auto& cell : mesh.cells)
+	for (auto& cell : mesh.getCells())
 	{
 		if (cell.id < 0) continue;  // 跳过 Ghost Cell
 
@@ -198,12 +198,12 @@ void PhysicalPropertiesManager::InitializeFractureElementsProperties(MeshManager
 void PhysicalPropertiesManager::UpdateMatrixProperties(MeshManager& mgr) 
 {
 	
-	
+	auto& mesh = mgr.mesh();
 	// 1）根据当前压力P 和当前温度T 计算基岩和其内部的水相和CO2相物性参数
 	auto waterProps = WaterPropertyTable::instance();
 	auto CO2Props = CO2PropertyTable::instance();
 
-	for (auto& cell : mgr.mesh().cells) 
+	for (auto& cell : mesh.getCells())
 	{
 		if (cell.id < 0) continue; // 跳过 Ghost Cell
 
@@ -240,8 +240,8 @@ void PhysicalPropertiesManager::debugPrintProperties( MeshManager& mgr) const
 {
 	// 打印基岩单元
 	std::cout << "\n=== Rock Matrix Cells Properties ===\n";
-	const auto& mesh = mgr.mesh();
-	for (const auto& cell : mesh.cells) {
+	 auto& mesh = mgr.mesh();
+	for ( auto& cell : mesh.getCells()) {
 		if (cell.id < 0) continue;  // ghost
 		std::cout
 			<< "Cell " << cell.id

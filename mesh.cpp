@@ -7,7 +7,7 @@
 #include <cmath>
 #include "Bound.h"
 
-Mesh::Mesh() : gridCount(0) {}
+Mesh::Mesh() : gridCount_(0) {}
 
 
 void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int ny, int nz, bool usePrism, bool useQuadBase)
@@ -134,8 +134,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
     {
         int id = static_cast<int>(nodeTags[i]);
         Vector coord(nodeCoords[3 * i], nodeCoords[3 * i + 1], nodeCoords[3 * i + 2]);
-        nodes.emplace_back(id, coord);         // 添加到节点列表
-        nodesMap[id] = Node(id, coord);        // 建立映射关系
+        nodes_.emplace_back(id, coord);        // 括号法定义，添加到节点列表
+        nodesMap_[id] = Node(id, coord);        // 建立映射关系
     }
 
     // ==== Step 2: 读取单元信息并构建 Cell（支持三角形和四面体） ====
@@ -160,8 +160,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                 for (int k = 0; k < 3; k++)                         // 三角形单元有三个节点
                 cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][3 * j + k]));               
                 Cell cell(cellId, cellNodeIDs);
-                cell.computeCenterAndVolume(nodesMap);
-                cells.push_back(cell);
+                cell.computeCenterAndVolume(nodesMap_);
+                cells_.push_back(cell);
             }
         }
 
@@ -177,8 +177,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                     cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][4 * j + k]));
 
 				Cell cell(cellId, cellNodeIDs);       // 构造 Cell 对象
-				cell.computeCenterAndVolume(nodesMap); // 计算 Cell 的中心和体积
-                cells.push_back(cell);
+				cell.computeCenterAndVolume(nodesMap_); // 计算 Cell 的中心和体积
+                cells_.push_back(cell);
             }
         }
         // 棱柱单元（type == 6）
@@ -193,8 +193,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                     cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][6 * j + k]));
 
                 Cell cell(cellId, cellNodeIDs);
-                cell.computeCenterAndVolume(nodesMap);
-                cells.push_back(cell);
+                cell.computeCenterAndVolume(nodesMap_);
+                cells_.push_back(cell);
             }
         }
 
@@ -210,26 +210,26 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                     cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][8 * j + k]));
 
                 Cell cell(cellId, cellNodeIDs);
-                cell.computeCenterAndVolume(nodesMap);
-                cells.push_back(cell);
+                cell.computeCenterAndVolume(nodesMap_);
+                cells_.push_back(cell);
             }
         }
 
 
     }
 	//构建 id → 下标 映射，方便后续快速访问
-    cellId2index.clear();
-    for (int i = 0; i < (int)cells.size(); ++i)
+    cellId2index_.clear();
+    for (int i = 0; i < (int)cells_.size(); ++i)
     {
-        cellId2index[cells[i].id] = i;
+        cellId2index_[cells_[i].id] = i;
     }
     
-    gridCount = cells.size();  // 统计总单元数
+    gridCount_ = cells_.size();  // 统计总单元数
 
 	// === Step 3: 构造面（Face）并建立 Cell 和 Face 的对应关系 ===  *注意 对于3D情况而言，是构造面片与单元的对应关系
 
 	map<set<int>, vector<int>> faceMap;   //set的作用是按从小到大自动排序，去除重复情况，可以当作唯一标识某个面的 key
-    for (const auto& cell : cells)
+    for (const auto& cell : cells_)
     {
 		const auto& cn = cell.nodeIDs; // 获取单元的节点编号
        
@@ -301,16 +301,16 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
 		vector<int> nodeIDs(entry.first.begin(), entry.first.end()); //遍历map并存储面节点编号
         vector<Vector> nodeCoords;
         for (int nid : nodeIDs)
-            nodeCoords.push_back(nodesMap[nid].coord);
+            nodeCoords.push_back(nodesMap_[nid].coord);
 
         Face face(faceId, nodeIDs, nodeCoords);
 		face.ownerCell = entry.second[0];   //第一个储存的单元编号为拥有该面的单元编号
 		face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1; //如果是边界面那么他的neighborCell为-1
-        faces.push_back(face);
+        faces_.push_back(face);
 
         for (int cid : entry.second)
         {
-            for (auto& cell : cells) 
+            for (auto& cell : cells_) 
             {
                 if (cell.id == cid) 
                 {
@@ -331,40 +331,40 @@ void Mesh::ClassifySolidMatrixCells()
 {
     // 构造一个 faceId 到 Face 的映射
    
-    for (const auto& cell : cells)
+    for (const auto& cell : cells_)
     {
         bool isBoundary = false;
         for (int faceId : cell.faceIDs)
         {
-            if (faces[faceId - 1].neighborCell == -1)
+            if (faces_[faceId - 1].neighborCell == -1)
             {
                 isBoundary = true;
                 break;
             }
         }
-        if (isBoundary) boundaryCells.push_back(cell);
-        else innerCells.push_back(cell);
+        if (isBoundary) boundaryCells_.push_back(cell);
+        else innerCells_.push_back(cell);
     }
 }
 
 void Mesh::CreateSolidMatrixGhostCells() 
 {
-    int origN = (int)cells.size();
-    ghostStartIndex = origN;  // 0-based
+    int origN = (int)cells_.size();
+    ghostStartIndex_ = origN;  // 0-based
 
     std::vector<Cell> ghosts;
-    ghosts.reserve(faces.size());
+    ghosts.reserve(faces_.size());
 
     int ghostCount = 0;
     // 1) 遍历所有面，给每个边界面造一个 ghost cell，并更新 face.neighborCell
-    for (auto& face : faces) 
+    for (auto& face : faces_) 
     {
         if (!face.isBoundary()) continue;
 
         // 拿出它的 ownerCell 在 cells 中的下标
         int ownerID = face.ownerCell;
-		int idx = cellId2index.at(ownerID); //找到 cellId 对应的下标
-        Cell   realC = cells[idx];
+		int idx = cellId2index_.at(ownerID); //找到 cellId 对应的下标
+        Cell   realC = cells_[idx];
 
         // 构造 ghost
         Cell ghostC = realC;
@@ -391,28 +391,28 @@ void Mesh::CreateSolidMatrixGhostCells()
     // 2) 把 ghosts append 到 cells，并更新 cellId2index
     for (auto& g : ghosts) 
     {
-        cellId2index[g.id] = (int)cells.size();
-        cells.push_back(g);
+        cellId2index_[g.id] = (int)cells_.size();
+        cells_.push_back(g);
     }
 }
 
 void Mesh::printMeshInfo()
 {
-    cout << "总节点数: " << nodes.size() << endl;
-    cout << "总单元数: " << cells.size() << endl;
-    cout << "总面数: " << faces.size() << endl;
-    cout << "内部单元数: " << innerCells.size() << endl;
-    cout << "边界单元数: " << boundaryCells.size() << endl;
+    cout << "总节点数: " << nodes_.size() << endl;
+    cout << "总单元数: " << cells_.size() << endl;
+    cout << "总面数: " << faces_.size() << endl;
+    cout << "内部单元数: " << innerCells_.size() << endl;
+    cout << "边界单元数: " << boundaryCells_.size() << endl;
 
     cout << "\n―― 节点信息 ――" << endl;
-    for (const auto& node : nodes)
+    for (const auto& node : nodes_)
     {
         cout << "Node " << node.id << " : ("
             << node.coord.m_x << ", " << node.coord.m_y << ", " << node.coord.m_z << ")"
             << endl;
     }
-    cout << "\n―― 单元信息 ――" << endl;
-    for (const auto& cell : cells)
+    cout << "\n―― 单元信息 ――" << endl;      //还需要添加Owner和Neighbor
+    for (const auto& cell : cells_)
     {
         if (cell.id < 0) continue;   // 跳过ghost cell
         cout << "Cell " << cell.id << " 中心: ("
@@ -424,7 +424,7 @@ void Mesh::printMeshInfo()
         cout << endl;
     }
     cout << "\n―― 面信息 ――" << endl;
-    for (const auto& face :faces)
+    for (const auto& face :faces_)
     {
         cout << "Face " << face.id << " 节点: ";
         for (int nid : face.nodeIDs)
@@ -440,7 +440,7 @@ void Mesh::printMeshInfo()
 double Mesh::getCellArea(int cellID) const
 {
     // 根据 cellID 查找基岩单元，获取它的面积
-    for (const auto& cell : cells)
+    for (const auto& cell : cells_)
     {
         if (cell.id == cellID) 
         {
@@ -453,15 +453,15 @@ double Mesh::getCellArea(int cellID) const
 void Mesh::ComputeSolidMatrixMeshFaceGeometricInfor(NormalVectorCorrectionMethod method)
 {
     // 遍历所有面
-    for (auto& face : faces) 
+    for (auto& face : faces_) 
     {
         // 只处理内部面
         //if (face.isBoundary()) continue;
 
         // 找到 owner 和 neighbor 在 cells 向量中的下标
-        auto it_o = cellId2index.find(face.ownerCell);
-        auto it_n = cellId2index.find(face.neighborCell);
-        if (it_o == cellId2index.end() || it_n == cellId2index.end()) 
+        auto it_o = cellId2index_.find(face.ownerCell);
+        auto it_n = cellId2index_.find(face.neighborCell);
+        if (it_o == cellId2index_.end() || it_n == cellId2index_.end()) 
         {
             // 安全起见，跳过或报错
 
@@ -469,8 +469,8 @@ void Mesh::ComputeSolidMatrixMeshFaceGeometricInfor(NormalVectorCorrectionMethod
         }
 
         // 提取两个单元的几何中心
-        const Vector& Cp = cells[it_o->second].center;
-        const Vector& Cn = cells[it_n->second].center;
+        const Vector& Cp = cells_[it_o->second].center;
+        const Vector& Cn = cells_[it_n->second].center;
 
         // 调用分解函数，能选三种方法之一
         face.computeFaceVectors(Cp, Cn, method);
@@ -482,7 +482,7 @@ void Mesh::exportGhostInfo(const std::string& prefix) const
 {
     std::ofstream f(prefix + "_info.txt");
     // 仅写一个数字：第一个 ghost cell 在 cells[] 中的下标
-    f << ghostStartIndex << "\n";
+    f << ghostStartIndex_ << "\n";
     f.close();
 }
 
@@ -491,7 +491,7 @@ void Mesh::exportToTxt(const std::string& prefix) const
     // Nodes
     ofstream fn(prefix + "_nodes.txt");
     fn << "id x y z\n";
-    for (auto& n : nodes)
+    for (auto& n : nodes_)
         fn << n.id << " "
         << n.coord.m_x << " "
         << n.coord.m_y << " "
@@ -501,7 +501,7 @@ void Mesh::exportToTxt(const std::string& prefix) const
     // Faces
     ofstream ff(prefix + "_faces.txt");
     ff << "id n1 n2 mx my mz\n";
-    for (auto& f : faces) {
+    for (auto& f : faces_) {
         ff << f.id << " "
             << f.nodeIDs[0] << " "
             << f.nodeIDs[1] << " "
@@ -514,7 +514,7 @@ void Mesh::exportToTxt(const std::string& prefix) const
     // Cells
     ofstream fc(prefix + "_cells.txt");
     fc << "id cx cy cz\n";
-    for (auto& c : cells) {
+    for (auto& c : cells_) {
         fc << c.id << " "
             << c.center.m_x << " "
             << c.center.m_y << " "
@@ -524,206 +524,3 @@ void Mesh::exportToTxt(const std::string& prefix) const
 
     exportGhostInfo(prefix);
 }
-
-//void Mesh::assignRockProperties(const Matrix& matrix) 
-//{
-//    // 遍历每个单元并分配物性参数
-//    for (auto& cell : cells) 
-//    {
-//        if (cell.id < 0) continue;
-//        // 将 Matrix 中的物性参数分配给每个单元
-//        cell.materialProps.setProperties(matrix.matrix_Porosity, matrix.matrix_Permeability, matrix.matrix_Beta);
-//    }
-//}
-
-//void Mesh::reindexIDs()
-//{
-//    std::map<int, int> newNodeMapping;
-//    int newId = 1;
-//    for (auto& node : nodes) {
-//        newNodeMapping[node.id] = newId;
-//        node.id = newId++;
-//    }
-//
-//    std::map<int, int> newCellMapping;
-//    newId = 1;
-//    for (auto& cell : cells) {
-//        newCellMapping[cell.id] = newId;
-//        cell.id = newId++;
-//        for (auto& nid : cell.nodeIDs)
-//            nid = newNodeMapping[nid];
-//    }
-//
-//    std::map<int, int> newFaceMapping;
-//    newId = 1;
-//    for (auto& face : faces) 
-//    {
-//        newFaceMapping[face.id] = newId;
-//        face.id = newId++;
-//        for (auto& nid : face.nodeIDs)
-//            nid = newNodeMapping[nid];
-//        if (face.ownerCell != -1) face.ownerCell = newCellMapping[face.ownerCell];
-//        if (face.neighborCell != -1) face.neighborCell = newCellMapping[face.neighborCell];
-//    }
-//
-//    for (auto& cell : cells) {
-//        for (auto& fid : cell.faceIDs)
-//            fid = newFaceMapping[fid];
-//    }
-//}
-//void Mesh::BuildMesh(double lengthX, double lengthY, int sectionNumX, int sectionNumY)
-//{
-//    gmsh::initialize();
-//    gmsh::model::add("UnstructuredMesh-EDFM");
-//    double lc = std::min(lengthX / sectionNumX, lengthY / sectionNumY);
-//
-//    int p1 = gmsh::model::geo::addPoint(0, 0, 0, lc);
-//    int p2 = gmsh::model::geo::addPoint(lengthX, 0, 0, lc);
-//    int p3 = gmsh::model::geo::addPoint(0, lengthY, 0, lc);
-//    int p4 = gmsh::model::geo::addPoint(lengthX, lengthY, 0, lc);
-//
-//    int l1 = gmsh::model::geo::addLine(p1, p2);
-//    int l2 = gmsh::model::geo::addLine(p2, p4);
-//    int l3 = gmsh::model::geo::addLine(p4, p3);
-//    int l4 = gmsh::model::geo::addLine(p3, p1);
-//
-//    int curveLoop = gmsh::model::geo::addCurveLoop({ l1, l2, l3, l4 });
-//    gmsh::model::geo::addPlaneSurface({ curveLoop });
-//
-//    gmsh::model::geo::synchronize();
-//    gmsh::model::mesh::generate(2);
-//
-//    std::vector<size_t> nodeTags;
-//    std::vector<double> nodeCoords, parametricCoords;
-//    gmsh::model::mesh::getNodes(nodeTags, nodeCoords, parametricCoords);
-//    for (size_t i = 0; i < nodeTags.size(); i++) 
-//    {
-//        int id = static_cast<int>(nodeTags[i]);
-//        Vector coord(nodeCoords[3 * i], nodeCoords[3 * i + 1], nodeCoords[3 * i + 2]);
-//        nodes.emplace_back(id, coord);
-//        nodesMap[id] = Node(id, coord);
-//    }
-//
-//    std::vector<int> elementTypes;
-//    std::vector<std::vector<size_t>> elementTags, nodeTagsPerElement;
-//    gmsh::model::mesh::getElements(elementTypes, elementTags, nodeTagsPerElement);
-//    for (size_t i = 0; i < elementTypes.size(); i++) 
-// {
-//        if (elementTypes[i] == 2) 
-// {
-//            size_t numTriangles = elementTags[i].size();
-//            for (size_t j = 0; j < numTriangles; j++) 
-// {
-//                int cellId = static_cast<int>(elementTags[i][j]);
-//                std::vector<int> cellNodeIDs;
-//                for (int k = 0; k < 3; k++)
-//                    cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][3 * j + k]));
-//
-//                Cell cell(cellId, cellNodeIDs);
-//                cell.computeCenterAndVolume(nodesMap);
-//                cells.push_back(cell);
-//            }
-//        }
-//    }
-//    gridCount = cells.size();
-//
-//    std::map<std::pair<int, int>, std::vector<int>> faceMap;
-//    for (const auto& cell : cells) 
-//    {
-//        const auto& cn = cell.nodeIDs;
-//        if (cn.size() != 3) continue;
-//        std::vector<std::pair<int, int>> edges = {
-//            { std::min(cn[0], cn[1]), std::max(cn[0], cn[1]) },
-//            { std::min(cn[1], cn[2]), std::max(cn[1], cn[2]) },
-//            { std::min(cn[2], cn[0]), std::max(cn[2], cn[0]) }
-//        };
-//        for (const auto& edge : edges)
-//            faceMap[edge].push_back(cell.id);
-//    }
-//
-//    int faceId = 1;
-//    for (auto& entry : faceMap) {
-//        int n1 = entry.first.first;
-//        int n2 = entry.first.second;
-//        std::vector<int> faceNodeIDs = { n1, n2 };
-//        std::vector<Vector> faceNodeCoords = { nodesMap[n1].coord, nodesMap[n2].coord };
-//        Face face(faceId, faceNodeIDs, faceNodeCoords);
-//        face.ownerCell = entry.second[0];
-//        face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1;
-//        faces.push_back(face);
-//
-//        for (int cid : entry.second) {
-//            for (auto& cell : cells) {
-//                if (cell.id == cid) {
-//                    cell.faceIDs.push_back(faceId);
-//                    break;
-//                }
-//            }
-//        }
-//        faceId++;
-//    }
-//
-//    gmsh::write("UnstructuredMesh-EDFM.msh");
-//    gmsh::finalize();
-//
-//   // reindexIDs();
-//}
-//
-//void Mesh::reindexIDs()
-//{
-//    std::map<int, int> newNodeMapping;
-//    int newId = 1;
-//    for (auto& node : nodes) {
-//        newNodeMapping[node.id] = newId;
-//        node.id = newId++;
-//    }
-//
-//    std::map<int, int> newCellMapping;
-//    newId = 1;
-//    for (auto& cell : cells) {
-//        newCellMapping[cell.id] = newId;
-//        cell.id = newId++;
-//        for (auto& nid : cell.nodeIDs)
-//            nid = newNodeMapping[nid];
-//    }
-//
-//    std::map<int, int> newFaceMapping;
-//    newId = 1;
-//    for (auto& face : faces) {
-//        newFaceMapping[face.id] = newId;
-//        face.id = newId++;
-//        for (auto& nid : face.nodeIDs)
-//            nid = newNodeMapping[nid];
-//        if (face.ownerCell != -1) face.ownerCell = newCellMapping[face.ownerCell];
-//        if (face.neighborCell != -1) face.neighborCell = newCellMapping[face.neighborCell];
-//    }
-//
-//    for (auto& cell : cells) {
-//        for (auto& fid : cell.faceIDs)
-//            fid = newFaceMapping[fid];
-//    }
-//}
-//
-//void Mesh::ClassifySolidMatrixCells()
-//{
-//    for (const auto& cell : cells) {
-//        bool isBoundary = false;
-//        for (int faceId : cell.faceIDs) {
-//            if (faces[faceId - 1].neighborCell == -1) {
-//                isBoundary = true;
-//                break;
-//            }
-//        }
-//        if (isBoundary) boundaryCells.push_back(cell);
-//        else innerCells.push_back(cell);
-//    }
-//}
-//
-//void Mesh::printMeshInfo()
-//{
-//    std::cout << "总节点数: " << nodes.size() << std::endl;
-//    std::cout << "总单元数: " << cells.size() << std::endl;
-//    std::cout << "总面数: " << faces.size() << std::endl;
-//    std::cout << "内部单元数: " << innerCells.size() << std::endl;
-//    std::cout << "边界单元数: " << boundaryCells.size() << std::endl;
-//}

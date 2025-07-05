@@ -53,7 +53,7 @@ public:
     void exportMesh(const std::string& prefix) const;
     void exportFractures(const std::string& prefix) const;
     void printFractureInfo() const;
-    void printCISourceTerms() const;
+    void printCISourceTerms();
 
     // ！！ 恵諒久蚊 Mesh & FractureNetwork ！！！！！！！！！！！！！！！！！！
     Mesh& mesh() { return mesh_; }
