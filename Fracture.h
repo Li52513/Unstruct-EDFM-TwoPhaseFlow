@@ -171,6 +171,7 @@ public:
     Vector start; // 裂缝起点坐标
 	Vector end;   // 裂缝终点坐标
 
+    //测试
 	/*===存储裂缝交点及裂缝段信息===*/
 	vector<FractureIntersectionPointByMatrixMesh> intersections; 
 	vector<FractureElement> elements;		  
