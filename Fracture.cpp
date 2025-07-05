@@ -88,7 +88,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
 
     // 3) 按 param 全局升序排序 & 赋临时 ID ---
     sort(intersections.begin(), intersections.end(),
-        [](const FractureIntersectionPoint& a, const FractureIntersectionPoint& b)
+        [](const FractureIntersectionPointByMatrixMesh& a, const FractureIntersectionPointByMatrixMesh& b)
         {
             return a.param < b.param;
         });
@@ -96,7 +96,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
         intersections[i].id = i + 1;
 
     //4）找到交点对应的Cell并建立映射 ---
-	unordered_map<int, vector<FractureIntersectionPoint>> perCell; //用于建立 Cell 和交点的映射关系
+	unordered_map<int, vector<FractureIntersectionPointByMatrixMesh>> perCell; //用于建立 Cell 和交点的映射关系
     for (auto& ip : intersections)
     {
         int cid = -1;
@@ -125,7 +125,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
     }
 
     // 5) 每个 Cell 内只保留最前面的两个点  ***用来处理贯穿网格顶点的情况****
-    vector<FractureIntersectionPoint> filtered;
+    vector<FractureIntersectionPointByMatrixMesh> filtered;
     for (auto& kv : perCell)
     {
         auto& vecPoints = kv.second;
@@ -144,7 +144,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
         [](auto& a, auto& b) { return a.param < b.param; });
 
     // 再次剔除距离过近（<1e-8）的交点
-    vector<FractureIntersectionPoint> cleaned;
+    vector<FractureIntersectionPointByMatrixMesh> cleaned;
     for (const auto& ip : intersections) 
     {
         if (!cleaned.empty() &&
@@ -401,8 +401,8 @@ double Fracture::computeDistanceFromCenter(const Cell& cell, const Vector& segSt
 void Fracture::sortAndRenumberIntersections()
 {
     sort(intersections.begin(), intersections.end(),
-        [](const FractureIntersectionPoint& a,
-            const FractureIntersectionPoint& b)
+        [](const FractureIntersectionPointByMatrixMesh& a,
+            const FractureIntersectionPointByMatrixMesh& b)
         { return a.param < b.param; });
 
     int nid = 1;

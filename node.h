@@ -1,3 +1,11 @@
+/*---------------------------------------------------------------------------*\
+*                                 Node 数据类型
+* 作用：    读取gmsh生成的网格节点，并存储节点编号和坐标信息。
+* 
+* 成员变量： 节点编号 （id）;  节点坐标（coord）
+* 
+* 构造
+\*---------------------------------------------------------------------------*/
 #pragma once
 #include <vector>
 #include <algorithm>
@@ -17,20 +25,5 @@ public:
  
 };
 
-//class MatrixNode
-//{
-//public:
-//	///the Geometry&Mesh information of the node///////
-//	int n_ID;					// node ID
-//	Vector n_position;			// node position
-//	vector<int> n_inCellID;		// cell ID included in the node
-//	vector<int> n_inFaceID;		// face ID included in the node
-//
-//	///the Physical information of the node///////
-//	double node_pressureValue;	// pressure value at the node 
-//
-//public:
-//	MatrixNode();
-//};
 
 

@@ -64,7 +64,7 @@ enum class IntersectionOrigin
     FracEnd         // 裂缝终点
 };
 
-struct FractureIntersectionPoint  //// 用于描述裂缝与基岩网格边界交点的结构体
+struct FractureIntersectionPointByMatrixMesh  //// 用于描述裂缝与基岩网格边界交点的结构体
 {
 	int id; // 交点编号
 	Vector point; // 交点坐标
@@ -74,7 +74,7 @@ struct FractureIntersectionPoint  //// 用于描述裂缝与基岩网格边界�
     int     globalFFID;   // <<< 新增：全局 FF 交点的 ID（face 交点填 0）
     IntersectionOrigin origin;   ///交点的“来源”
     
-    FractureIntersectionPoint(int _id,
+    FractureIntersectionPointByMatrixMesh(int _id,
         const Vector& _pt,
         int _edgeID,
         double _param,
@@ -172,7 +172,7 @@ public:
 	Vector end;   // 裂缝终点坐标
 
 	/*===存储裂缝交点及裂缝段信息===*/
-	vector<FractureIntersectionPoint> intersections; 
+	vector<FractureIntersectionPointByMatrixMesh> intersections; 
 	vector<FractureElement> elements;		  
 
 	///*===裂缝物性参数（考虑到流体物性的变化以及多物理场过程对裂缝物性的影响，将物性赋值在裂缝段内）===*/
