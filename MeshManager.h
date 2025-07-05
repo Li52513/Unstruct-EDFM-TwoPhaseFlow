@@ -29,7 +29,19 @@ public:
 
     // —— 裂缝几何 & CI 计算 —————————————————————————————
     /// 添加裂缝（起点→终点）
-    void addFracture(const Vector& start, const Vector& end);
+    void addFracture(const Vector& start, const Vector& end); //手动插入裂缝用于调试
+
+    //DFN裂缝模型
+    void setDFNRandomSeed(unsigned seed);  // 设置随机种子
+    void generateDFN(int N,
+        const Vector& minPoint,
+        const Vector& maxPoint,
+        double Lmin,
+        double Lmax,
+        double alpha,
+        double kappa,
+        bool avoidOverlap); //生成随机裂缝网络
+    
 
     /// 处理裂缝几何：交点→排序→subdivide
     void DetectAndSubdivideFractures();

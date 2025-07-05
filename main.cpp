@@ -35,7 +35,7 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =3, sectionNumY =3, sectionNumZ = 0;
+    int sectionNumX =2, sectionNumY =2, sectionNumZ = 0;
 	bool usePrism = true;       /// true-使用棱柱单元 false-使用四面体单元
 	bool useQuadBase = true;    /// true-是用四边形底面 false -使用三角形底面
     /*----------------------------------------------------------------------*/
@@ -51,9 +51,9 @@ int main()
 	std::cout << "MatrixMesh built in " << ms0 << " ms.\n";
 
 	// 2) 添加裂缝 & 裂缝网格划分 & 计算几何耦合系数
-   /* mgr.addFracture({ 0.1,0.2,0 }, { 0.3,0.9,0 });
+    mgr.addFracture({ 0.1,0.2,0 }, { 0.3,0.9,0 });
     mgr.addFracture({ 0.7,0.1,0 }, { 0.1,0.8,0 });
-    mgr.addFracture({ 0.0725,0.1825,0 }, { 0.4025,0.3925,0 });*/
+    mgr.addFracture({ 0.0725,0.1825,0 }, { 0.4025,0.3925,0 });
 
     //@brief 生成随机 DFN 裂缝网络
  /**
@@ -68,23 +68,37 @@ int main()
   * @param avoidOverlap 是否简单避让已有裂缝重叠
   */
 	auto t2 = std::chrono::high_resolution_clock::now(); // 计时开始
-    mgr.fracture_network().setRandomSeed(12345);
-    mgr.fracture_network().generateDFN
-    (
-        /*N=*/30,
-        /*min=*/{ 0.0,0.0,0.0 },
-        /*max=*/{ 1.0,1.0,0.0 },
-        /*Lmin=*/0.5,
-        /*Lmax=*/1.4,
-        /*alpha=*/0,
-        /*kappa=*/0,
-        /*avoidOverlap=*/true 
-    );
+
+	mgr.setDFNRandomSeed(12345); // 设置随机种子
+	mgr.generateDFN
+	(
+		/*N=*/2,
+		/*minPoint=*/{ 0.0,0.0,0.0 },
+		/*maxPoint=*/{ 1.0,1.0,0.0 },
+		/*Lmin=*/0.5,
+		/*Lmax=*/1.4,
+		/*alpha=*/0,
+		/*kappa=*/0,
+		/*avoidOverlap=*/true
+	);
+    //mgr.fracture_network().setRandomSeed(12345);
+    //mgr.fracture_network().generateDFN
+    //(
+    //    /*N=*/2,
+    //    /*min=*/{ 0.0,0.0,0.0 },
+    //    /*max=*/{ 1.0,1.0,0.0 },
+    //    /*Lmin=*/0.5,
+    //    /*Lmax=*/1.4,
+    //    /*alpha=*/0,
+    //    /*kappa=*/0,
+    //    /*avoidOverlap=*/true 
+    //);
     mgr.DetectAndSubdivideFractures();
     mgr.ComputeFractureGeometryCouplingCoefficient();
-	auto t3 = std::chrono::high_resolution_clock::now(); // 计时结束
-	auto ms1 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
-	std::cout << "FractureNetwork built in " << ms1 << " ms.\n";
+  
+	//auto t3 = std::chrono::high_resolution_clock::now(); // 计时结束
+	//auto ms1 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+	//std::cout << "FractureNetwork built in " << ms1 << " ms.\n";
 
     /**************************物性参数设置模块******************************/
     /*----------------------------------------------------------------------*/
@@ -126,7 +140,8 @@ int main()
     // 导出网格、裂缝信息
     mgr.exportMesh("mesh");
     mgr.exportFractures("fractures");
-    mgr.printCISourceTerms();
+    mgr.printFractureInfo();
+	mgr.printCISourceTerms();
     cout << "Finished initial setup and property assignment.\n";
     return 0; 
 

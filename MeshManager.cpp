@@ -53,6 +53,22 @@ void MeshManager::ComputeFractureGeometryCouplingCoefficient()
         F.computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
 }
 
+void MeshManager::setDFNRandomSeed(unsigned seed)
+{
+	frNet_.setRandomSeed(seed);
+}
+
+void MeshManager::generateDFN(int N,
+    const Vector& minPoint,
+    const Vector& maxPoint,
+    double Lmin,
+    double Lmax,
+    double alpha,
+    double kappa,
+    bool avoidOverlap)
+{
+	frNet_.generateDFN(N, minPoint, maxPoint, Lmin, Lmax, alpha, kappa, avoidOverlap);
+}
 
 void MeshManager::exportMesh(const std::string& pref) const {
     mesh_.exportToTxt(pref);

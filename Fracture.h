@@ -100,7 +100,7 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     int cellID;              ///< 裂缝单元所在基岩网格单元编号
 
     // —————— 几何信息 —————— （有多大）
-	double aperture = 0.0;         ///< 裂缝单元开度 w
+	double aperture = 1.0;         ///< 裂缝单元开度 w
     double length = 0.0;           ///< 裂缝单元长度 L
     double avgDistance =0.0;      ///< 平均距离 d
     double geomCI = 0.0;   ///< 纯几何耦合系数  CI_geom = (L·w) / d
