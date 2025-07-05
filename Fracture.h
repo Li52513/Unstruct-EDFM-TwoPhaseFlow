@@ -172,7 +172,7 @@ public:
 	Vector end;   // 裂缝终点坐标
 
 	/*===存储裂缝交点及裂缝段信息===*/
-	vector<FractureIntersectionPointByMatrixMesh> intersections_by_mesh; 
+	vector<FractureIntersectionPointByMatrixMesh> intersections; 
 	vector<FractureElement> elements;		  
 
 	///*===裂缝物性参数（考虑到流体物性的变化以及多物理场过程对裂缝物性的影响，将物性赋值在裂缝段内）===*/

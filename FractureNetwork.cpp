@@ -115,9 +115,9 @@ void FractureNetwork::generateDFN(
         if (avoidOverlap) {
             bool bad = false;
             for (auto const& F : fractures) {
-                if (!F.intersections_by_mesh.empty()) {
-                    Vector a1 = F.intersections_by_mesh.front().point;
-                    Vector a2 = F.intersections_by_mesh.back().point;
+                if (!F.intersections.empty()) {
+                    Vector a1 = F.intersections.front().point;
+                    Vector a2 = F.intersections.back().point;
                     if (segmentsIntersect(s, e, a1, a2)) { bad = true; break; }
                 }
             }
@@ -158,7 +158,7 @@ void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const 
     for (auto& g : globalFFPts) {
         // 裂缝 A
         auto& FA = fractures[g.fracA];
-        FA.intersections_by_mesh.emplace_back(
+        FA.intersections.emplace_back(
             /*local id*/   -1,      // 稍后重新排序
             /*point*/      g.point,
             /*edgeID*/     -1,
@@ -169,7 +169,7 @@ void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const 
 
         // 裂缝 B
         auto& FB = fractures[g.fracB];
-        FB.intersections_by_mesh.emplace_back(-1, g.point, -1, g.paramB, true, g.id);
+        FB.intersections.emplace_back(-1, g.point, -1, g.paramB, true, g.id);
     }
 
     /* 3. 排序并重新编号 ------------------------------------*/
@@ -225,11 +225,11 @@ void FractureNetwork::DistributeFracture_FractureIntersectionsToGlobalInersectio
         {
             auto& FA = fractures[g.fracA];
             // 在 FA.intersections 中查找：有没有已有的交点其 param 与 g.paramA 极其接近
-            auto it = std::find_if(FA.intersections_by_mesh.begin(), FA.intersections_by_mesh.end(),
+            auto it = std::find_if(FA.intersections.begin(), FA.intersections.end(),
                 [&](auto& ip) {
                     return std::abs(ip.param - g.paramA) < tol;
                 });
-            if (it != FA.intersections_by_mesh.end()) {
+            if (it != FA.intersections.end()) {
                 // 找到了，就“升级”这条记录，把它标记为裂缝–裂缝交点
                 it->isFF = true;
                 it->globalFFID = g.id;
@@ -237,7 +237,7 @@ void FractureNetwork::DistributeFracture_FractureIntersectionsToGlobalInersectio
             }
             else {
                 // 没找到，就新 emplace 一个节点
-                FA.intersections_by_mesh.emplace_back(
+                FA.intersections.emplace_back(
                     -1,                   // id 先用 -1，后面统一重编号
                     g.point,              // 坐标：交点位置
                     -1,                   // edgeID：不是与网格面相交
@@ -252,17 +252,17 @@ void FractureNetwork::DistributeFracture_FractureIntersectionsToGlobalInersectio
         // —— 裂缝 B —— 完全同理，只不过用 g.paramB，fractures[g.fracB]
         {
             auto& FB = fractures[g.fracB];
-            auto it = std::find_if(FB.intersections_by_mesh.begin(), FB.intersections_by_mesh.end(),
+            auto it = std::find_if(FB.intersections.begin(), FB.intersections.end(),
                 [&](auto& ip) {
                     return std::abs(ip.param - g.paramB) < tol;
                 });
-            if (it != FB.intersections_by_mesh.end()) {
+            if (it != FB.intersections.end()) {
                 it->isFF = true;
                 it->globalFFID = g.id;
                 it->origin = IntersectionOrigin::FracFrac;
             }
             else {
-                FB.intersections_by_mesh.emplace_back(
+                FB.intersections.emplace_back(
                     -1,
                     g.point,
                     -1,
@@ -322,8 +322,8 @@ void FractureNetwork::printFractureInfo() const
         for (const auto& E : F.elements)
         {
             /* ① 取该段的两端交点 */
-            const auto& I1 = F.intersections_by_mesh[E.id - 1];
-            const auto& I2 = F.intersections_by_mesh[E.id];
+            const auto& I1 = F.intersections[E.id - 1];
+            const auto& I2 = F.intersections[E.id];
 
             std::cout << "Seg:" << std::setw(2) << E.id
                 << "  Cell " << std::setw(2) << E.cellID
@@ -388,7 +388,7 @@ void FractureNetwork::exportToTxt(const std::string& prefix) const
         {
             /* 找到该段在 intersections 中的两端点：
                subdivide() 保证 elem.id == its position starting at 1 */
-            const auto& I = F.intersections_by_mesh;
+            const auto& I = F.intersections;
             const Vector& p1 = I[elem.id - 1].point;
             const Vector& p2 = I[elem.id].point;
 
