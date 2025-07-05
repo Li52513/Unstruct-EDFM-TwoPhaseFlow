@@ -19,7 +19,7 @@ Fracture::Fracture(const Vector& s, const Vector& e)
 void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& meshFaces,const std::vector<Cell>& meshCells,const std::map<int, Node>& meshNodes)
 {
     // 1) 面内交点计算 & 去重
-    intersections.clear();
+    intersections_by_mesh.clear();
     for (const auto& face : meshFaces)
     {
         if (face.nodeCoords.size() < 2) continue;   //跳过无效面
@@ -33,7 +33,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
             double t = (segLen > 1e-8 ? (ip - start).Mag() / segLen : 0.0); //计算归一化参数，用于后面排序
             // 如果本 face 上已有一个非常接近的点，就跳过
             bool dup = false;
-            for (auto& e : intersections)
+            for (auto& e : intersections_by_mesh)
             {
                 if (e.edgeID == face.id && (e.point - ip).Mag() < 1e-8)
                 {
@@ -42,7 +42,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
             }
 
             if (!dup)
-                intersections.emplace_back
+                intersections_by_mesh.emplace_back
                 (
                     -1,                // id（稍后再排）
                     ip,                // 交点坐标
@@ -58,13 +58,13 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
     }
         // 2) 起点和终点作为交点（若未被添加）
     bool startIncluded = false, endIncluded = false;
-    for (auto& e : intersections)
+    for (auto& e : intersections_by_mesh)
     {
         if ((e.point - start).Mag() < 1e-6) startIncluded = true;  //如果其中有一个交点与起点重合那么起点就是交点
         if ((e.point - end).Mag() < 1e-6) endIncluded = true;      //如果其中有一个交点与终点重合那么终点就是交点
     }
     if (!startIncluded)
-        intersections.emplace_back
+        intersections_by_mesh.emplace_back
         (
 			-1,                     //id(稍后再排)
 			start,                  //起点坐标
@@ -75,7 +75,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
             IntersectionOrigin::FracStart  // 来源：裂缝起点
         );// 起点
     if (!endIncluded)
-        intersections.emplace_back
+        intersections_by_mesh.emplace_back
         (
             -1,
             end,
@@ -87,17 +87,17 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
         );   // 终点
 
     // 3) 按 param 全局升序排序 & 赋临时 ID ---
-    sort(intersections.begin(), intersections.end(),
+    sort(intersections_by_mesh.begin(), intersections_by_mesh.end(),
         [](const FractureIntersectionPointByMatrixMesh& a, const FractureIntersectionPointByMatrixMesh& b)
         {
             return a.param < b.param;
         });
-    for (int i = 0; i < intersections.size(); ++i)
-        intersections[i].id = i + 1;
+    for (int i = 0; i < intersections_by_mesh.size(); ++i)
+        intersections_by_mesh[i].id = i + 1;
 
     //4）找到交点对应的Cell并建立映射 ---
 	unordered_map<int, vector<FractureIntersectionPointByMatrixMesh>> perCell; //用于建立 Cell 和交点的映射关系
-    for (auto& ip : intersections)
+    for (auto& ip : intersections_by_mesh)
     {
         int cid = -1;
         // 情况 A：标准面交点
@@ -139,13 +139,13 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
 
 
     // --- 6) 用过滤结果更新 intersections，并重新排序与编号 ---
-    intersections = std::move(filtered);
-    sort(intersections.begin(), intersections.end(),
+    intersections_by_mesh = std::move(filtered);
+    sort(intersections_by_mesh.begin(), intersections_by_mesh.end(),
         [](auto& a, auto& b) { return a.param < b.param; });
 
     // 再次剔除距离过近（<1e-8）的交点
     vector<FractureIntersectionPointByMatrixMesh> cleaned;
-    for (const auto& ip : intersections) 
+    for (const auto& ip : intersections_by_mesh) 
     {
         if (!cleaned.empty() &&
             (ip.point - cleaned.back().point).Mag() < 1e-8) 
@@ -159,7 +159,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
     for (int i = 0; i < (int)cleaned.size(); ++i)
         cleaned[i].id = i + 1;
 
-    intersections = move(cleaned);
+    intersections_by_mesh = move(cleaned);
 }
 /*==根据裂缝交点划分裂缝单元，并计算每个单元的长度（computeSegmentLength）、所属网格单元（findContainingCell）以及平均距离（computeDistanceFromCenter&computeAverageDistanceFromNodes）===*/
 void Fracture::subdivide(const vector<Cell>& meshCells, const map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
@@ -168,10 +168,10 @@ void Fracture::subdivide(const vector<Cell>& meshCells, const map<int, Node>& me
     constexpr double tolLen = 1e-10;     // 段长阈值
     constexpr double tolPoint = 1e-8;    // 判断中点在三角形内部时的容差
 
-    for (int i = 0; i + 1 < (int)intersections.size(); ++i)
+    for (int i = 0; i + 1 < (int)intersections_by_mesh.size(); ++i)
     {
-        const auto& I0 = intersections[i];
-        const auto& I1 = intersections[i + 1];
+        const auto& I0 = intersections_by_mesh[i];
+        const auto& I1 = intersections_by_mesh[i + 1];
        
         Vector P0 = I0.point, P1 = I1.point;
         double segLen = computeSegmentLength(P0, P1);
@@ -400,13 +400,13 @@ double Fracture::computeDistanceFromCenter(const Cell& cell, const Vector& segSt
 
 void Fracture::sortAndRenumberIntersections()
 {
-    sort(intersections.begin(), intersections.end(),
+    sort(intersections_by_mesh.begin(), intersections_by_mesh.end(),
         [](const FractureIntersectionPointByMatrixMesh& a,
             const FractureIntersectionPointByMatrixMesh& b)
         { return a.param < b.param; });
 
     int nid = 1;
-    for (auto& I : intersections) I.id = nid++;
+    for (auto& I : intersections_by_mesh) I.id = nid++;
 }
 
 
