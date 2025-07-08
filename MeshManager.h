@@ -6,6 +6,18 @@
 /**
  * @class MeshManager
  * @brief Unified mesh management for solid matrix and fracture network including CI calculation and property assignment
+ * 
+ * @details This class provides a high-level interface for managing both solid matrix meshes and fracture networks.
+ * Typical usage workflow:
+ * 1. Construct MeshManager with domain parameters
+ * 2. Call BuildSolidMatrixGrid() to create the base mesh
+ * 3. Add fractures using addFracture() or generateDFN()
+ * 4. Call DetectAndSubdivideFractures() to handle intersections
+ * 5. Call ComputeFractureGeometryCouplingCoefficient() to compute coupling
+ * 6. Use export/print methods for output and debugging
+ * 
+ * The class encapsulates both Mesh and FractureNetwork objects and provides
+ * a streamlined interface for EDFM (Embedded Discrete Fracture Model) workflows.
  */
 class MeshManager 
 {
@@ -106,10 +118,22 @@ public:
     Mesh& mesh() { return mesh_; }
     
     /**
+     * @brief Get const reference to underlying mesh
+     * @return Const reference to Mesh object
+     */
+    const Mesh& mesh() const { return mesh_; }
+    
+    /**
      * @brief Get reference to fracture network
      * @return Reference to FractureNetwork object
      */
     FractureNetwork& fracture_network() { return frNet_; }
+    
+    /**
+     * @brief Get const reference to fracture network
+     * @return Const reference to FractureNetwork object
+     */
+    const FractureNetwork& fracture_network() const { return frNet_; }
 
 private:
     // ========================= MEMBER VARIABLES =========================
