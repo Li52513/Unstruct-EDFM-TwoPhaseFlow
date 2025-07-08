@@ -346,6 +346,28 @@ void Mesh::ClassifySolidMatrixCells()
     }
 }
 
+std::vector<std::reference_wrapper<const Cell>> Mesh::getInnerCells() const
+{
+    std::vector<std::reference_wrapper<const Cell>> innerCells;
+    for (const auto& cell : cells_)
+    {
+        if (cell.location == Cell::LocationType::Inner)
+            innerCells.push_back(std::cref(cell));
+    }
+    return innerCells;
+}
+
+std::vector<std::reference_wrapper<const Cell>> Mesh::getBoundaryCells() const
+{
+	std::vector<std::reference_wrapper<const Cell>> boundaryCells;
+	for (const auto& cell : cells_)
+	{
+		if (cell.location == Cell::LocationType::Boundary)
+			boundaryCells.push_back(std::cref(cell));
+	}
+	return boundaryCells;
+}
+
 void Mesh::CreateSolidMatrixGhostCells() 
 {
     int origN = (int)cells_.size();
