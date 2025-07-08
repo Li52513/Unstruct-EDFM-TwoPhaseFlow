@@ -17,8 +17,8 @@ public:
 	const vector<Node>& getNodes() const { return nodes_; } // 提供只读访问
 	const vector<Face>& getFaces() const { return faces_; } // 提供只读访问
 	vector<Cell>& getCells() { return cells_; } // 提供科协访问  考虑到物性会更新，所以是可修改的
-	const vector<Cell>& getInnerCells() const { return innerCells_; } // 提供只读访问  
-	const vector<Cell>& getBoundaryCells() const { return boundaryCells_; } // 提供只读访问
+	//const vector<Cell>& getInnerCells() const { return innerCells_; } // 提供只读访问  
+	//const vector<Cell>& getBoundaryCells() const { return boundaryCells_; } // 提供只读访问
 	const map<int, Node>& getNodesMap() const { return nodesMap_; } // 提供只读访问
 	const map<int, int>& getCellId2Index() const { return cellId2index_; } // 提供只读访问
 	int getGridCount() const { return gridCount_; } // 获取网格总数
@@ -43,8 +43,8 @@ private:
     vector<Node> nodes_;
 	vector<Face> faces_;
 	vector<Cell> cells_;
-    vector <Cell> innerCells_;
-    vector<Cell> boundaryCells_;
+    //vector <Cell> innerCells_;
+    //vector<Cell> boundaryCells_;
 	map<int, Node> nodesMap_; 
     map<int, int> cellId2index_;
 	int gridCount_ = 0; // 网格总数

@@ -331,7 +331,7 @@ void Mesh::ClassifySolidMatrixCells()
 {
     // 构造一个 faceId 到 Face 的映射
    
-    for (const auto& cell : cells_)
+    for (auto& cell : cells_)
     {
         bool isBoundary = false;
         for (int faceId : cell.faceIDs)
@@ -342,8 +342,7 @@ void Mesh::ClassifySolidMatrixCells()
                 break;
             }
         }
-        if (isBoundary) boundaryCells_.push_back(cell);
-        else innerCells_.push_back(cell);
+        cell.location = isBoundary ? Cell::LocationType::Boundary : Cell::LocationType::Inner;
     }
 }
 
@@ -401,8 +400,13 @@ void Mesh::printMeshInfo()
     cout << "总节点数: " << nodes_.size() << endl;
     cout << "总单元数: " << cells_.size() << endl;
     cout << "总面数: " << faces_.size() << endl;
-    cout << "内部单元数: " << innerCells_.size() << endl;
-    cout << "边界单元数: " << boundaryCells_.size() << endl;
+    int nInner = 0, nBoundary = 0;
+    for (const auto& cell : cells_) {
+        if (cell.location == Cell::LocationType::Inner) ++nInner;
+        else if (cell.location == Cell::LocationType::Boundary) ++nBoundary;
+    }
+    cout << "内部单元数: " << nInner << endl;
+    cout << "边界单元数: " << nBoundary << endl;
 
     cout << "\n―― 节点信息 ――" << endl;
     for (const auto& node : nodes_)

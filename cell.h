@@ -5,6 +5,8 @@
 #include "Node.h"
 #include "PropertiesSummary.h"
 
+
+
 class Cell 
 {
 public:
@@ -16,6 +18,15 @@ public:
     vector<int> nodeIDs;        // 构成单元的节点编号
     Vector center;                   // 单元中心（几何重心）
     double volume;                   // 单元面积（对三角形）
+
+
+	//-----------------网格单元分类------------------//
+    enum class LocationType
+    {
+		Inner,       // 内部单元
+		Boundary,    // 边界单元
+    };
+	LocationType location = LocationType::Inner; // 默认内部单元
 
     //-----------------区域分类-------------------------//
     enum class RegionType
