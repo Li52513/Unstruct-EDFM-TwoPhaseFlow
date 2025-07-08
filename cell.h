@@ -4,7 +4,7 @@
 #include "UserDefineVarType.h"
 #include "Node.h"
 #include "PropertiesSummary.h"
-
+#include <unordered_map>
 
 
 class Cell 
@@ -18,7 +18,7 @@ public:
     vector<int> nodeIDs;        // 构成单元的节点编号
     Vector center;                   // 单元中心（几何重心）
     double volume;                   // 单元面积（对三角形）
-
+    
 
 	//-----------------网格单元分类------------------//
     enum class LocationType
@@ -69,7 +69,9 @@ public:
     Cell(int id, const vector<int>& nodeIDs);
 
 
-	void computeCenterAndVolume(const map<int, Node>& allNodes); //计算单元的几何中心和面积
+	void computeCenterAndVolume(const unordered_map<int, Node>& allNodes); //计算单元的几何中心和面积
 
+	vector <vector<int>> getLocalFaces() const; // 获取单元的局部面信息
+   
 
 };

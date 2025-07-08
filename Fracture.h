@@ -1,46 +1,4 @@
-﻿//#pragma once
-//using namespace std;
-//#include <vector>
-//#include <algorithm>
-//#include "UserDefineVarType.h"
-//
-//class Fraction
-//{
-//public:
-//	//the Geometry&Mesh information of the fraction/////////
-//	
-//	int fracNum;				// number of fractions
-//	int fraction_ID;			// fraction ID
-//	Vector startPoint_pos;		// start point position
-//	Vector endPoint_pos;		// end point position
-//	int belongMatrix_ID;		// matrix ID to which the fraction belongs
-//	double A_fr;				// area of the fraction
-//	double d_fr;				// distance between the fraction to the center of the cell
-//	vector<int>inter_fraction_ID;// the ID of the intersection fraction
-//	vector<Fraction>fraction_cell;// store discrete fracture segments
-//	vector<Vector>node;		// store the node position of the fracture
-//
-//	//the Physical information of the fraction/////////
-//	double k_f;					// permeability of the fraction
-//	double k_eff;				// effective permeability of the fraction
-//	double phie_f;				// porosity of the fraction
-//	double k_width;				// width of the fraction
-//	vector <double> interPointofOtherFraction_pressure; // pressure of the intersection point of other fractions
-//	vector<Vector>interPointwithFractions_pos; // position of the intersection point with other fractions
-//	int interFractionCellwithOthers_ID; // the ID of the intersection fraction cell with other fractions
-//
-//	//the Numerical information of the fraction/////////
-//	double aP_fr;				// aP coefficient of the fraction
-//	double aE_fr;				// aE coefficient of the fraction
-//	double aW_fr;				// aW coefficient of the fraction
-//	double aP0_fr;				// aP0 coefficient of the fraction
-//	double b_fr;				// b coefficient of the fraction
-//	double b_fr_TI_alpha;		// TI_coefficient of the fraction
-//	vector <double> b_fr_TI;	// TI_coefficient of the fraction
-//	double Erroe_fr;			// Error of the fraction
-//
-//};
-#pragma once
+﻿#pragma once
 #include <vector>
 #include <algorithm>
 #include <cmath>
@@ -178,7 +136,7 @@ public:
 	///*===裂缝物性参数（考虑到流体物性的变化以及多物理场过程对裂缝物性的影响，将物性赋值在裂缝段内）===*/
    
      /*==裂缝与基岩交点计算====*/
-    void DetectFracturetoMeshFaceIntersections(const vector<Face>& meshFaces, const std::vector<Cell>& meshCells, const std::map<int, Node>& meshNodes);
+    void DetectFracturetoMeshFaceIntersections(const vector<Face>& meshFaces, const std::vector<Cell>& meshCells, const std::unordered_map<int, Node>& meshNodes);
   
  /*=====构造函数=====*/
     Fracture(const Vector& s, const Vector& e);
@@ -190,7 +148,7 @@ public:
     void computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
         
     /*==裂缝段离散====*/
-    void subdivide(const vector<Cell>& meshCells, const map<int, Node>& meshNodes,  bool useCenterDistance = false);    
+    void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance = false);
 
     /*== 给定 param，定位它属于哪一段====*/
     int locateSegment(double param) const;
@@ -205,8 +163,8 @@ private:
     static bool pointInTriangle(const Vector& p, const Vector& a, const Vector& b, const Vector& c);
     double computeSegmentLength(const Vector& a, const Vector& b);
     Vector computeMidpoint(const Vector& a, const Vector& b);
-    int findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::map<int, Node>& nodes);
-    static double computeAverageDistanceFromNodes(const Cell& cell, const std::map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
+    int findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::unordered_map<int, Node>& nodes);
+    static double computeAverageDistanceFromNodes(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
     static double computeDistanceFromCenter(const Cell& cell, const Vector& segStart, const Vector& segEnd);
 };
 

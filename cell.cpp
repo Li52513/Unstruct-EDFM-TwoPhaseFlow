@@ -7,8 +7,67 @@ Cell::Cell(int id, const std::vector<int>& nodeIDs)
     // 物性参数通过 materialProps 成员进行初始化
 }
 
+vector<vector<int>> Cell::getLocalFaces()const
+{
+	const auto& cn = nodeIDs; // 获取单元的节点编号
+    vector<std::vector<int>> faces;
+    if (cn.size() == 3) {
+        // 2D三角形
+        faces = {
+            {cn[0], cn[1]},
+            {cn[1], cn[2]},
+            {cn[2], cn[0]}
+        };
+    }
+    else if (cn.size() == 4) {
+        // 3D四面体
+        faces = {
+            {cn[0], cn[1], cn[2]},
+            {cn[0], cn[1], cn[3]},
+            {cn[1], cn[2], cn[3]},
+            {cn[0], cn[2], cn[3]}
+        };
+    }
+    else if (cn.size() == 5) {
+        // 金字塔
+        faces = {
+            {cn[0], cn[1], cn[2], cn[3]}, // 底面
+            {cn[0], cn[1], cn[4]},
+            {cn[1], cn[2], cn[4]},
+            {cn[2], cn[3], cn[4]},
+            {cn[3], cn[0], cn[4]}
+        };
+    }
+    else if (cn.size() == 6) {
+        // 棱柱
+        faces = {
+            {cn[0], cn[1], cn[2]},
+            {cn[3], cn[4], cn[5]},
+            {cn[0], cn[1], cn[4], cn[3]},
+            {cn[1], cn[2], cn[5], cn[4]},
+            {cn[2], cn[0], cn[3], cn[5]}
+        };
+    }
+    else if (cn.size() == 8) {
+        // 六面体
+        faces = {
+            {cn[0], cn[1], cn[2], cn[3]},
+            {cn[4], cn[5], cn[6], cn[7]},
+            {cn[0], cn[1], cn[5], cn[4]},
+            {cn[1], cn[2], cn[6], cn[5]},
+            {cn[2], cn[3], cn[7], cn[6]},
+            {cn[3], cn[0], cn[4], cn[7]}
+        };
+    }
+    // 可继续扩展其它多面体类型
+    return faces;
+}
 
-void Cell::computeCenterAndVolume(const map<int, Node>& allNodes) 
+
+
+
+
+void Cell::computeCenterAndVolume(const unordered_map<int, Node>& allNodes)
 {
     if (nodeIDs.size() == 3) 
     {

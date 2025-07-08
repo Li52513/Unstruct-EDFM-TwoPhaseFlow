@@ -16,7 +16,7 @@ Fracture::Fracture(const Vector& s, const Vector& e)
 
 
 /*====利用基岩网格边界对裂缝进行网格划分并排序---基于lineSegmentIntersection子函数 *注：对于非结构化网格需要进行排序===*/
-void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& meshFaces,const std::vector<Cell>& meshCells,const std::map<int, Node>& meshNodes)
+void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& meshFaces,const std::vector<Cell>& meshCells,const std::unordered_map<int, Node>& meshNodes)
 {
     // 1) 面内交点计算 & 去重
     intersections.clear();
@@ -162,7 +162,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
     intersections = move(cleaned);
 }
 /*==根据裂缝交点划分裂缝单元，并计算每个单元的长度（computeSegmentLength）、所属网格单元（findContainingCell）以及平均距离（computeDistanceFromCenter&computeAverageDistanceFromNodes）===*/
-void Fracture::subdivide(const vector<Cell>& meshCells, const map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
+void Fracture::subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
 {
     elements.clear();
     constexpr double tolLen = 1e-10;     // 段长阈值
@@ -362,7 +362,7 @@ Vector Fracture::computeMidpoint(const Vector& a, const Vector& b)
 }
 
 /*====判断交点是否在基岩网格内，并找到包含该点的 Cell（findContainingCell）====*/
-int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::map<int, Node>& nodes) 
+int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::unordered_map<int, Node>& nodes)
 {
     for (const auto& cell : cells) 
     {
@@ -382,7 +382,7 @@ int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& c
 }
 
 /*====计算裂缝段到基岩网格单元的平均距离--方法1利用 Cell 中的各节点计算====*/
-double Fracture::computeAverageDistanceFromNodes(const Cell& cell, const std::map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd) 
+double Fracture::computeAverageDistanceFromNodes(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd)
 {
     double sumDist = 0.0;
     for (int nid : cell.nodeIDs) {

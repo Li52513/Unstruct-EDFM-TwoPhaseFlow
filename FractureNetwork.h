@@ -49,7 +49,7 @@ public:
     void addFracture(const Vector& start, const Vector& end);  
     
     //@brief 主处理函数：检测裂缝-裂缝交点 + 裂缝-边界交点 + 分段
-    void processFractures(const vector<Face>& meshFaces, const vector<Cell>& meshCells, const map<int, Node>& meshNodes, const Fluid& fluid, const Matrix& matrix, Mesh& mesh);  
+    void processFractures(const vector<Face>& meshFaces, const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes, const Fluid& fluid, const Matrix& matrix, Mesh& mesh);
     
     //@brief 将 globalFFPts 中的每个裂缝–裂缝交点分发至对应两条裂缝的 intersections 中
     void DistributeFracture_FractureIntersectionsToGlobalInersections();  

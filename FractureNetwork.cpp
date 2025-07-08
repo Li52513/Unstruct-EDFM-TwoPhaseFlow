@@ -143,7 +143,7 @@ void FractureNetwork::addFracture(const Vector& s, const Vector& e)
 }
 
 //针对多条裂缝以星型相交方式的情况，TI系数暂时无法计算
-void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const vector<Cell>& meshCells,const map<int, Node>& meshNodes, const Fluid& fluid,const Matrix& matrix, Mesh& mesh)
+void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const vector<Cell>& meshCells,const unordered_map<int, Node>& meshNodes, const Fluid& fluid,const Matrix& matrix, Mesh& mesh)
 {
     /* 0) 先检测交点 */
     DetectFracturetoFractureIntersections();
