@@ -151,8 +151,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
 
         // 三角形单元（2D） 1=线单元, 2=三角形, 3=四边形  其他网格类型待补充
         if (is2D && type == 2)
-        {
-            size_t numTriangles = elementTags[i].size();
+        { 
+            size_t numTriangles = elementTags[i].size();    //有多少个三角形网格单元
             cout << "Element numbers = " << numTriangles << endl;
             for (size_t j = 0; j < numTriangles; j++)               //遍历每一个网格单元
             {
@@ -231,7 +231,6 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
     gridCount_ = cells_.size();  // 统计总单元数
 
 	// === Step 3: 构造面（Face）并建立 Cell 和 Face 的对应关系 ===  *注意 对于3D情况而言，是构造面片与单元的对应关系
-
 	//map<set<int>, vector<int>> faceMap;   //set的作用是按从小到大自动排序，去除重复情况，可以当作唯一标识某个面的 key  O(logn)  后续可用HashMap优化
  //   for (const auto& cell : cells_)
  //   {
@@ -263,7 +262,6 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
  //           for (const auto& face : faces)
  //               faceMap[face].push_back(cell.id);
  //       }
-
  //       else if (cn.size() == 6)  // 棱柱
  //       {
  //           vector<set<int>> faces =
@@ -279,7 +277,6 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
  //              
  //           
  //       }
-
  //       else if (cn.size() == 8)  // 六面体 Hexahedron
  //       {
  //           std::vector<std::set<int>> faces =
@@ -295,10 +292,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
  //               faceMap[face].push_back(cell.id);
  //       }      
  //   }
-
 	//// 面的编号接着Cell的编号继续
  //   int faceId = 1;
-
 	//// 遍历面映射，构造 Face 对象并建立 Cell 和 Face 的对应关系
  //   for (const auto& entry : faceMap) 
  //   {
@@ -306,12 +301,10 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
  //       vector<Vector> nodeCoords;
  //       for (int nid : nodeIDs)
  //           nodeCoords.push_back(nodesMap_[nid].coord);
-
  //       Face face(faceId, nodeIDs, nodeCoords);
 	//	face.ownerCell = entry.second[0];   //第一个储存的单元编号为拥有该面的单元编号
 	//	face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1; //如果是边界面那么他的neighborCell为-1
  //       faces_.push_back(face);
-
  //       for (int cid : entry.second)
  //       {
  //           for (auto& cell : cells_) 
@@ -325,15 +318,16 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
  //       }
  //       faceId++;
  //   }
-
-
 	// === Step 4: 构造 Face 对象并建立 Cell 和 Face 的对应关系 ===
-    std::unordered_map<std::vector<int>, std::vector<int>, VectorHash> faceMap;
 
-    for (const auto& cell : cells_) {
-        for (const auto& faceNodeIDs : cell.getLocalFaces()) {
-            std::vector<int> sortedNodeIDs = faceNodeIDs;
-            std::sort(sortedNodeIDs.begin(), sortedNodeIDs.end());
+   unordered_map<vector<int>,vector<int>, VectorHash> faceMap;
+
+    for (const auto& cell : cells_) 
+    {
+        for (const auto& faceNodeIDs : cell.getLocalFaces())   //遍历组成cell的所有面，并对组成面的Node进行排序，防止重复
+        {
+            vector<int> sortedNodeIDs = faceNodeIDs;
+            sort(sortedNodeIDs.begin(), sortedNodeIDs.end());
             faceMap[sortedNodeIDs].push_back(cell.id);
         }
     }
@@ -342,14 +336,14 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
     int faceId = 1;
     for (const auto& entry : faceMap)
     {
-        const std::vector<int>& nodeIDs = entry.first;
-        std::vector<Vector> nodeCoords;
+        const vector<int>& nodeIDs = entry.first;
+        vector<Vector> nodeCoords;
         for (int nid : nodeIDs)
-            nodeCoords.push_back(nodesMap_[nid].coord);
+            nodeCoords.push_back(nodesMap_[nid].coord); 
 
         Face face(faceId, nodeIDs, nodeCoords);
         face.ownerCell = entry.second[0];
-        face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1;
+        face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1;  //边界网格的边界面只有倍Owner网格单元包含，所有 faceMap的second只有一个元素
         faces_.push_back(face);
 
         for (int cid : entry.second)
@@ -359,13 +353,13 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         }
         faceId++;
     }
-    std::cout << "BuildMesh: faces_ count = " << faces_.size() << std::endl;
-    std::cout << "=== Face owner/neighbor check ===" << std::endl;
+    cout << "BuildMesh: faces_ count = " << faces_.size() << std::endl;
+    cout << "=== Face owner/neighbor check ===" << std::endl;
     for (const auto& face : faces_) {
-        std::cout << "Face " << face.id << ": [";
+       cout << "Face " << face.id << ": [";
         for (int nid : face.nodeIDs)
-            std::cout << nid << " ";
-        std::cout << "], owner = " << face.ownerCell
+           cout << nid << " ";
+        cout << "], owner = " << face.ownerCell
             << ", neighbor = " << face.neighborCell << std::endl;
     }
     gmsh::write("UnstructuredMesh-EDFM.msh");

@@ -10,7 +10,7 @@ Cell::Cell(int id, const std::vector<int>& nodeIDs)
 vector<vector<int>> Cell::getLocalFaces()const
 {
 	const auto& cn = nodeIDs; // 获取单元的节点编号
-    vector<std::vector<int>> faces;
+    vector<vector<int>> faces;
     if (cn.size() == 3) {
         // 2D三角形
         faces = {

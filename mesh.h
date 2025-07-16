@@ -22,8 +22,8 @@ public:
 	const unordered_map<int, int>& getCellId2Index() const { return cellId2index_; } // 提供只读访问
 	int getGridCount() const { return gridCount_; } // 获取网格总数
 
-    std::vector<std::reference_wrapper<const Cell>> getInnerCells() const;
-    std::vector<std::reference_wrapper<const Cell>> getBoundaryCells() const;
+    vector<reference_wrapper<const Cell>> getInnerCells() const;
+    vector<reference_wrapper<const Cell>> getBoundaryCells() const;
 	int getGhostStartIndex() const { return ghostStartIndex_; } // 获取 Ghost Cell 起始索引   
     
     //------------------其他接口------------------------------//
@@ -34,7 +34,7 @@ public:
     void BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int ny, int nz,bool usePrism, bool useQuadBase);
     void ClassifySolidMatrixCells();
     void printMeshInfo();
-    void exportToTxt(const std::string& prefix) const;     
+    void exportToTxt(const string& prefix) const;     
     void ComputeSolidMatrixMeshFaceGeometricInfor(NormalVectorCorrectionMethod method);   
    
     // （可选）Dirichlet 边界压力  //待优化
