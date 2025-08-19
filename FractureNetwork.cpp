@@ -199,6 +199,7 @@ void FractureNetwork::DetectFracturetoFractureIntersections()
         const auto& Fi = fractures[i];
         Vector p = Fi.start, q = Fi.end;
         double L = (q - p).Mag();
+        cout << "第" << Fi.id << "条裂缝的长度为" << L << endl;
         for (size_t j = i + 1; j < fractures.size(); ++j) 
         {
             const auto& Fj = fractures[j];
@@ -206,6 +207,7 @@ void FractureNetwork::DetectFracturetoFractureIntersections()
             Vector ip;
             if (Fracture::lineSegmentIntersection(p, q, r, s, ip)) 
             {
+                cout << "第" << Fi.id << "条和第" << Fj.id << "条裂缝的交点坐标为（" << ip.m_x << "," << ip.m_y << "," << ip.m_z << "）" << endl;
                 // 计算各自的 param
                 double ti = L > 1e-12 ? (ip - p).Mag() / L : 0.0;
                 double L2 = (s - r).Mag();

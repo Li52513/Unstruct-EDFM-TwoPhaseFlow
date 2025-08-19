@@ -17,9 +17,10 @@ public:
     // --------------------- 只读参数 ------------------- //
 	const vector<Node>& getNodes() const { return nodes_; } // 提供只读访问
 	const vector<Face>& getFaces() const { return faces_; } // 提供只读访问
-	vector<Cell>& getCells() { return cells_; } // 提供科协访问  考虑到物性会更新，所以是可修改的
+	vector<Cell>& getCells() { return cells_; } // 提供访问  考虑到物性会更新，所以是可修改的
 	const unordered_map<int, Node>& getNodesMap() const { return nodesMap_; } // 提供只读访问
 	const unordered_map<int, int>& getCellId2Index() const { return cellId2index_; } // 提供只读访问
+    
 	int getGridCount() const { return gridCount_; } // 获取网格总数
 
     vector<reference_wrapper<const Cell>> getInnerCells() const;
@@ -47,6 +48,7 @@ private:
 	vector<Cell> cells_;
     unordered_map<int, Node> nodesMap_;
     unordered_map<int, int> cellId2index_;
+ 
 	int gridCount_ = 0; // 网格总数
     int ghostStartIndex_ = 0;
 

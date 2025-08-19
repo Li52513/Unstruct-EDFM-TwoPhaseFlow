@@ -22,9 +22,9 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
     intersections.clear();
     for (const auto& face : meshFaces)
     {
-        if (face.nodeCoords.size() < 2) continue;   //跳过无效面
-        Vector A = face.nodeCoords[0];              //网格面的两个节点坐标    
-        Vector B = face.nodeCoords[1];              //网格面的两个节点坐标
+        if (face.FaceNodeCoords.size() < 2) continue;   //跳过无效面
+        Vector A = face.FaceNodeCoords[0];              //网格面的两个节点坐标    
+        Vector B = face.FaceNodeCoords[1];              //网格面的两个节点坐标
         Vector ip;                                  //存储交点坐标
         // 判断裂缝(start→end) 与 面(A→B) 的线段相交
         if (lineSegmentIntersection(start, end, A, B, ip))
@@ -37,7 +37,7 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
             {
                 if (e.edgeID == face.id && (e.point - ip).Mag() < 1e-8)
                 {
-                    dup = true; break;
+                    dup = true; break; 
                 }
             }
 
@@ -222,49 +222,6 @@ void Fracture::subdivide(const vector<Cell>& meshCells, const unordered_map<int,
         elem.gIDend = I1.globalFFID;
         elements.push_back(elem);
     }
-    //vector<Vector> pts;
-    //for (const auto& inter : intersections)
-    //    pts.push_back(inter.point);
-    //int elemId = 1;
-    //for (size_t i = 0; i < pts.size() - 1; i++) 
-    //{
-    //    const double lenTol = 1e-10;          // 可按需要调大/调小用于侦测零长度裂缝段
-    //    Vector segStart = pts[i];
-    //    Vector segEnd = pts[i + 1];
-    //    double segLength = computeSegmentLength(segStart, segEnd);
-    //    
-    //    //0423
-    //    if (segLength < lenTol)
-    //    {
-    //        GeneralMethods::warn("Zero-length fracture segment detected, "
-    //            "check duplicate intersection points.");
-    //        continue;   // 跳过该段，防止除零
-    //    }
-    //    Vector mid = computeMidpoint(segStart, segEnd);
-    //    int associatedCellID = findContainingCell(mid, meshCells, meshNodes);
-    //    double avgDist = 0.0;
-    //    if (associatedCellID != -1) 
-    //    {
-    //        for (const auto& cell : meshCells) 
-    //        {
-    //            if (cell.id == associatedCellID)
-    //            {
-    //                avgDist = useCenterDistance
-    //                    ? computeDistanceFromCenter(cell, segStart, segEnd)
-    //                    : computeAverageDistanceFromNodes(cell, meshNodes, segStart, segEnd);
-    //                break;
-    //            }
-    //        }
-    //    }
-    //    else 
-    //    {
-    //        cerr << "Warning: Midpoint of segment " << i + 1 << " not inside any cell." << std::endl;
-    //        avgDist = -1.0;
-    //    }
-    //    FractureElement elem(elements.size() + 1, associatedCellID, segLength, avgDist);
-    //    elem.param0=
-    //    elements.emplace_back(elemId++, associatedCellID, segLength, avgDist);
-    //}
 }
 
 int Fracture::locateSegment(double param) const
@@ -323,6 +280,21 @@ bool Fracture::pointInTriangle(const Vector& p, const Vector& a, const Vector& b
 bool Fracture::lineSegmentIntersection(const Vector& p, const Vector& q, const Vector& r, const Vector& s, Vector& ip) 
 {
     const double tol = 1e-10;
+    //采用AABB包围盒剔除完全不可能相交的情况
+        // 0) === AABB 剔除阶段 ===
+    double min_px = std::min(p.m_x, q.m_x), max_px = std::max(p.m_x, q.m_x);
+    double min_py = std::min(p.m_y, q.m_y), max_py = std::max(p.m_y, q.m_y);
+    double min_rx = std::min(r.m_x, s.m_x), max_rx = std::max(r.m_x, s.m_x);
+    double min_ry = std::min(r.m_y, s.m_y), max_ry = std::max(r.m_y, s.m_y);
+
+    // 如果AABB不相交，立即返回false
+    if (max_px < min_rx || max_rx < min_px ||
+        max_py < min_ry || max_ry < min_py)
+    {
+        return false;
+    }
+
+    // 随后进入精确几何检测阶段--向量叉积法
     Vector pq = q - p;
     Vector rs = s - r;
 
@@ -347,6 +319,7 @@ bool Fracture::lineSegmentIntersection(const Vector& p, const Vector& q, const V
 
     // 3) 计算交点
     ip = p + pq * t;
+    
     return true;
 }
 
@@ -366,11 +339,11 @@ int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& c
 {
     for (const auto& cell : cells) 
     {
-        if (cell.nodeIDs.size() != 3) 
+        if (cell.CellNodeIDs.size() != 3) 
             continue;
-        Vector a = nodes.at(cell.nodeIDs[0]).coord;
-        Vector b = nodes.at(cell.nodeIDs[1]).coord;
-        Vector c = nodes.at(cell.nodeIDs[2]).coord;
+        Vector a = nodes.at(cell.CellNodeIDs[0]).coord;
+        Vector b = nodes.at(cell.CellNodeIDs[1]).coord;
+        Vector c = nodes.at(cell.CellNodeIDs[2]).coord;
         if (pointInTriangle(point, a, b, c)) 
             return cell.id;
         else if (pointInTriangle(point, a, b, c))
@@ -385,11 +358,11 @@ int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& c
 double Fracture::computeAverageDistanceFromNodes(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd)
 {
     double sumDist = 0.0;
-    for (int nid : cell.nodeIDs) {
+    for (int nid : cell.CellNodeIDs) {
         Vector nodeCoord = meshNodes.at(nid).coord;
         sumDist += pointToSegmentDistance(nodeCoord, segStart, segEnd);
     }
-    return sumDist / cell.nodeIDs.size();
+    return sumDist / cell.CellNodeIDs.size();
 }
 
 /*====计算裂缝段到基岩网格单元的平均距离--方法2利用 Cell 中点计算====*/

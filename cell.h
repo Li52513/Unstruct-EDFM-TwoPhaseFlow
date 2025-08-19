@@ -14,8 +14,8 @@ public:
     
     //------------------网格单元信息----------------------//
     int id;                          // 单元编号
-    vector<int> faceIDs;        // 构成单元的面编号
-    vector<int> nodeIDs;        // 构成单元的节点编号
+    vector<int> CellFaceIDs;             // 构成单元的面编号
+    vector<int> CellNodeIDs;             // 构成单元的节点编号
     Vector center;                   // 单元中心（几何重心）
     double volume;                   // 单元面积（对三角形）
     

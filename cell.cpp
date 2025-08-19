@@ -2,14 +2,14 @@
 #include <cmath>
 
 Cell::Cell(int id, const std::vector<int>& nodeIDs)
-	: id(id), nodeIDs(nodeIDs), volume(0.0), center(0.0, 0.0, 0.0), sourceTerm(0.0), faceDiscreCoef(0.0), pressure(6.531e7), pressureGradient(0.0, 0.0, 0.0), temperature(597.65), saturation_water(0.8), saturation_CO2(0.2), error(1e-6), SolidMaterialProps(), WaterMaterialProps(), CO2MaterialProps()  // 初始化物性参数
+	: id(id), CellNodeIDs(nodeIDs), volume(0.0), center(0.0, 0.0, 0.0), sourceTerm(0.0), faceDiscreCoef(0.0), pressure(6.531e7), pressureGradient(0.0, 0.0, 0.0), temperature(597.65), saturation_water(0.8), saturation_CO2(0.2), error(1e-6), SolidMaterialProps(), WaterMaterialProps(), CO2MaterialProps()  // 初始化物性参数
 {
     // 物性参数通过 materialProps 成员进行初始化
 }
 
 vector<vector<int>> Cell::getLocalFaces()const
 {
-	const auto& cn = nodeIDs; // 获取单元的节点编号
+	const auto& cn = CellNodeIDs; // 获取单元的节点编号
     vector<vector<int>> faces;
     if (cn.size() == 3) {
         // 2D三角形
@@ -69,24 +69,26 @@ vector<vector<int>> Cell::getLocalFaces()const
 
 void Cell::computeCenterAndVolume(const unordered_map<int, Node>& allNodes)
 {
-    if (nodeIDs.size() == 3) 
+    if (CellNodeIDs.size() == 3) 
     {
-        Vector p0 = allNodes.at(nodeIDs[0]).coord;
-        Vector p1 = allNodes.at(nodeIDs[1]).coord;
-        Vector p2 = allNodes.at(nodeIDs[2]).coord;
+        Vector p0 = allNodes.at(CellNodeIDs[0]).coord;
+        Vector p1 = allNodes.at(CellNodeIDs[1]).coord;
+        Vector p2 = allNodes.at(CellNodeIDs[2]).coord;
 
         center = (p0 + p1 + p2) / 3.0;
+		//cout << "Cell " << id << " center: [" << center.m_x <<"," << center.m_y << "," << center.m_z << "]" << endl;
         Vector v1 = p1 - p0;
         Vector v2 = p2 - p0;
 		volume = 0.5 * fabs(v1.m_x * v2.m_y - v1.m_y * v2.m_x); //fabs表示绝对值
+		//cout << "Cell " << id << " area: " << volume << endl; // 输出面积
     }
-    else if (nodeIDs.size() == 4) 
+    else if (CellNodeIDs.size() == 4) 
     {
         // 3D 四面体单元
-        Vector p0 = allNodes.at(nodeIDs[0]).coord;
-        Vector p1 = allNodes.at(nodeIDs[1]).coord;
-        Vector p2 = allNodes.at(nodeIDs[2]).coord;
-        Vector p3 = allNodes.at(nodeIDs[3]).coord;
+        Vector p0 = allNodes.at(CellNodeIDs[0]).coord;
+        Vector p1 = allNodes.at(CellNodeIDs[1]).coord;
+        Vector p2 = allNodes.at(CellNodeIDs[2]).coord;
+        Vector p3 = allNodes.at(CellNodeIDs[3]).coord;
 
         center = (p0 + p1 + p2 + p3) / 4.0;
 

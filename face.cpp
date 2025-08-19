@@ -1,21 +1,24 @@
 #include "Face.h"
 
 Face::Face(int id, const std::vector<int>& nodeIDs, const std::vector<Vector>& nodeCoords)
-    : id(id), nodeIDs(nodeIDs), nodeCoords(nodeCoords), length(0.0), ownerCell(-1), neighborCell(-1)
+    : id(id), FaceNodeIDs(nodeIDs), FaceNodeCoords(nodeCoords), length(0.0), ownerCell(-1), neighborCell(-1)
 {
     computeGeometry();
 }
 
 void Face::computeGeometry()
 {
-    size_t n = nodeCoords.size(); //记录节点数量
+    size_t n = FaceNodeCoords.size(); //记录节点数量
     if (n == 2) 
     {
         // 2D 面（线段）
-        midpoint = (nodeCoords[0] + nodeCoords[1]) / 2.0;
-        Vector diff = nodeCoords[1] - nodeCoords[0];
+        midpoint = (FaceNodeCoords[0] + FaceNodeCoords[1]) / 2.0;
+        Vector diff = FaceNodeCoords[1] - FaceNodeCoords[0];
         length = diff.Mag();
+		cout << "Face " << id << " 2D 面长度: " << length << endl;
         normal = Vector(diff.m_y, -diff.m_x, 0.0);
+		cout << "Face " << id << " 2D 面法向量: ("
+			<< normal.m_x << ", " << normal.m_y << ", " << normal.m_z << ")" << endl;
         double normMag = normal.Mag();
         if (normMag > 1e-12)
             normal = normal / normMag;
@@ -23,9 +26,9 @@ void Face::computeGeometry()
     else if (n == 3)
     {
         // 3D 面（三角形面片）
-        const Vector& p0 = nodeCoords[0];
-        const Vector& p1 = nodeCoords[1];
-        const Vector& p2 = nodeCoords[2];
+        const Vector& p0 = FaceNodeCoords[0];
+        const Vector& p1 = FaceNodeCoords[1];
+        const Vector& p2 = FaceNodeCoords[2];
 
         // 面的几何中心（三角形重心）
         midpoint = (p0 + p1 + p2) / 3.0;

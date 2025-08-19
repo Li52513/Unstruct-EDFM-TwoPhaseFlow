@@ -133,8 +133,9 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
     for (size_t i = 0; i < nodeTags.size(); i++)
     {
 		int id = static_cast<int>(nodeTags[i]); // 获取节点编号
-		cout << "Node ID = " << id << endl;
+		//cout << "Node ID = " << id << endl;
         Vector coord(nodeCoords[3 * i], nodeCoords[3 * i + 1], nodeCoords[3 * i + 2]);
+		//cout << "Node Coord = (" << coord.m_x << ", " << coord.m_y << ", " << coord.m_z << ")" << endl;
         nodes_.emplace_back(id, coord);        // 括号法定义，添加到节点列表
         nodesMap_[id] = Node(id, coord);        // 建立映射关系
     }
@@ -150,6 +151,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         cout << "Element type = " << elementTypes[i] << endl;
 
         // 三角形单元（2D） 1=线单元, 2=三角形, 3=四边形  其他网格类型待补充
+        cout << "------------Cell全局编号和坐标信息------------" << endl;
         if (is2D && type == 2)
         { 
             size_t numTriangles = elementTags[i].size();    //有多少个三角形网格单元
@@ -157,13 +159,22 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
             for (size_t j = 0; j < numTriangles; j++)               //遍历每一个网格单元
             {
 				int cellId = static_cast<int>(elementTags[i][j]);   // 读取单元编号
-				cout << "Cell ID = " << cellId << endl;
-				vector<int> cellNodeIDs;                            //建立储存单元节点编号的容器
-                for (int k = 0; k < 3; k++)                         // 三角形单元有三个节点
-                cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][3 * j + k]));               
+				//cout << "Cell ID = " << cellId << endl;
+				vector<int> cellNodeIDs;                            //建立储存单元节点编号的容器  **建立cell与Node之间的连接关系
+                for (int k = 0; k < 3; k++)
+				{
+                    // 三角形单元有三个节点，其中 k=0,1,2 分别对应三个节点 //局部编号
+                
+                    cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][3 * j + k]));  
+					//cout << "Node ID = " << cellNodeIDs[k] << endl;
+                    
+				}
+                
                 Cell cell(cellId, cellNodeIDs);
+                //cout <<"------编号为"<< cellId<<"的Cell中心点和面积信息--------"  << endl;
                 cell.computeCenterAndVolume(nodesMap_);
                 cells_.push_back(cell);
+                cout << "------------------------------------------------" << endl;
             }
         }
 
@@ -212,7 +223,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                     cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][8 * j + k]));
 
                 Cell cell(cellId, cellNodeIDs);
-                cell.computeCenterAndVolume(nodesMap_);
+                               cell.computeCenterAndVolume(nodesMap_);
                 cells_.push_back(cell);
             }
         }
@@ -221,106 +232,24 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
     }
 	//构建 id → 下标 映射，方便后续快速访问
     cellId2index_.clear();
-    for (size_t i = 0; i < cells_.size(); ++i) {
+    for (size_t i = 0; i < cells_.size(); ++i)
+    {
 
-        cout << "Cell ID: " << cells_[i].id << endl;
+       // cout << "Cell ID: " << cells_[i].id << endl;
 			
-        cellId2index_[cells_[i].id] = static_cast<int>(i);
+		cellId2index_[cells_[i].id] = static_cast<int>(i); //局部编号到全局编号的映射
     }
+
+   
+
     
     gridCount_ = cells_.size();  // 统计总单元数
+    cout << "网格数量为" << gridCount_ << endl;
 
-	// === Step 3: 构造面（Face）并建立 Cell 和 Face 的对应关系 ===  *注意 对于3D情况而言，是构造面片与单元的对应关系
-	//map<set<int>, vector<int>> faceMap;   //set的作用是按从小到大自动排序，去除重复情况，可以当作唯一标识某个面的 key  O(logn)  后续可用HashMap优化
- //   for (const auto& cell : cells_)
- //   {
-	//	const auto& cn = cell.nodeIDs; // 获取单元的节点编号
- //      
- //       if (cn.size() == 3)
- //       {
- //           // 2D 情况（三角形边）
- //           vector<set<int>> edges =
- //           {
- //               {cn[0], cn[1]},
- //               {cn[1], cn[2]},
- //               {cn[2], cn[0]}
- //           };
- //           for (const auto& edge : edges)
- //               faceMap[edge].push_back(cell.id);
- //       }
- //      
- //       else if (cn.size() == 4)
- //       {
- //           // 3D情况四面体的四个面（每面是三个点）
- //           vector<set<int>> faces = 
- //           {
- //               {cn[0], cn[1], cn[2]},
- //               {cn[0], cn[1], cn[3]},
- //               {cn[1], cn[2], cn[3]},
- //               {cn[0], cn[2], cn[3]}
- //           };
- //           for (const auto& face : faces)
- //               faceMap[face].push_back(cell.id);
- //       }
- //       else if (cn.size() == 6)  // 棱柱
- //       {
- //           vector<set<int>> faces =
- //           {
- //               {cn[0], cn[1], cn[2]}, // 三角底面
- //               {cn[3], cn[4], cn[5]}, // 三角顶面
- //               {cn[0], cn[1], cn[4], cn[3]}, // 四边形面
- //               {cn[1], cn[2], cn[5], cn[4]}, // 四边形面
- //               {cn[2], cn[0], cn[3], cn[5]}  // 四边形面
- //           };
- //           for (const auto& face : faces)
- //           faceMap[face].push_back(cell.id);
- //              
- //           
- //       }
- //       else if (cn.size() == 8)  // 六面体 Hexahedron
- //       {
- //           std::vector<std::set<int>> faces =
- //           {
- //               {cn[0], cn[1], cn[2], cn[3]}, // 底面
- //               {cn[4], cn[5], cn[6], cn[7]}, // 顶面
- //               {cn[0], cn[1], cn[5], cn[4]}, // 侧面1
- //               {cn[1], cn[2], cn[6], cn[5]}, // 侧面2
- //               {cn[2], cn[3], cn[7], cn[6]}, // 侧面3
- //               {cn[3], cn[0], cn[4], cn[7]}  // 侧面4
- //           };
- //           for (const auto& face : faces)
- //               faceMap[face].push_back(cell.id);
- //       }      
- //   }
-	//// 面的编号接着Cell的编号继续
- //   int faceId = 1;
-	//// 遍历面映射，构造 Face 对象并建立 Cell 和 Face 的对应关系
- //   for (const auto& entry : faceMap) 
- //   {
-	//	vector<int> nodeIDs(entry.first.begin(), entry.first.end()); //遍历map并存储面节点编号
- //       vector<Vector> nodeCoords;
- //       for (int nid : nodeIDs)
- //           nodeCoords.push_back(nodesMap_[nid].coord);
- //       Face face(faceId, nodeIDs, nodeCoords);
-	//	face.ownerCell = entry.second[0];   //第一个储存的单元编号为拥有该面的单元编号
-	//	face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1; //如果是边界面那么他的neighborCell为-1
- //       faces_.push_back(face);
- //       for (int cid : entry.second)
- //       {
- //           for (auto& cell : cells_) 
- //           {
- //               if (cell.id == cid) 
- //               {
- //                   cell.faceIDs.push_back(faceId);
- //                   break;
- //               }
- //           }
- //       }
- //       faceId++;
- //   }
-	// === Step 4: 构造 Face 对象并建立 Cell 和 Face 的对应关系 ===
+	// === Step 3: 构造 Face 对象并建立 Cell 和 Face 的对应关系 ===
 
-   unordered_map<vector<int>,vector<int>, VectorHash> faceMap;
+   //建立面 点及网格单元之间的拓扑关系
+	unordered_map<vector<int>, vector<int>, VectorHash> FacetoCellMap;  // key:一个面由哪几个节点构成（唯一标识一个面） value:哪些单元拥有这个面（可能是1个或2个）
 
     for (const auto& cell : cells_) 
     {
@@ -328,13 +257,16 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         {
             vector<int> sortedNodeIDs = faceNodeIDs;
             sort(sortedNodeIDs.begin(), sortedNodeIDs.end());
-            faceMap[sortedNodeIDs].push_back(cell.id);
+			FacetoCellMap[sortedNodeIDs].push_back(cell.id); // 将面节点编号作为 key，cell.id 作为 value 存入 faceMap
+			//cout << "Cell ID: " << cell.id << " has face with nodes: ";
+			//for (int nid : sortedNodeIDs) cout << nid << " ";
+			//cout << endl;
         }
     }
 
     faces_.clear();
     int faceId = 1;
-    for (const auto& entry : faceMap)
+    for (const auto& entry : FacetoCellMap)
     {
         const vector<int>& nodeIDs = entry.first;
         vector<Vector> nodeCoords;
@@ -344,24 +276,32 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         Face face(faceId, nodeIDs, nodeCoords);
         face.ownerCell = entry.second[0];
         face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1;  //边界网格的边界面只有倍Owner网格单元包含，所有 faceMap的second只有一个元素
+        
+        
+      /*  cout << "构建 Face ID: " << faceId << ", 节点: ";
+        for (int nid : nodeIDs) cout << nid << " ";*/
+       // cout << "| ownerCell = " << face.ownerCell
+           // << ", neighborCell = " << face.neighborCell << endl;
+
         faces_.push_back(face);
 
         for (int cid : entry.second)
         {
-            int idx = cellId2index_.at(cid);
-            cells_[idx].faceIDs.push_back(faceId);
+			int idx = cellId2index_.at(cid); //访问 cellId 对应的局部编号
+            cells_[idx].CellFaceIDs.push_back(faceId);
+           // cout << "  → Face ID " << faceId << " 被添加到 Cell ID: " << cid << " 中。" << endl;
         }
         faceId++;
     }
     cout << "BuildMesh: faces_ count = " << faces_.size() << std::endl;
-    cout << "=== Face owner/neighbor check ===" << std::endl;
-    for (const auto& face : faces_) {
+    //cout << "=== Face owner/neighbor check ===" << std::endl;
+    /*for (const auto& face : faces_) {
        cout << "Face " << face.id << ": [";
-        for (int nid : face.nodeIDs)
+        for (int nid : face.FaceNodeIDs)
            cout << nid << " ";
-        cout << "], owner = " << face.ownerCell
+       cout << "], owner = " << face.ownerCell
             << ", neighbor = " << face.neighborCell << std::endl;
-    }
+    }*/
     gmsh::write("UnstructuredMesh-EDFM.msh");
     gmsh::finalize();
 }
@@ -374,7 +314,7 @@ void Mesh::ClassifySolidMatrixCells()
     for (auto& cell : cells_)
     {
         bool isBoundary = false;
-        for (int faceId : cell.faceIDs)
+        for (int faceId : cell.CellFaceIDs)
         {
             if (faces_[faceId - 1].neighborCell == -1)
             {
@@ -386,9 +326,9 @@ void Mesh::ClassifySolidMatrixCells()
     }
 }
 
-std::vector<std::reference_wrapper<const Cell>> Mesh::getInnerCells() const
+vector<std::reference_wrapper<const Cell>> Mesh::getInnerCells() const
 {
-    std::vector<std::reference_wrapper<const Cell>> innerCells;
+    vector<std::reference_wrapper<const Cell>> innerCells;
     for (const auto& cell : cells_)
     {
         if (cell.location == Cell::LocationType::Inner)
@@ -444,8 +384,8 @@ void Mesh::CreateSolidMatrixGhostCells()
         ghostC.center = Cp - 2.0 * d * n;
 
         // ghost 不需要原来的 nodeIDs/faceIDs
-        ghostC.nodeIDs.clear();
-        ghostC.faceIDs.clear();
+        ghostC.CellNodeIDs.clear();
+        ghostC.CellFaceIDs.clear();
         ghosts.push_back(ghostC);
     }
 
@@ -485,7 +425,7 @@ void Mesh::printMeshInfo()
             << cell.center.m_x << ", " << cell.center.m_y << ", " << cell.center.m_z << ")"
             << " 面积: " << cell.volume << endl;
         cout << "  包含面: ";
-        for (int fid : cell.faceIDs)
+        for (int fid : cell.CellFaceIDs)
             cout << fid << " ";
         cout << endl;
     }
@@ -493,7 +433,7 @@ void Mesh::printMeshInfo()
     for (const auto& face :faces_)
     {
         cout << "Face " << face.id << " 节点: ";
-        for (int nid : face.nodeIDs)
+        for (int nid : face.FaceNodeIDs)
             cout << nid << " ";
         cout << " | owner: " << face.ownerCell
             << " neighbor: " << face.neighborCell << endl;
@@ -569,8 +509,8 @@ void Mesh::exportToTxt(const std::string& prefix) const
     ff << "id n1 n2 mx my mz\n";
     for (auto& f : faces_) {
         ff << f.id << " "
-            << f.nodeIDs[0] << " "
-            << f.nodeIDs[1] << " "
+            << f.FaceNodeIDs[0] << " "
+            << f.FaceNodeIDs[1] << " "
             << f.midpoint.m_x << " "
             << f.midpoint.m_y << " "
             << f.midpoint.m_z << "\n";

@@ -35,7 +35,7 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =3, sectionNumY =3, sectionNumZ = 0;
+    int sectionNumX =100, sectionNumY =100, sectionNumZ = 0;
 	bool usePrism = true;       /// true-使用棱柱单元 false-使用四面体单元
 	bool useQuadBase = true;    /// true-是用四边形底面 false -使用三角形底面
     /*----------------------------------------------------------------------*/
@@ -72,7 +72,7 @@ int main()
 	mgr.setDFNRandomSeed(12345); // 设置随机种子
 	mgr.generateDFN
 	(
-		/*N=*/2,
+		/*N=*/100,
 		/*minPoint=*/{ 0.0,0.0,0.0 },
 		/*maxPoint=*/{ 1.0,1.0,0.0 },
 		/*Lmin=*/0.5,
@@ -93,7 +93,11 @@ int main()
     //    /*kappa=*/0,
     //    /*avoidOverlap=*/true 
     //);
+    auto t8 = std::chrono::high_resolution_clock::now();
     mgr.DetectAndSubdivideFractures();
+    auto t9 = std::chrono::high_resolution_clock::now(); // 计时结束
+    auto ms10 = std::chrono::duration_cast<std::chrono::milliseconds>(t9 - t8).count();
+    std::cout << "FractureDetect in " << ms10 << " ms.\n";
     mgr.ComputeFractureGeometryCouplingCoefficient();
   
 	//auto t3 = std::chrono::high_resolution_clock::now(); // 计时结束
