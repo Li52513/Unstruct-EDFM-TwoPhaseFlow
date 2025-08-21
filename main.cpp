@@ -81,18 +81,6 @@ int main()
 		/*kappa=*/0,
 		/*avoidOverlap=*/true
 	);
-    //mgr.fracture_network().setRandomSeed(12345);
-    //mgr.fracture_network().generateDFN
-    //(
-    //    /*N=*/2,
-    //    /*min=*/{ 0.0,0.0,0.0 },
-    //    /*max=*/{ 1.0,1.0,0.0 },
-    //    /*Lmin=*/0.5,
-    //    /*Lmax=*/1.4,
-    //    /*alpha=*/0,
-    //    /*kappa=*/0,
-    //    /*avoidOverlap=*/true 
-    //);
     auto t8 = std::chrono::high_resolution_clock::now();
     mgr.DetectAndSubdivideFractures();
     auto t9 = std::chrono::high_resolution_clock::now(); // 计时结束

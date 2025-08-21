@@ -15,13 +15,31 @@ void Face::computeGeometry()
         midpoint = (FaceNodeCoords[0] + FaceNodeCoords[1]) / 2.0;
         Vector diff = FaceNodeCoords[1] - FaceNodeCoords[0];
         length = diff.Mag();
-		cout << "Face " << id << " 2D 面长度: " << length << endl;
+		//cout << "Face " << id << " 2D 面长度: " << length << endl;
         normal = Vector(diff.m_y, -diff.m_x, 0.0);
-		cout << "Face " << id << " 2D 面法向量: ("
-			<< normal.m_x << ", " << normal.m_y << ", " << normal.m_z << ")" << endl;
+		//cout << "Face " << id << " 2D 面法向量: ("
+			//<< normal.m_x << ", " << normal.m_y << ", " << normal.m_z << ")" << endl;
         double normMag = normal.Mag();
         if (normMag > 1e-12)
-            normal = normal / normMag;
+			normal = normal / normMag; // 单位化法向量
+
+        if (!FaceNodeCoords.empty())
+        {
+			// 计算包围盒
+			Vector minCoord = FaceNodeCoords[0];
+			Vector maxCoord = FaceNodeCoords[0];
+			for (const auto& coord : FaceNodeCoords)
+			{
+				if (coord.m_x < minCoord.m_x) minCoord.m_x = coord.m_x;
+				if (coord.m_y < minCoord.m_y) minCoord.m_y = coord.m_y;
+				if (coord.m_z < minCoord.m_z) minCoord.m_z = coord.m_z;
+				if (coord.m_x > maxCoord.m_x) maxCoord.m_x = coord.m_x;
+				if (coord.m_y > maxCoord.m_y) maxCoord.m_y = coord.m_y;
+				if (coord.m_z > maxCoord.m_z) maxCoord.m_z = coord.m_z;
+			}
+			boundingBox = AABB(minCoord, maxCoord);
+        }
+
     }
     else if (n == 3)
     {
@@ -67,6 +85,9 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     {
 		Aj = -Aj; //		// 确保法向量与单位向量同向
     }
+   /* cout << "Face " << id << " 的面积矢量 A_j: (" 
+         << Aj.m_x << ", " << Aj.m_y << ", " << Aj.m_z << ") 长度: " 
+         << length << endl;*/
 
     // 3) 依据不同算法分解 A_j = E_j + T_j
     double Aj_dot_ej = Aj * ej;  // 点积

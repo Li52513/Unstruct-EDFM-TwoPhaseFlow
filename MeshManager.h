@@ -4,6 +4,7 @@
 #include "BoundaryClassify.h"
 
 
+
 /**
  * @class MeshManager
  * @brief 统一管理基岩 & 裂缝网格及几何参数、CI 计算、物性赋值
@@ -26,6 +27,7 @@ public:
 
     // —— 网格构建 & 预处理 ——————————————————————————————————
     void BuildSolidMatrixGrid(NormalVectorCorrectionMethod corr = NormalVectorCorrectionMethod::OrthogonalCorrection);
+
 
     // —— 裂缝几何 & CI 计算 —————————————————————————————
     /// 添加裂缝（起点→终点）
@@ -67,5 +69,6 @@ private:
 	double lx_, ly_, lz_; // 区域长度成员对象
 	int nx_, ny_, nz_; // 网格数量成员对象
 	bool usePrism_, useQuadBase_; // 网格单元类型成员对象
+	
 };
 

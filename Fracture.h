@@ -129,17 +129,26 @@ public:
     Vector start; // 裂缝起点坐标
 	Vector end;   // 裂缝终点坐标
 
+
 	/*===存储裂缝交点及裂缝段信息===*/
 	vector<FractureIntersectionPointByMatrixMesh> intersections; 
 	vector<FractureElement> elements;		  
 
 	///*===裂缝物性参数（考虑到流体物性的变化以及多物理场过程对裂缝物性的影响，将物性赋值在裂缝段内）===*/
    
-     /*==裂缝与基岩交点计算====*/
-    void DetectFracturetoMeshFaceIntersections(const vector<Face>& meshFaces, const std::vector<Cell>& meshCells, const std::unordered_map<int, Node>& meshNodes);
+    
+    //构建每条裂缝的AABB
+	AABB fractureBox; // 裂缝的包围盒（用于碰撞检测等）
+    int candidateFaceCount_ = 0; // 可选加 mutable
+
+    
+    /*==裂缝与基岩交点计算====*/
+    void DetectFracturetoMeshFaceIntersections(const Mesh& mesh, const std::vector<Cell>& meshCells, const std::unordered_map<int, Node>& meshNodes, bool useAABBFilter);
   
  /*=====构造函数=====*/
     Fracture(const Vector& s, const Vector& e);
+
+    void computeAABB();
 
 /// -/*=== 计算几何耦合系数 geomCI 和 geomAlpha======*/
 /// 仅基于几何：计算每段的 geomCI 和 geomAlpha
@@ -154,6 +163,7 @@ public:
     int locateSegment(double param) const;
 
     static bool lineSegmentIntersection(const Vector& p, const Vector& q, const Vector& r, const Vector& s, Vector& ip);
+    
     void sortAndRenumberIntersections();
 
     

@@ -20,6 +20,11 @@ public:
 	vector<Cell>& getCells() { return cells_; } // 提供访问  考虑到物性会更新，所以是可修改的
 	const unordered_map<int, Node>& getNodesMap() const { return nodesMap_; } // 提供只读访问
 	const unordered_map<int, int>& getCellId2Index() const { return cellId2index_; } // 提供只读访问
+
+	//==============基岩网格空间划分函数声明=================//
+	void buildFaceBins(); // 构建面空间划分
+	vector<int>getCandidateFacesFromBins(const AABB& box) const;
+
     
 	int getGridCount() const { return gridCount_; } // 获取网格总数
 
@@ -48,6 +53,13 @@ private:
 	vector<Cell> cells_;
     unordered_map<int, Node> nodesMap_;
     unordered_map<int, int> cellId2index_;
+
+	int binCountX_; // X 方向网格划分数
+	int binCountY_; // Y 方向网格划分数
+    double binSizeX_;   // X 方向实际 bin 宽度
+    double binSizeY_;   // Y 方向实际 bin 高度
+
+	unordered_map<int, vector<int>> faceBins_; // 面空间划分的 bin
  
 	int gridCount_ = 0; // 网格总数
     int ghostStartIndex_ = 0;

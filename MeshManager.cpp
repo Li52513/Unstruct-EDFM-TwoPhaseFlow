@@ -16,7 +16,7 @@ void MeshManager::BuildSolidMatrixGrid(NormalVectorCorrectionMethod corr)
     mesh_.BuildMesh(lx_, ly_, lz_, nx_, ny_, nz_, usePrism_, useQuadBase_);
     mesh_.ClassifySolidMatrixCells();
     BoundaryClassify::ClassifySolidMatrixMeshBoundaryFaces(mesh_, lx_, ly_);
-    mesh_.CreateSolidMatrixGhostCells();
+    //mesh_.CreateSolidMatrixGhostCells();
     mesh_.ComputeSolidMatrixMeshFaceGeometricInfor(corr);
 }
 
@@ -29,9 +29,34 @@ void MeshManager::DetectAndSubdivideFractures()
 {
     // 1) 先找裂缝–裂缝的交点
     frNet_.DetectFracturetoFractureIntersections();
+    
+    bool useAABBAcceleration = true;  // 或 false 用于对比测试
+    int totalFaces = mesh_.getFaces().size();
+    int totalCandidates = 0;
+
 	// 2) 然后找裂缝–网格面的交点
     for (auto& F : frNet_.fractures)
-        F.DetectFracturetoMeshFaceIntersections(mesh_.getFaces(), mesh_.getCells(), mesh_.getNodesMap());
+    {
+		if (useAABBAcceleration)
+		{
+			F.computeAABB(); // 计算每条裂缝的 AABB 边界框
+			F.DetectFracturetoMeshFaceIntersections(mesh_, mesh_.getCells(), mesh_.getNodesMap(), true);
+            totalCandidates += F.candidateFaceCount_; // 候选面数
+		}
+        else
+        {
+            F.DetectFracturetoMeshFaceIntersections(mesh_, mesh_.getCells(), mesh_.getNodesMap(), false);
+            totalCandidates += totalFaces; // 所有面都遍历
+        }
+
+    }
+    std::cout << "[加速效果] 总面数 = " << totalFaces
+        << ", 总裂缝数 = " << frNet_.fractures.size()
+        << ", 总候选面数 = " << totalCandidates
+        << ", 平均每条裂缝面数 = " << (double)totalCandidates / frNet_.fractures.size()
+        << ", 剔除率 = " << (100.0 - 100.0 * totalCandidates / (totalFaces * frNet_.fractures.size()))
+        << "%\n";
+        
    
     // 3) 给全局裂缝–裂缝交点去重并编号
     frNet_.DeduplicateAndRenumberFractureToFractureIntersections();
@@ -46,6 +71,7 @@ void MeshManager::DetectAndSubdivideFractures()
         F.subdivide(mesh_.getCells(), mesh_.getNodesMap());
     }
 }
+
 
 void MeshManager::ComputeFractureGeometryCouplingCoefficient()
 {

@@ -2,6 +2,7 @@
 #include <vector>
 #include <cmath>
 #include "UserDefineVarType.h"
+#include "AABB.h"
 using namespace std;
 
 // ---------- 非正交校正方法枚举 ----------
@@ -24,6 +25,7 @@ public:
     Vector midpoint;                     // 面的几何中心
     int ownerCell;                       // 所属的单元编号
     int neighborCell;                    // 相邻的单元编号（无为 -1）
+	AABB boundingBox;                   // 面的包围盒（用于碰撞检测等）
 
     Vector ownerToNeighbor;            // 从 ownerCell.center 指向 neighborCell.center 的向量
     Vector vectorE;                    // 分解得到的正交分量（沿 d 方向）

@@ -142,52 +142,52 @@ void FractureNetwork::addFracture(const Vector& s, const Vector& e)
     f.id = nextFracID_++;                // 3. 写入唯一 ID
 }
 
-//针对多条裂缝以星型相交方式的情况，TI系数暂时无法计算
-void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const vector<Cell>& meshCells,const unordered_map<int, Node>& meshNodes, const Fluid& fluid,const Matrix& matrix, Mesh& mesh)
-{
-    /* 0) 先检测交点 */
-    DetectFracturetoFractureIntersections();
-
-    /* 1. 裂缝-网格交点 -------------------------------------*/
-    for (auto& F : fractures)
-        F.DetectFracturetoMeshFaceIntersections(meshFaces, meshCells, meshNodes);
-
-    DeduplicateAndRenumberFractureToFractureIntersections();
-
-    /* 2. 把 FF 交点插入对应裂缝的 intersections  ------------*/
-    for (auto& g : globalFFPts) {
-        // 裂缝 A
-        auto& FA = fractures[g.fracA];
-        FA.intersections.emplace_back(
-            /*local id*/   -1,      // 稍后重新排序
-            /*point*/      g.point,
-            /*edgeID*/     -1,
-            /*param*/      g.paramA,
-            /*isFF*/       true,
-            /*globalID*/   g.id
-        );
-
-        // 裂缝 B
-        auto& FB = fractures[g.fracB];
-        FB.intersections.emplace_back(-1, g.point, -1, g.paramB, true, g.id);
-    }
-
-    /* 3. 排序并重新编号 ------------------------------------*/
-    for (auto& F : fractures)
-        F.sortAndRenumberIntersections();
-
-    /* 4. 现在再做分段 --------------------------------------*/
-    for (auto& F : fractures)
-        F.subdivide(meshCells, meshNodes);
-
-    ///* 5. 计算离散系数、CI ----------------------------------*/
-    //for (auto& F : fractures)
-    //    F.computeFractureDiscreteCoefficients(fluid, matrix, mesh);
-
-    ///* 6. 计算 TI（星形公式） -------------------------------*/
-    //computeFractureFractureTI(fluid);
-
-}
+////针对多条裂缝以星型相交方式的情况，TI系数暂时无法计算
+//void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const vector<Cell>& meshCells,const unordered_map<int, Node>& meshNodes, const Fluid& fluid,const Matrix& matrix, Mesh& mesh)
+//{
+//    /* 0) 先检测交点 */
+//    DetectFracturetoFractureIntersections();
+//
+//    /* 1. 裂缝-网格交点 -------------------------------------*/
+//    for (auto& F : fractures)
+//        F.DetectFracturetoMeshFaceIntersections(meshFaces, meshCells, meshNodes);
+//
+//    DeduplicateAndRenumberFractureToFractureIntersections();
+//
+//    /* 2. 把 FF 交点插入对应裂缝的 intersections  ------------*/
+//    for (auto& g : globalFFPts) {
+//        // 裂缝 A
+//        auto& FA = fractures[g.fracA];
+//        FA.intersections.emplace_back(
+//            /*local id*/   -1,      // 稍后重新排序
+//            /*point*/      g.point,
+//            /*edgeID*/     -1,
+//            /*param*/      g.paramA,
+//            /*isFF*/       true,
+//            /*globalID*/   g.id
+//        );
+//
+//        // 裂缝 B
+//        auto& FB = fractures[g.fracB];
+//        FB.intersections.emplace_back(-1, g.point, -1, g.paramB, true, g.id);
+//    }
+//
+//    /* 3. 排序并重新编号 ------------------------------------*/
+//    for (auto& F : fractures)
+//        F.sortAndRenumberIntersections();
+//
+//    /* 4. 现在再做分段 --------------------------------------*/
+//    for (auto& F : fractures)
+//        F.subdivide(meshCells, meshNodes);
+//
+//    ///* 5. 计算离散系数、CI ----------------------------------*/
+//    //for (auto& F : fractures)
+//    //    F.computeFractureDiscreteCoefficients(fluid, matrix, mesh);
+//
+//    ///* 6. 计算 TI（星形公式） -------------------------------*/
+//    //computeFractureFractureTI(fluid);
+//
+//}
 
 /// 检测裂缝之间的交点
 void FractureNetwork::DetectFracturetoFractureIntersections()
@@ -199,7 +199,7 @@ void FractureNetwork::DetectFracturetoFractureIntersections()
         const auto& Fi = fractures[i];
         Vector p = Fi.start, q = Fi.end;
         double L = (q - p).Mag();
-        cout << "第" << Fi.id << "条裂缝的长度为" << L << endl;
+        //cout << "第" << Fi.id << "条裂缝的长度为" << L << endl;
         for (size_t j = i + 1; j < fractures.size(); ++j) 
         {
             const auto& Fj = fractures[j];
@@ -207,7 +207,7 @@ void FractureNetwork::DetectFracturetoFractureIntersections()
             Vector ip;
             if (Fracture::lineSegmentIntersection(p, q, r, s, ip)) 
             {
-                cout << "第" << Fi.id << "条和第" << Fj.id << "条裂缝的交点坐标为（" << ip.m_x << "," << ip.m_y << "," << ip.m_z << "）" << endl;
+                //cout << "第" << Fi.id << "条和第" << Fj.id << "条裂缝的交点坐标为（" << ip.m_x << "," << ip.m_y << "," << ip.m_z << "）" << endl;
                 // 计算各自的 param
                 double ti = L > 1e-12 ? (ip - p).Mag() / L : 0.0;
                 double L2 = (s - r).Mag();
@@ -314,6 +314,8 @@ void FractureNetwork::printFractureInfo() const
         std::cout << "Fracture #" << fid + 1 << "  ("
             << F.start.m_x << "," << F.start.m_y << ")  →  ("
             << F.end.m_x << "," << F.end.m_y << ")\n";
+
+
 
         //std::cout << "  Porosity=" << F.porosity
         //    << ",  k=" << F.permeability

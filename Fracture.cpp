@@ -6,57 +6,98 @@
 #include "Matrix.h"
 #include "Mesh.h"
 #include <unordered_map>
+#include <numeric>
 
 
 Fracture::Fracture(const Vector& s, const Vector& e)  
    : start(s), end(e), id(0)  
 {  
-     
+
+}
+
+void Fracture::computeAABB()
+{
+    Vector minCoord, maxCoord;
+	minCoord.m_x = std::min(start.m_x, end.m_x);
+	minCoord.m_y = std::min(start.m_y, end.m_y);
+	minCoord.m_z = std::min(start.m_z, end.m_z);
+
+	maxCoord.m_x = std::max(start.m_x, end.m_x);
+	maxCoord.m_y = std::max(start.m_y, end.m_y);
+	maxCoord.m_z = std::max(start.m_z, end.m_z);
+	fractureBox = AABB(minCoord, maxCoord); // 计算包围盒
 }
 
 
 /*====利用基岩网格边界对裂缝进行网格划分并排序---基于lineSegmentIntersection子函数 *注：对于非结构化网格需要进行排序===*/
-void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& meshFaces,const std::vector<Cell>& meshCells,const std::unordered_map<int, Node>& meshNodes)
+void Fracture::DetectFracturetoMeshFaceIntersections(const Mesh& mesh,const vector<Cell>& meshCells,const unordered_map<int, Node>& meshNodes,bool useAABBFilter)
 {
-    // 1) 面内交点计算 & 去重
-    intersections.clear();
-    for (const auto& face : meshFaces)
+    /* =========================================================
+   0. 基本准备：裂缝自身 AABB 以及要遍历的面列表
+   =========================================================*/
+
+	AABB fractureBox(start, end); // 计算裂缝的包围盒
+	vector<int> faceIDList; // 用于存储需要遍历的面 ID
+
+    if (useAABBFilter)
     {
-        if (face.FaceNodeCoords.size() < 2) continue;   //跳过无效面
-        Vector A = face.FaceNodeCoords[0];              //网格面的两个节点坐标    
-        Vector B = face.FaceNodeCoords[1];              //网格面的两个节点坐标
-        Vector ip;                                  //存储交点坐标
-        // 判断裂缝(start→end) 与 面(A→B) 的线段相交
-        if (lineSegmentIntersection(start, end, A, B, ip))
-        {
-            double segLen = (end - start).Mag(); // 计算裂缝总长度用于计算归一化参数
-            double t = (segLen > 1e-8 ? (ip - start).Mag() / segLen : 0.0); //计算归一化参数，用于后面排序
-            // 如果本 face 上已有一个非常接近的点，就跳过
-            bool dup = false;
-            for (auto& e : intersections)
-            {
-                if (e.edgeID == face.id && (e.point - ip).Mag() < 1e-8)
-                {
-                    dup = true; break; 
-                }
-            }
-
-            if (!dup)
-                intersections.emplace_back
-                (
-                    -1,                // id（稍后再排）
-                    ip,                // 交点坐标
-                    face.id,           // 关联的 faceID
-                    t,                 // param
-                    false,             // isFF（不是裂缝–裂缝交点）
-                    0,                 // globalFFID
-                    IntersectionOrigin::FracFace   // 来源：裂缝–网格面
-                );
-           
-        }
-
+		faceIDList = mesh.getCandidateFacesFromBins(fractureBox); // 获取与裂缝包围盒相交的面 ID 列表
+        candidateFaceCount_ = static_cast<int>(faceIDList.size());
     }
-        // 2) 起点和终点作为交点（若未被添加）
+    else
+    {
+        const auto& faces = mesh.getFaces();
+		faceIDList.resize(faces.size());
+		iota(faceIDList.begin(), faceIDList.end(), 1); // 如果不使用 AABB 过滤，则遍历所有面
+    }
+
+	////打印候选面 ID 列表
+ //     std::cout << "[Detect] face candidates = "
+ //              << faceIDList.size() << " / "
+ //              << mesh.getFaces().size() << "\n";
+
+    /* =========================================================
+       1. 精确检测：裂缝-面交点 & 去重
+    =========================================================*/
+    intersections.clear();
+	const auto&  faces= mesh.getFaces(); // 获取网格面的引用
+
+    for (int fid : faceIDList)
+    {
+		const Face& face = faces[fid - 1]; // 获取面对象（ID 从 1 开始）
+		if (face.FaceNodeCoords.size() < 2) continue; // 跳过无效面
+        
+        /* —— 二次快速剔除：裂缝盒 vs. 面盒 —— */
+
+		if (useAABBFilter && !fractureBox.overlaps(face.boundingBox)) continue; // 如果裂缝包围盒与面包围盒不相交则跳过
+
+		const Vector& A = face.FaceNodeCoords[0]; // 网格面的两个节点坐标
+		const Vector& B = face.FaceNodeCoords[1]; // 网格面的两个节点坐标
+
+		Vector ip; // 存储交点坐标
+
+		if (!lineSegmentIntersection(start, end, A, B, ip)) continue; // 判断裂缝(start→end) 与 面(A→B) 的线段是否相交
+
+        //在裂缝上的归一化位置 param ∈ [0,1]
+		double segLen = (end - start).Mag(); // 计算裂缝总长度用于计算归一化参数
+		double t = (segLen > 1e-8 ? (ip - start).Mag() / segLen : 0.0); // 计算归一化参数，用于后面排序
+		// 如果本 face 上已有一个非常接近的点，就跳过
+		bool dup = false;
+		for (const auto& e : intersections)
+			if (e.edgeID == face.id && (e.point - ip).Mag() < 1e-8)
+			{
+				dup = true;
+				break;
+			}
+		if (dup) continue; // 如果是重复点则跳过
+		// 添加新的交点
+		intersections.emplace_back(-1, ip, face.id, t, false, 0, IntersectionOrigin::FracFace);
+        
+    }
+
+    /* =========================================================
+       2. 起点 / 终点 也要算交点（若尚未包含）
+       =========================================================*/
     bool startIncluded = false, endIncluded = false;
     for (auto& e : intersections)
     {
@@ -86,80 +127,68 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const std::vector<Face>& me
             IntersectionOrigin::FracEnd    // 【新增】来源：裂缝终点
         );   // 终点
 
-    // 3) 按 param 全局升序排序 & 赋临时 ID ---
-    sort(intersections.begin(), intersections.end(),
+    /* =========================================================
+      3. 排序（按 param）并暂编号
+      =========================================================*/
+    std::sort(intersections.begin(), intersections.end(),
         [](const FractureIntersectionPointByMatrixMesh& a, const FractureIntersectionPointByMatrixMesh& b)
         {
             return a.param < b.param;
         });
     for (int i = 0; i < intersections.size(); ++i)
         intersections[i].id = i + 1;
+    /* =========================================================
+   4. 建立 “Cell → 交点” 映射，只保留每个 Cell 最靠前的两个点
+   =========================================================*/
+    std::unordered_map<int, std::vector<FractureIntersectionPointByMatrixMesh>> perCell;
 
-    //4）找到交点对应的Cell并建立映射 ---
-	unordered_map<int, vector<FractureIntersectionPointByMatrixMesh>> perCell; //用于建立 Cell 和交点的映射关系
-    for (auto& ip : intersections)
-    {
+    for (auto& ip : intersections) {
         int cid = -1;
-        // 情况 A：标准面交点
-        if (ip.edgeID >= 1 && ip.edgeID <= (int)meshFaces.size()) 
-        {
-            const Face& f = meshFaces[ip.edgeID - 1];
-            cid = (f.ownerCell >= 0 ? f.ownerCell : f.neighborCell);  //什么情况会取neighbor neighbor是什么
+
+        if (ip.edgeID >= 1 && ip.edgeID <= (int)faces.size()) {
+            // 通过边直接找到宿主 Cell
+            const Face& f = faces[ip.edgeID - 1];
+            cid = (f.ownerCell >= 0 ? f.ownerCell : f.neighborCell);
         }
-        // 情况 B：起点/终点（edgeID == -1），需要几何定位
-        else    
-        {
+        else {
+            // 起点/终点：靠几何定位
             cid = findContainingCell(ip.point, meshCells, meshNodes);
         }
 
-        if (cid >= 0) 
-        {
-            perCell[cid].push_back(ip);
-        }
-        else 
-        {
-            cerr << "[警告] 裂缝交点无法分配宿主 Cell, 点("
-                << ip.point.m_x << "," << ip.point.m_y << ") "
-                << "来自 faceID=" << ip.edgeID << "\n";
+        if (cid >= 0)  perCell[cid].push_back(ip);
+        else {
+            std::cerr << "[Warn] 交点无法匹配 Cell (faceID="
+                << ip.edgeID << ")\n";
         }
     }
 
-    // 5) 每个 Cell 内只保留最前面的两个点  ***用来处理贯穿网格顶点的情况****
-    vector<FractureIntersectionPointByMatrixMesh> filtered;
-    for (auto& kv : perCell)
-    {
-        auto& vecPoints = kv.second;
-        if (vecPoints.empty()) continue;
-        sort(vecPoints.begin(), vecPoints.end(),
+    std::vector<FractureIntersectionPointByMatrixMesh> filtered;
+    for (auto& kv : perCell) {
+        auto& v = kv.second;
+        if (v.empty()) continue;
+        std::sort(v.begin(), v.end(),
             [](auto& a, auto& b) { return a.param < b.param; });
-        int take = std::min(2, (int)vecPoints.size());
-        for (int i = 0; i < take; ++i)
-            filtered.push_back(vecPoints[i]);
+        int take = std::min(2, (int)v.size());
+        filtered.insert(filtered.end(), v.begin(), v.begin() + take);
     }
 
-
-    // --- 6) 用过滤结果更新 intersections，并重新排序与编号 ---
-    intersections = std::move(filtered);
-    sort(intersections.begin(), intersections.end(),
+    /* =========================================================
+       5. 距离过近(<1e-8) 的点再剔除，最终重编号
+       =========================================================*/
+    std::sort(filtered.begin(), filtered.end(),
         [](auto& a, auto& b) { return a.param < b.param; });
 
-    // 再次剔除距离过近（<1e-8）的交点
-    vector<FractureIntersectionPointByMatrixMesh> cleaned;
-    for (const auto& ip : intersections) 
-    {
-        if (!cleaned.empty() &&
-            (ip.point - cleaned.back().point).Mag() < 1e-8) 
-        {
-            continue; // 跳过过近重复点
-        }
+    std::vector<FractureIntersectionPointByMatrixMesh> cleaned;
+    for (const auto& ip : filtered) {
+        if (!cleaned.empty() && (ip.point - cleaned.back().point).Mag() < 1e-8)
+            continue;
         cleaned.push_back(ip);
     }
 
-    // 重编号
     for (int i = 0; i < (int)cleaned.size(); ++i)
         cleaned[i].id = i + 1;
 
-    intersections = move(cleaned);
+    intersections.swap(cleaned);
 }
 /*==根据裂缝交点划分裂缝单元，并计算每个单元的长度（computeSegmentLength）、所属网格单元（findContainingCell）以及平均距离（computeDistanceFromCenter&computeAverageDistanceFromNodes）===*/
 void Fracture::subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
@@ -279,22 +308,14 @@ bool Fracture::pointInTriangle(const Vector& p, const Vector& a, const Vector& b
 /*====判断两线段是否有交点且在两线段内 （lineSegmentIntersection）====*/
 bool Fracture::lineSegmentIntersection(const Vector& p, const Vector& q, const Vector& r, const Vector& s, Vector& ip) 
 {
-    const double tol = 1e-10;
-    //采用AABB包围盒剔除完全不可能相交的情况
-        // 0) === AABB 剔除阶段 ===
-    double min_px = std::min(p.m_x, q.m_x), max_px = std::max(p.m_x, q.m_x);
-    double min_py = std::min(p.m_y, q.m_y), max_py = std::max(p.m_y, q.m_y);
-    double min_rx = std::min(r.m_x, s.m_x), max_rx = std::max(r.m_x, s.m_x);
-    double min_ry = std::min(r.m_y, s.m_y), max_ry = std::max(r.m_y, s.m_y);
-
-    // 如果AABB不相交，立即返回false
-    if (max_px < min_rx || max_rx < min_px ||
-        max_py < min_ry || max_ry < min_py)
-    {
-        return false;
+    if (std::max(p.m_x, q.m_x) < std::min(r.m_x, s.m_x) ||
+        std::min(p.m_x, q.m_x) > std::max(r.m_x, s.m_x) ||
+        std::max(p.m_y, q.m_y) < std::min(r.m_y, s.m_y) ||
+        std::min(p.m_y, q.m_y) > std::max(r.m_y, s.m_y)) {
+        return false; // bounding box 不相交
     }
-
-    // 随后进入精确几何检测阶段--向量叉积法
+    const double tol = 1e-10;
+    // 精确几何检测阶段--向量叉积法
     Vector pq = q - p;
     Vector rs = s - r;
 

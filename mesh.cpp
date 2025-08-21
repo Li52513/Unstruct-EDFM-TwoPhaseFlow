@@ -6,8 +6,10 @@
 #include <set>
 #include <cmath>
 #include "Bound.h"
+#include <unordered_set>
 
 Mesh::Mesh() : gridCount_(0) {}
+
 
 
 void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int ny, int nz, bool usePrism, bool useQuadBase)
@@ -174,7 +176,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                 //cout <<"------编号为"<< cellId<<"的Cell中心点和面积信息--------"  << endl;
                 cell.computeCenterAndVolume(nodesMap_);
                 cells_.push_back(cell);
-                cout << "------------------------------------------------" << endl;
+               // cout << "------------------------------------------------" << endl;
             }
         }
 
@@ -273,7 +275,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         for (int nid : nodeIDs)
             nodeCoords.push_back(nodesMap_[nid].coord); 
 
-        Face face(faceId, nodeIDs, nodeCoords);
+        Face face(faceId, nodeIDs, nodeCoords); //通过调用构造函数自动计算normal和length
         face.ownerCell = entry.second[0];
         face.neighborCell = (entry.second.size() == 2) ? entry.second[1] : -1;  //边界网格的边界面只有倍Owner网格单元包含，所有 faceMap的second只有一个元素
         
@@ -287,7 +289,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
 
         for (int cid : entry.second)
         {
-			int idx = cellId2index_.at(cid); //访问 cellId 对应的局部编号
+			int idx = cellId2index_.at(cid); //访问 cellId 对应的局部编号 这样才能访问全局编号
             cells_[idx].CellFaceIDs.push_back(faceId);
            // cout << "  → Face ID " << faceId << " 被添加到 Cell ID: " << cid << " 中。" << endl;
         }
@@ -302,6 +304,8 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
        cout << "], owner = " << face.ownerCell
             << ", neighbor = " << face.neighborCell << std::endl;
     }*/
+
+	buildFaceBins(); // 构建面 bin
     gmsh::write("UnstructuredMesh-EDFM.msh");
     gmsh::finalize();
 }
@@ -326,6 +330,139 @@ void Mesh::ClassifySolidMatrixCells()
     }
 }
 
+// =========== 计算 (ix,iy) -> 唯一 bin ID  =============
+static inline int computeBinID(int ix, int iy, int binCountY)
+{
+    return ix * binCountY + iy;
+}
+
+void Mesh::buildFaceBins()
+{
+    if (faces_.empty()) return;
+
+    // ---------- 1. 统计整个网格的坐标范围 ----------
+    double minX = std::numeric_limits<double>::max();
+    double minY = std::numeric_limits<double>::max();
+    double maxX = -std::numeric_limits<double>::max();
+    double maxY = -std::numeric_limits<double>::max();
+
+    for (const auto& f : faces_) {
+        minX = std::min(minX, f.boundingBox.min.m_x);
+        minY = std::min(minY, f.boundingBox.min.m_y);
+        maxX = std::max(maxX, f.boundingBox.max.m_x);
+        maxY = std::max(maxY, f.boundingBox.max.m_y);
+    }
+
+    // ---------- 2. 自动计算 bin 数量 ----------
+    int targetFacesPerBin = 70;  //可调范围在5-30，越小精度越高，越大过滤速度越快内存消耗越大
+    int totalFaces = static_cast<int>(faces_.size());
+    int totalBins = std::max(1, totalFaces / targetFacesPerBin);
+    int sqrtBins = static_cast<int>(std::sqrt(totalBins));
+
+    binCountX_ = std::min(std::max(sqrtBins, 10), 100); //clamp上下限 5-200 越小 粗网格测试
+    binCountY_ = std::min(std::max(sqrtBins, 10), 100);
+
+    binSizeX_ = (maxX - minX) / binCountX_;
+    binSizeY_ = (maxY - minY) / binCountY_;
+
+    // ---------- 3. 防护判断 ----------
+    if (binSizeX_ <= 0 || binSizeY_ <= 0) {
+        std::cerr << "[buildFaceBins] 检测到包围盒尺寸异常，终止构建\n";
+        return;
+    }
+
+    faceBins_.clear();
+
+    // ---------- 4. 遍历所有面，把它们放进对应 bin ----------
+    for (const auto& f : faces_) {
+        const AABB& box = f.boundingBox;
+
+        int ix_min = static_cast<int>((box.min.m_x - minX) / binSizeX_);
+        int iy_min = static_cast<int>((box.min.m_y - minY) / binSizeY_);
+        int ix_max = static_cast<int>((box.max.m_x - minX) / binSizeX_);
+        int iy_max = static_cast<int>((box.max.m_y - minY) / binSizeY_);
+
+        ix_min = std::max(0, std::min(binCountX_ - 1, ix_min));
+        iy_min = std::max(0, std::min(binCountY_ - 1, iy_min));
+        ix_max = std::max(0, std::min(binCountX_ - 1, ix_max));
+        iy_max = std::max(0, std::min(binCountY_ - 1, iy_max));
+
+        for (int ix = ix_min; ix <= ix_max; ++ix)
+            for (int iy = iy_min; iy <= iy_max; ++iy) {
+                int binID = computeBinID(ix, iy, binCountY_);
+                faceBins_[binID].push_back(f.id);
+            }
+    }
+
+    // ---------- 5. 日志 ----------
+    std::size_t filledBins = 0;
+    for (const auto& kv : faceBins_) if (!kv.second.empty()) ++filledBins;
+
+    std::cout << "[buildFaceBins] 总面数 = " << faces_.size()
+        << ", Bin 划分 = " << binCountX_ << "×" << binCountY_
+        << ", 平均每 bin 面数 ≈ "
+        << static_cast<double>(faces_.size()) / std::max<std::size_t>(1, filledBins)
+        << std::endl;
+}
+
+
+/*  ============================================================
+ *  Mesh::getCandidateFacesFromBins — 根据查询盒子 (box)
+ *  返回可能与之相交的网格面 ID 列表（去重后）。
+ *  依赖：binCountX_ / binCountY_ / binSizeX_ / binSizeY_
+ *        以及 buildFaceBins() 构建好的 faceBins_。
+ *  ============================================================ */
+std::vector<int> Mesh::getCandidateFacesFromBins(const AABB& box) const
+{
+    std::vector<int> result;
+    if (faceBins_.empty()) return result;
+
+    // ---------- 1. 全局坐标基准（minX, minY） ----------
+    double minX = std::numeric_limits<double>::max();
+    double minY = std::numeric_limits<double>::max();
+    for (const auto& f : faces_) {
+        minX = std::min(minX, f.boundingBox.min.m_x);
+        minY = std::min(minY, f.boundingBox.min.m_y);
+    }
+
+    // ---------- 2. 计算 AABB 所落入的 bin 区间 ----------
+    int ix_min = static_cast<int>((box.min.m_x - minX) / binSizeX_);
+    int iy_min = static_cast<int>((box.min.m_y - minY) / binSizeY_);
+    int ix_max = static_cast<int>((box.max.m_x - minX) / binSizeX_);
+    int iy_max = static_cast<int>((box.max.m_y - minY) / binSizeY_);
+
+    ix_min = std::max(0, std::min(binCountX_ - 1, ix_min));
+    iy_min = std::max(0, std::min(binCountY_ - 1, iy_min));
+    ix_max = std::max(0, std::min(binCountX_ - 1, ix_max));
+    iy_max = std::max(0, std::min(binCountY_ - 1, iy_max));
+
+    // ---------- 3. 预收集候选面 ID（未去重） ----------
+    std::vector<int> rawList;
+    for (int ix = ix_min; ix <= ix_max; ++ix)
+        for (int iy = iy_min; iy <= iy_max; ++iy) {
+            int binID = computeBinID(ix, iy, binCountY_);
+            auto it = faceBins_.find(binID);
+            if (it == faceBins_.end()) continue;
+            rawList.insert(rawList.end(), it->second.begin(), it->second.end());
+        }
+
+    // ---------- 4. 去重 ----------
+    std::sort(rawList.begin(), rawList.end());
+    rawList.erase(std::unique(rawList.begin(), rawList.end()), rawList.end());
+
+    // ---------- 5. 二次过滤：AABB overlap ----------
+    result.reserve(rawList.size());
+    for (int fid : rawList) {
+        const Face& f = faces_[fid - 1];  // ID 从 1 开始
+        if (f.boundingBox.min.m_x <= box.max.m_x && f.boundingBox.max.m_x >= box.min.m_x &&
+            f.boundingBox.min.m_y <= box.max.m_y && f.boundingBox.max.m_y >= box.min.m_y) {
+            result.push_back(fid);
+        }
+    }
+
+    return result;
+}
+
 vector<std::reference_wrapper<const Cell>> Mesh::getInnerCells() const
 {
     vector<std::reference_wrapper<const Cell>> innerCells;
@@ -337,9 +474,9 @@ vector<std::reference_wrapper<const Cell>> Mesh::getInnerCells() const
     return innerCells;
 }
 
-std::vector<std::reference_wrapper<const Cell>> Mesh::getBoundaryCells() const
+vector<std::reference_wrapper<const Cell>> Mesh::getBoundaryCells() const
 {
-	std::vector<std::reference_wrapper<const Cell>> boundaryCells;
+	vector<std::reference_wrapper<const Cell>> boundaryCells;
 	for (const auto& cell : cells_)
 	{
 		if (cell.location == Cell::LocationType::Boundary)
