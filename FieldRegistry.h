@@ -14,13 +14,19 @@ struct FieldRegistry
 {
 	unordered_map<string, shared_ptr<BaseField>> fields; //建立名称到物理场变量的映射
 
-    template<class FieldType, class... Args>
-    shared_ptr<FieldType> create(const string& name, Args&&... args) 
-    {
-        auto f = std::make_shared<FieldType>(name, forward<Args>(args)...);
-        fields[name] = f;
-        return f;
-    }
+template<class FieldType, class... Args>
+shared_ptr<FieldType> create(const string& name, Args&&... args) 
+{
+    // 使用 std::make_shared 创建一个 FieldType 对象
+    auto f = std::make_shared<FieldType>(name, forward<Args>(args)...);
+
+    // 将创建的对象存储到 fields 映射中
+    fields[name] = f;
+
+    // 返回智能指针，供调用者使用
+    return f;
+}
+
 
     template<class FieldType>
     shared_ptr<FieldType> get(const string& name) const {

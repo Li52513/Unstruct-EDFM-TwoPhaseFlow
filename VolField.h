@@ -7,10 +7,6 @@
 using namespace std;
 
 
-
-/// <summary>
-/// ///	基类：物理场变量（如压力、温度、饱和度、速度等）
-/// </summary>
 struct BaseField
 {
 	string name;
@@ -20,10 +16,6 @@ struct BaseField
 	virtual ~BaseField() = default; //虚析构函数
 }; 
 
-/// <summary>
-/// 体积场变量类（如压力、温度、饱和度、速度等）
-/// </summary>
-/// 
 template<typename T>
 struct VolField : BaseField
 {

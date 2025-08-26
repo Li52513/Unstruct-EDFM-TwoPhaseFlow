@@ -43,12 +43,12 @@ public:
 	WaterProperties WaterMaterialProps;
 	CO2Properties   CO2MaterialProps;
 
-    //------------------代求变量信息----------------------//
-    double pressure;                  // 当前压力值（Pa）
-    Vector pressureGradient;          // 存储压力梯度（Pa/m）
-	double temperature;               // 当前温度值（K）
-	double saturation_water;          // 当前水饱和度
-	double saturation_CO2;            // 当前气体饱和度
+ //   //------------------代求变量信息----------------------//
+ //   double pressure;                  // 当前压力值（Pa）
+ //   Vector pressureGradient;          // 存储压力梯度（Pa/m）
+	//double temperature;               // 当前温度值（K）
+	//double saturation_water;          // 当前水饱和度
+	//double saturation_CO2;            // 当前气体饱和度
     
     //------------------裂缝交互信息----------------------//
     vector<int> fractureIDs;          // 与该单元交互的裂缝编号

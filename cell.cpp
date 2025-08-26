@@ -2,7 +2,7 @@
 #include <cmath>
 
 Cell::Cell(int id, const std::vector<int>& nodeIDs)
-	: id(id), CellNodeIDs(nodeIDs), volume(0.0), center(0.0, 0.0, 0.0), sourceTerm(0.0), faceDiscreCoef(0.0), pressure(6.531e7), pressureGradient(0.0, 0.0, 0.0), temperature(597.65), saturation_water(0.8), saturation_CO2(0.2), error(1e-6), SolidMaterialProps(), WaterMaterialProps(), CO2MaterialProps()  // 初始化物性参数
+	: id(id), CellNodeIDs(nodeIDs), volume(0.0), center(0.0, 0.0, 0.0), sourceTerm(0.0), faceDiscreCoef(0.0), /*pressure(6.531e7), pressureGradient(0.0, 0.0, 0.0), temperature(597.65), saturation_water(0.8), saturation_CO2(0.2),*/ error(1e-6), SolidMaterialProps(), WaterMaterialProps(), CO2MaterialProps()  // 初始化物性参数
 {
     // 物性参数通过 materialProps 成员进行初始化
 }
@@ -62,10 +62,6 @@ vector<vector<int>> Cell::getLocalFaces()const
     // 可继续扩展其它多面体类型
     return faces;
 }
-
-
-
-
 
 void Cell::computeCenterAndVolume(const unordered_map<int, Node>& allNodes)
 {
