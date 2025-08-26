@@ -35,9 +35,9 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =100, sectionNumY =100, sectionNumZ = 0;
+    int sectionNumX =1, sectionNumY =1, sectionNumZ =0;
 	bool usePrism = true;       /// true-使用棱柱单元 false-使用四面体单元
-	bool useQuadBase = true;    /// true-是用四边形底面 false -使用三角形底面
+	bool useQuadBase = false;    /// true-是用四边形底面 false -使用三角形底面
     /*----------------------------------------------------------------------*/
 
     /**************************网格设置模块******************************/

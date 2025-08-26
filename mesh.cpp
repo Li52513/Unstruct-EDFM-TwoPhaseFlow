@@ -67,7 +67,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         gmsh::model::geo::mesh::setTransfiniteSurface(surface, "Left", { p1, p2, p3, p4 });
         // 是否将底面四边形转成三角形（生成棱柱或六面体）
         if (useQuadBase)
-            gmsh::model::geo::mesh::setRecombine(0, surface);
+            gmsh::model::geo::mesh::setRecombine(1, surface);
         // 执行挤压，最后一个参数控制是否生成六面体（true）或棱柱（false）
         gmsh::vectorpair surfaceVec = { {2, surface} };
         gmsh::vectorpair outDimTags;
