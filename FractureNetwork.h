@@ -1,5 +1,4 @@
 #pragma once
-#include "Fracture.h"
 #include <vector>
 #include <map>
 #include <set>
@@ -8,6 +7,7 @@
 #include <cstdlib>   // rand, srand
 #include <ctime>     // time
 #include <cmath>     // cos, sin, M_PI
+#include "Fracture.h"
 
 
 class FractureNetwork 

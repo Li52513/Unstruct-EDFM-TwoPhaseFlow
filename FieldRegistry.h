@@ -18,7 +18,7 @@ template<class FieldType, class... Args>
 shared_ptr<FieldType> create(const string& name, Args&&... args) 
 {
     // 使用 std::make_shared 创建一个 FieldType 对象
-    auto f = std::make_shared<FieldType>(name, forward<Args>(args)...);
+    auto f = make_shared<FieldType>(name, forward<Args>(args)...);
 
     // 将创建的对象存储到 fields 映射中
     fields[name] = f;
@@ -36,4 +36,16 @@ shared_ptr<FieldType> create(const string& name, Args&&... args)
     }
 
     bool has(const string& name) const { return fields.count(name) > 0; }
+
+    template<class FieldType, class... Args>
+    shared_ptr<FieldType> getOrCreate(const std::string& name, Args&&... args) {
+        auto it = fields.find(name);
+        if (it != fields.end()) {
+            return dynamic_pointer_cast<FieldType>(it->second);
+        }
+        auto f = make_shared<FieldType>(name, std::forward<Args>(args)...);
+        fields[name] = f;
+        return f;
+    }
 };
+
