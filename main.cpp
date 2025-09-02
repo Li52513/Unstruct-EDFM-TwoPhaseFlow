@@ -88,10 +88,6 @@ int main()
     auto ms10 = std::chrono::duration_cast<std::chrono::milliseconds>(t9 - t8).count();
     std::cout << "FractureDetect in " << ms10 << " ms.\n";
     mgr.ComputeFractureGeometryCouplingCoefficient();
-  
-	//auto t3 = std::chrono::high_resolution_clock::now(); // 计时结束
-	//auto ms1 = std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
-	//std::cout << "FractureNetwork built in " << ms1 << " ms.\n";
 
     /**************************物性参数设置模块******************************/
     /*----------------------------------------------------------------------*/
@@ -126,36 +122,44 @@ int main()
 
 
 	// 4) 主变量场初始化（温度T,水相饱和度Sw,水相压力Pw)
-	FieldRegistry reg_rock; //为基岩场注册器
-	InitFields ic;  // 初始化基岩内部水相压力压力场、温度场和水相饱和度场
-    VGParams vg;    //V-G模型参数
-    RelPermParams rp;  //相对渗透率参数
-	InitDiagnostics diag; // 初始化诊断信息
-	Initializer::createPrimaryFields(mgr.mesh(), reg_rock);  //创建基岩的主变量场  //如何在main函数中对初场的大小进行控制
-	Initializer::fillBaseDistributions(mgr.mesh(), reg_rock, ic); //填充基岩主变量场
-	Initializer::enforceSaturationBounds(reg_rock, vg, diag); //对水相饱和度进行限幅并记录限制修改的次数
-	Initializer::computeClosure(mgr.mesh(), reg_rock, vg, rp, diag); //计算闭合关系包括毛细压力和相对渗透率
+    FieldRegistry reg;      // 基岩场
+    FieldRegistry reg_fr;   // 裂缝场（与你当前实现一致，用同一类型的注册表管理）
+    InitFields ic;          // p0/T0/Sw0 及其梯度（默认为均匀）
+    VGParams vg;            // vG 参数
+    RelPermParams rp;       // 相对渗透率参数（默认 L=0.5）
+    RockDefaults rock;      // 基岩默认热物性
+    InitDiagnostics diag;   // 诊断统计
+    // 5) 基岩“主变量场”创建与填充：p_w, S_w, T (+ p_c, p_g, kr_w, kr_g)
+    Initializer::createPrimaryFields(mgr.mesh(), reg); //创建基岩的主变量场
+    Initializer::fillBaseDistributions(mgr.mesh(), reg, ic); //填充基岩主变量场
+    Initializer::enforceSaturationBounds(reg, vg, diag); //对水相饱和度进行限幅并记录限制修改的次数
+    Initializer::computeClosure(mgr.mesh(), reg, vg, rp, diag); //计算闭合关系包括毛细压力和相对渗透率
 
-    // 5)
-	//Initializer::computerEffectiveThermals(mgr.mesh(), reg_rock, rock, diag); //计算有效热物性参数
+    // 6) 基岩有效热物性（C_eff, lambda_eff）
+    Initializer::computerEffectiveThermals(mgr.mesh(), reg, rock, diag);
 
+    // 7) 裂缝段主变量场：pf_w, Sf_w, Tf（从宿主基岩单元拷贝）
+    Initializer::initFracturePrimaries(mgr.mesh(), mgr.fracture_network(), reg, reg_fr);
 
+    // 8) 基岩/裂缝固相场：由 region/type + (P,T) 通过你的 computeSolidProperties() 得到
+    ppm.InitializeRockMatrixProperties(mgr, reg);
+    ppm.InitializeFractureElementsProperties(mgr, reg_fr);
 
+    // 9) 基岩/裂缝流体物性场：查 WaterPropertyTable / CO2PropertyTable
+    //    - 基岩用 p_w/p_g/T
+    //    - 裂缝用 pf_w/Tf 与 pg_f = pf_w + pc_vG(Sf_w)
+    ppm.InitializeMatrixFluidProperties(mgr, reg, vg);
+    ppm.InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
 
+    // 打印初始化诊断
+    Initializer::printDiag(diag);
 
-
-
-
-
-    //初始化固相、液相和气相参数（基岩和裂缝内：初始温度为303.15K，初始压力为1e6，初始水相饱和度为0.8，初始CO2饱和度为0.2） 目前的初始化温度是通过构造函数初始化的
-    //ppm.InitializeRockMatrixProperties(mgr);
-    //ppm.InitializeFractureElementsProperties(mgr);
-	auto t5 = std::chrono::high_resolution_clock::now(); // 计时结束
-	auto ms2 = std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
-	std::cout << "Physical properties initialized in " << ms2 << " ms.\n";
+    auto t5 = std::chrono::high_resolution_clock::now(); // 计时结束
+    auto ms2 = std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
+    std::cout << "Fields & properties initialized in " << ms2 << " ms.\n";
     /****************** 调试 & 输出 ******************/
     // 打印所有 Cell 和 FractureElement 的当前物性
-    ppm.debugPrintProperties(mgr);
+    ppm.debugPrintProperties(mgr, reg, reg_fr, /*maxPrint=*/10);
     // 导出网格、裂缝信息
     mgr.exportMesh("mesh");
     mgr.exportFractures("fractures");

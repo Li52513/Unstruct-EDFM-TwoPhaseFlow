@@ -241,7 +241,7 @@ template<class FractureNetworkT>
 		for (size_t f = 0; f < frNet.fractures.size(); ++f)
 		{
 			const auto& F = frNet.fractures[f];
-			const size_t base = idx.offsets[f]; //本条裂缝的全局起点
+			const size_t base = idx.offset[f]; //本条裂缝的全局起点
 			for (size_t e = 0; e < F.elements.size(); ++e)
 			{
 				const auto& elem = F.elements[e];

@@ -30,7 +30,7 @@ public:
     void classifyFractureElementsByGeometry(MeshManager& mgr, int fracID, const Vector& regionStart, const Vector& regionEnd, FractureElementType insideType, FractureElementType outsideType);
 
 
-
+	//************固相物性参数初始化与更新************//
     // 1)【初始化】—在开始计算前根据初始的 P 和 T 初始化固相物性
     void InitializeRockMatrixProperties(MeshManager& mgr, FieldRegistry& reg_r);
     void InitializeFractureElementsProperties(MeshManager& mgr, FieldRegistry& reg_fr);
@@ -46,8 +46,25 @@ public:
     //【更新】更新裂缝单元的分类（低/中/高渗透-孔隙）
     void classifyFractureElements(MeshManager& mgr, double permThreshold);
 
-    // 3） 【调试】 打印所有基岩单元和所有裂缝段的物性参数
-    void debugPrintProperties(MeshManager& mgr) const;
+    // 3） 【调试】 打印所有基岩单元和所有裂缝段的物性参数（待更新）
+    void debugPrintProperties(MeshManager& mgr,
+        const FieldRegistry& reg,
+        const FieldRegistry& reg_fr,
+        std::size_t maxPrint = 20) const;
+
+
+	//**************流体物性参数初始化与更新**************//
+
+    void InitializeMatrixFluidProperties(MeshManager& mgr,FieldRegistry& reg,const VGParams& vg);
+	void InitializeFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg);
+
+
+    void UpdateMatrixFluidProperties(MeshManager& mgr,FieldRegistry& reg,const VGParams& vg);
+    void UpdateFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg);
+
+
+
+
 
 
 };

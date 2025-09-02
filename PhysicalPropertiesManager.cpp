@@ -9,6 +9,7 @@
 #include <cassert> // for assert
 #include <algorithm>  // for swap
 #include "Initializer.h"
+#include <iomanip>
 
 
 //-——————————————-——分类———————————————————//
@@ -102,10 +103,6 @@ void PhysicalPropertiesManager::classifyFractureElementsByGeometry(MeshManager& 
 
 }
 
-
-
-
-
 void PhysicalPropertiesManager::classifyRockRegions(MeshManager& mgr, double poroLow, double poroHigh, double permLow, double permHigh)    //输入低渗孔隙率、渗透率阈值&高渗孔隙率、渗透率，现在这个函数功能还不能自适应
 {
 	auto& mesh = mgr.mesh();
@@ -188,6 +185,15 @@ inline void ensureFracPrimaryFields(FieldRegistry& freg, size_t ne)
 	freg.getOrCreate<volScalarField>("Tf", ne, 303.15);
 }
 
+template<class FieldT>
+std::shared_ptr<FieldT>ensureSize(FieldRegistry& reg_fr, const std::string& name, std::size_t n, double defVal)
+{
+	auto f = reg_fr.get<FieldT>(name);
+	if (!f)return reg_fr.getOrCreate<FieldT>(name, n, defVal);
+	if (f->data.size()!= n) f->data.resize(n, defVal);
+	return f;
+}
+
 //Step2:根据单元的区域类型和初始的 P 和 T 计算物性参数，并赋值给场
 void PhysicalPropertiesManager::InitializeRockMatrixProperties(MeshManager& mgr, FieldRegistry& reg)
 {
@@ -207,6 +213,8 @@ void PhysicalPropertiesManager::InitializeRockMatrixProperties(MeshManager& mgr,
 	auto p_w = reg.get<volScalarField>("p_w");
 	auto T = reg.get<volScalarField>("T");
 
+	
+
 	for (const auto& cell : mesh.getCells())
 	{
 		if (cell.id < 0) continue; // 跳过 Ghost Cell
@@ -222,6 +230,7 @@ void PhysicalPropertiesManager::InitializeRockMatrixProperties(MeshManager& mgr,
 		(*rho_r)[i] = sp.rho_s;
 		(*cp_r)[i] = sp.cp_s;
 		(*lambda_r)[i] = sp.k_s;
+		
 	}
 }
 
@@ -279,124 +288,357 @@ void PhysicalPropertiesManager::InitializeFractureElementsProperties(MeshManager
 	}
 }
 
-	//auto& fn = const_cast<FractureNetwork&>(mgr.fracture_network());
-	//auto& waterProps = WaterPropertyTable::instance();
-	//auto& CO2Props = CO2PropertyTable::instance();
-
-	//for (auto& frac : fn.fractures)
-	//{
-	//	for (auto& elem : frac.elements)
-	//	{
-	//		double P = elem.p_fr;
-	//		double T = elem.T_fr;
-	//		elem.solidProps = fracture::computeSolidProperties(elem.type, P, T);
-	//		// … fluid/gas …
-	//		elem.fluidProps = waterProps.getProperties(P, T);
-	//		elem.gasProps = CO2Props.getProperties(P, T);
-	//	}
-	//}
-
-	//
-	//auto& waterTable = WaterPropertyTable::instance();
-	//auto& co2Table = CO2PropertyTable::instance(); //目前采用的SpanWagner方法 ，如果需要采用其他方法，将D:\dataBase_MatrialProperties中其他方法的,txt文件传进去
-
-	//for (auto& cell : mesh.getCells())
-	//{
-	//	if (cell.id < 0) continue;  // 跳过 Ghost Cell
-
-	//	// 取单元自身的初始压力和温度（调用初始化模块后应已赋值）
-	//	double P = cell.pressure;
-	//	double T = cell.temperature;
-
-	//	// 1) 固相：按 cell.region、P、T 计算
-	//	cell.SolidMaterialProps = rock::computeSolidProperties(cell.region, P, T);
-
-	//	// 2) 水相 & CO₂ 相：表格中插值
-	//	cell.WaterMaterialProps = waterTable.getProperties(P, T);  
-	//	cell.CO2MaterialProps = co2Table.getProperties(P, T);	
-//	}
-//}
-
 
 
 //----------------------------------更新----------------------------------------//
 void PhysicalPropertiesManager::UpdateMatrixProperties(MeshManager& mgr, FieldRegistry& reg_r)
 {
 	InitializeRockMatrixProperties(mgr, reg_r);
-	
-	//auto& mesh = mgr.mesh();
-	//// 1）根据当前压力P 和当前温度T 计算基岩和其内部的水相和CO2相物性参数
-	//auto waterProps = WaterPropertyTable::instance();
-	//auto CO2Props = CO2PropertyTable::instance();
-		//for (auto& cell : mesh.getCells())
-	//{
-	//	if (cell.id < 0) continue; // 跳过 Ghost Cell
-		//	double P = cell.pressure;
-	//	double T = cell.temperature;
-		//	cell.SolidMaterialProps = rock::computeSolidProperties(cell.region, P, T);
-	//	// … fluid/gas …
-	//	cell.WaterMaterialProps = waterProps.getProperties(P, T);
-	//	cell.CO2MaterialProps = CO2Props.getProperties(P, T);
-	//}
 }
 
 void PhysicalPropertiesManager::UpdateFractureSolidProperties(MeshManager& mgr, FieldRegistry& reg_fr)
 {
 	InitializeFractureElementsProperties(mgr, reg_fr);
-	//auto waterProps = WaterPropertyTable::instance();
-	//auto CO2Props = CO2PropertyTable::instance();
-	//auto& fn = mgr.fracture_network();
-	//for (auto& frac : fn.fractures) {
-	//	for (auto& elem : frac.elements) 
-	//	{
-	//		double P = elem.p_fr;
-	//		double T = elem.T_fr;
-	//		elem.solidProps = fracture::computeSolidProperties(elem.type, P, T);
-	//		// … fluid/gas …
-	//		elem.fluidProps = waterProps.getProperties(P, T);
-	//		elem.gasProps = CO2Props.getProperties(P, T);
-	//	}
-	//}
 }
 
 //----------------------------------输出&调试----------------------------------------//
-void PhysicalPropertiesManager::debugPrintProperties( MeshManager& mgr) const
-{
-	//// 打印基岩单元
-	//std::cout << "\n=== Rock Matrix Cells Properties ===\n";
-	// auto& mesh = mgr.mesh();
-	//for ( auto& cell : mesh.getCells()) {
-	//	if (cell.id < 0) continue;  // ghost
-	//	std::cout
-	//		<< "Cell " << cell.id
-	//		<< " | region=" << static_cast<int>(cell.region)   //0- Low, 1- Medium, 2- High
-	//		<< " | P=" << cell.pressure
-	//		<< " | T=" << cell.temperature
-	//		<< " | poro=" << cell.SolidMaterialProps.porosity
-	//		<< " | perm=" << cell.SolidMaterialProps.permeability
-	//		<< " | mu_water=" << cell.WaterMaterialProps.mu
-	//		<< " | rho_CO2=" << cell.CO2MaterialProps.rho
-	//		<< "\n";
-	//}
 
-	//// 打印每条裂缝的每个裂缝段
-	//std::cout << "\n=== Fracture Elements Properties ===\n";
-	//const auto& fn = mgr.fracture_network();
-	//for (const auto& frac : fn.fractures) {
-	//	std::cout << "Fracture " << frac.id << ":\n";
-	//	for (const auto& elem : frac.elements) {
-	//		std::cout
-	//			<< "  Elem " << elem.id
-	//			<< " | cell=" << elem.cellID
-	//			<< " | type=" << static_cast<int>(elem.type)    //  //0- Blocking, 1- Conductive
-	//			<< " | P=" << elem.p_fr
-	//			<< " | T=" << elem.T_fr
-	//			<< " | poro=" << elem.solidProps.porosity
-	//			<< " | perm=" << elem.solidProps.permeability
-	//			<< " | mu_water=" << elem.fluidProps.mu
-	//			<< " | rho_CO2=" << elem.gasProps.rho
-	//			<< "\n";
-	//	}
-	//}
-	//std::cout << std::endl;
+// 小工具：安全读取场值（不存在则给默认）
+static inline double getOr(const FieldRegistry& reg,
+	const std::string& name,
+	std::size_t i,
+	double def = std::numeric_limits<double>::quiet_NaN())
+{
+	auto f = reg.get<volScalarField>(name);
+	return f ? (*f)[i] : def;
+}
+
+static inline double getFrOr(const FieldRegistry& reg_fr,
+	const std::string& name,
+	std::size_t g,
+	double def = std::numeric_limits<double>::quiet_NaN())
+{
+	auto f = reg_fr.get<volScalarField>(name);
+	return f ? (*f)[g] : def;
+}
+
+
+
+void PhysicalPropertiesManager::debugPrintProperties(MeshManager& mgr,
+	const FieldRegistry& reg,
+	const FieldRegistry& reg_fr,
+	std::size_t maxPrint) const
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const auto& id2idx = mesh.getCellId2Index();
+
+	std::cout << std::fixed << std::setprecision(6);
+
+	// ===================== 基岩单元 =====================
+	std::cout << "\n=== Matrix Cells (up to " << maxPrint << ") ===\n";
+	std::size_t printed = 0;
+	for (const auto& c : cells) {
+		if (c.id < 0) continue;     // ghost
+		const auto it = id2idx.find(c.id);
+		if (it == id2idx.end()) continue;
+		const std::size_t i = it->second;
+
+		if (printed++ >= maxPrint) { std::cout << "... (truncated)\n"; break; }
+
+		// 主变量
+		double pw = getOr(reg, "p_w", i);
+		double Sw = getOr(reg, "S_w", i);
+		double T = getOr(reg, "T", i);
+		double pc = getOr(reg, "p_c", i);
+		double pg = getOr(reg, "p_g", i);
+		double krw = getOr(reg, "kr_w", i);
+		double krg = getOr(reg, "kr_g", i);
+
+		// 固相（各向异性渗透率用 kxx/kyy/kzz）
+		double phi = getOr(reg, "phi", i);
+		double kxx = getOr(reg, "kxx", i);
+		double kyy = getOr(reg, "kyy", i);
+		double kzz = getOr(reg, "kzz", i);
+		double rho_r = getOr(reg, "rho_r", i);
+		double cp_r = getOr(reg, "cp_r", i);
+		double lam_r = getOr(reg, "lambda_r", i);
+
+		// 流体（水/CO2）
+		double rho_w = getOr(reg, "rho_w", i);
+		double mu_w = getOr(reg, "mu_w", i);
+		double cp_w = getOr(reg, "cp_w", i);
+		double k_w = getOr(reg, "k_w", i);
+
+		double rho_g = getOr(reg, "rho_g", i);
+		double mu_g = getOr(reg, "mu_g", i);
+		double cp_g = getOr(reg, "cp_g", i);
+		double k_g = getOr(reg, "k_g", i);
+
+		// 有效热
+		double Ceff = getOr(reg, "C_eff", i);
+		double lame = getOr(reg, "lambda_eff", i);
+
+		std::cout
+			<< "Cell " << c.id
+			<< " | region=" << static_cast<int>(c.region)
+			<< " | center=(" << c.center.m_x << "," << c.center.m_y << "," << c.center.m_z << ")\n"
+			<< "  Primaries: p_w=" << pw << " Pa, S_w=" << Sw
+			<< ", T=" << T << " K, p_c=" << pc << " Pa, p_g=" << pg
+			<< ", kr_w=" << krw << ", kr_g=" << krg << "\n"
+			<< "  Rock: phi=" << phi
+			<< ", kxx=" << kxx << ", kyy=" << kyy << ", kzz=" << kzz
+			<< ", rho_r=" << rho_r << " kg/m^3"
+			<< ", cp_r=" << cp_r << " J/(kg·K)"
+			<< ", lambda_r=" << lam_r << " W/(m·K)\n"
+			<< "  Fluids-W: rho_w=" << rho_w << " kg/m^3"
+			<< ", mu_w=" << mu_w << " Pa·s"
+			<< ", cp_w=" << cp_w << " J/(kg·K)"
+			<< ", k_w=" << k_w << " W/(m·K)\n"
+			<< "  Fluids-CO2: rho_g=" << rho_g << " kg/m^3"
+			<< ", mu_g=" << mu_g << " Pa·s"
+			<< ", cp_g=" << cp_g << " J/(kg·K)"
+			<< ", k_g=" << k_g << " W/(m·K)\n"
+			<< "  Effective: C_eff=" << Ceff << " J/(m^3·K)"
+			<< ", lambda_eff=" << lame << " W/(m·K)\n";
+	}
+
+	// ===================== 裂缝段 =====================
+	const auto& frNet = mgr.fracture_network();
+	const auto idx = buildFracElemIndex(frNet);
+	std::cout << "\n=== Fracture Elements (total " << idx.total
+		<< ", showing up to " << maxPrint << ") ===\n";
+
+	std::size_t g = 0, printedFr = 0;
+	for (std::size_t f = 0; f < frNet.fractures.size(); ++f) {
+		const auto& F = frNet.fractures[f];
+		for (std::size_t e = 0; e < F.elements.size(); ++e, ++g) {
+			if (printedFr++ >= maxPrint) { std::cout << "... (truncated)\n"; goto DONE_FR; }
+
+			const auto& elem = F.elements[e];
+
+			// 裂缝主变量
+			double pfw = getFrOr(reg_fr, "pf_w", g);
+			double Sfw = getFrOr(reg_fr, "Sf_w", g);
+			double Tf = getFrOr(reg_fr, "Tf", g);
+
+			// 裂缝固相
+			double fr_phi = getFrOr(reg_fr, "fr_phi", g);
+			double fr_kt = getFrOr(reg_fr, "fr_k_t", g);
+			double fr_kn = getFrOr(reg_fr, "fr_k_n", g);
+			double fr_rho = getFrOr(reg_fr, "fr_rho_r", g);
+			double fr_cp = getFrOr(reg_fr, "fr_cp_r", g);
+			double fr_lam = getFrOr(reg_fr, "fr_lambda_r", g);
+			double fr_b = getFrOr(reg_fr, "fr_aperture", g);
+
+			// 裂缝流体
+			double fr_rho_w = getFrOr(reg_fr, "fr_rho_w", g);
+			double fr_mu_w = getFrOr(reg_fr, "fr_mu_w", g);
+			double fr_cp_w = getFrOr(reg_fr, "fr_cp_w", g);
+			double fr_k_w = getFrOr(reg_fr, "fr_k_w", g);
+
+			double fr_rho_g = getFrOr(reg_fr, "fr_rho_g", g);
+			double fr_mu_g = getFrOr(reg_fr, "fr_mu_g", g);
+			double fr_cp_g = getFrOr(reg_fr, "fr_cp_g", g);
+			double fr_k_g = getFrOr(reg_fr, "fr_k_g", g);
+
+			std::cout
+				<< "Frac " << frNet.fractures[f].id
+				<< " | Elem local=" << e << ", global=" << g
+				<< " | hostCell=" << elem.cellID
+				<< " | type=" << static_cast<int>(elem.type) << "\n"
+				<< "  Primaries: pf_w=" << pfw << " Pa, Sf_w=" << Sfw
+				<< ", Tf=" << Tf << " K\n"
+				<< "  Rock(fr): phi=" << fr_phi
+				<< ", k_t=" << fr_kt << ", k_n=" << fr_kn
+				<< ", rho_r=" << fr_rho << " kg/m^3"
+				<< ", cp_r=" << fr_cp << " J/(kg·K)"
+				<< ", lambda_r=" << fr_lam << " W/(m·K)"
+				<< ", aperture=" << fr_b << " m\n"
+				<< "  Fluids(fr)-W: rho_w=" << fr_rho_w << " kg/m^3"
+				<< ", mu_w=" << fr_mu_w << " Pa·s"
+				<< ", cp_w=" << fr_cp_w << " J/(kg·K)"
+				<< ", k_w=" << fr_k_w << " W/(m·K)\n"
+				<< "  Fluids(fr)-CO2: rho_g=" << fr_rho_g << " kg/m^3"
+				<< ", mu_g=" << fr_mu_g << " Pa·s"
+				<< ", cp_g=" << fr_cp_g << " J/(kg·K)"
+				<< ", k_g=" << fr_k_g << " W/(m·K)\n";
+		}
+	}
+DONE_FR:
+	std::cout << std::endl;
+}
+
+
+
+
+//--------------------------流体物性参数赋值----------------------------------------//
+inline void ensureMatrixFluidFields(FieldRegistry& reg, std::size_t n)
+{
+	reg.getOrCreate<volScalarField>("rho_w", n, 1000.0); //水密度，kg/m³
+	reg.getOrCreate<volScalarField>("mu_w", n, 1e-3);    //水粘度，Pa·s
+	reg.getOrCreate<volScalarField>("cp_w", n, 4182.0); //水比热容，J/(kg·K)
+	reg.getOrCreate<volScalarField>("k_w", n, 0.6);   //水导热系数，W/(m·K)
+
+	reg.getOrCreate<volScalarField>("rho_g", n, 1.98);   //CO2密度，kg/m³
+	reg.getOrCreate<volScalarField>("mu_g", n, 1.48e-5); //CO2粘度，Pa·s
+	reg.getOrCreate<volScalarField>("cp_g", n, 846.0);   //CO2比热容，J/(kg·K)
+	reg.getOrCreate<volScalarField>("k_g", n, 0.0146); //CO2导热系数，W/(m·K)
+}
+
+inline void ensureFractureFluidFields(FieldRegistry& reg_fr, std::size_t ne)
+{
+	reg_fr.getOrCreate<volScalarField>("fr_rho_w", ne, 1000.0); //水密度，kg/m³
+	reg_fr.getOrCreate<volScalarField>("fr_mu_w", ne, 1e-3);    //水粘度，Pa·s
+	reg_fr.getOrCreate<volScalarField>("fr_cp_w", ne, 4182.0); //水比热容，J/(kg·K)
+	reg_fr.getOrCreate<volScalarField>("fr_k_w", ne, 0.6);   //水导热系数，W/(m·K)
+	reg_fr.getOrCreate<volScalarField>("fr_rho_g", ne, 1.98);   //CO2密度，kg/m³
+	reg_fr.getOrCreate<volScalarField>("fr_mu_g", ne, 1.48e-5); //CO2粘度，Pa·s
+	reg_fr.getOrCreate<volScalarField>("fr_cp_g", ne, 846.0);   //CO2比热容，J/(kg·K)
+	reg_fr.getOrCreate<volScalarField>("fr_k_g", ne, 0.0146); //CO2导热系数，W/(m·K)
+}
+
+void PhysicalPropertiesManager::InitializeMatrixFluidProperties(MeshManager& mgr, FieldRegistry& reg, const VGParams& vg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+
+	ensureMatrixFluidFields(reg, n); //确保基岩流体物性参数场存在，若不存在则创建并赋默认值
+
+	//获取主变量场指针
+	auto p_w = reg.get<volScalarField>("p_w");
+	auto p_g = reg.get<volScalarField>("p_g");
+	auto T = reg.get<volScalarField>("T");
+
+	//获取物性场指针
+	auto rho_wF = reg.get<volScalarField>("rho_w");
+	auto mu_wF = reg.get<volScalarField>("mu_w");
+	auto cp_wF = reg.get<volScalarField>("cp_w");
+	auto k_wF = reg.get<volScalarField>("k_w");
+
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto mu_gF = reg.get<volScalarField>("mu_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+
+	auto wt = WaterPropertyTable::instance();
+	auto gt = CO2PropertyTable::instance();
+
+	std::size_t oor = 0, ghost = 0;
+
+	for (const auto& c : cells)
+	{
+		if (c.id < 0) { ++ghost; continue; } // 跳过 Ghost Cell
+
+		const std::size_t i = mesh.getCellId2Index().at(c.id); //获取网格单元的内部下标
+		double pw = (*p_w)[i], pg = (*p_g)[i], Tf = (*T)[i];
+		Initializer::clampPT(pw, Tf); Initializer::clampPT(pg, Tf);
+
+		double rho_w = 1000, mu_w = 1e-3, cp_w = 4200, k_w = 0.6;
+		double rho_g = 600, mu_g = 1e-4, cp_g = 850, k_g = 0.08;
+
+		try {
+			const auto W = wt.getProperties(pw, Tf);
+			rho_w = W.rho; mu_w = W.mu; cp_w = W.cp; k_w = W.k;
+		}
+		catch (...) { ++oor; }
+
+		try {
+			const auto G = gt.getProperties(pg, Tf);
+			rho_g = G.rho; mu_g = G.mu; cp_g = G.cp; k_g = G.k;
+		}
+		catch (...) { ++oor; }
+
+		(*rho_wF)[i] = rho_w; (*mu_wF)[i] = mu_w; (*cp_wF)[i] = cp_w; (*k_wF)[i] = k_w;
+		(*rho_gF)[i] = rho_g; (*mu_gF)[i] = mu_g; (*cp_gF)[i] = cp_g; (*k_gF)[i] = k_g;
+
+		if (ghost) std::cout << "[PPM] InitializeMatrixFluidProperties: skipped ghost cells = " << ghost << "\n";
+		if (oor)   std::cout << "[PPM] InitializeMatrixFluidProperties: property-table OOR hits = " << oor << "\n";
+	}
+ 
+}
+
+void PhysicalPropertiesManager::UpdateMatrixFluidProperties(MeshManager& mgr, FieldRegistry& reg, const VGParams& vg)
+{
+	InitializeMatrixFluidProperties(mgr, reg, vg);
+}
+
+
+// ======================= 裂缝：初始化/更新 流体物性场 =======================//
+
+void  PhysicalPropertiesManager:: InitializeFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg)
+{
+	const auto& fr_Net = mgr.fracture_network(); // 取出裂缝网络
+	const auto idx = buildFracElemIndex(fr_Net); // 调用裂缝段索引
+	const size_t ne = idx.total; // 裂缝段总数
+	if (!ne) {
+		std::cout << "[PPM] No fracture elements. Skip InitializeFractureFluidProperties.\n";
+		return;
+	}
+
+	// 获取裂缝主变量场（先前由 Initializer::initFracturePrimaries 写好）
+	auto pf_w = ensureSize<volScalarField>(reg_fr, "pf_w", ne, 1.0e6);
+	auto Sf_w = ensureSize<volScalarField>(reg_fr, "Sf_w", ne, 0.90);
+	auto Tf = ensureSize<volScalarField>(reg_fr, "Tf", ne, 303.15);
+
+	// 获取裂缝流体物性场
+	ensureFractureFluidFields(reg_fr, ne);
+	auto fr_rho_w = reg_fr.get<volScalarField>("fr_rho_w");
+	auto fr_mu_w = reg_fr.get<volScalarField>("fr_mu_w");
+	auto fr_cp_w = reg_fr.get<volScalarField>("fr_cp_w");
+	auto fr_k_w = reg_fr.get<volScalarField>("fr_k_w");
+
+	auto fr_rho_g = reg_fr.get<volScalarField>("fr_rho_g");
+	auto fr_mu_g = reg_fr.get<volScalarField>("fr_mu_g");
+	auto fr_cp_g = reg_fr.get<volScalarField>("fr_cp_g");
+	auto fr_k_g = reg_fr.get<volScalarField>("fr_k_g");
+
+	auto wt = WaterPropertyTable::instance();
+	auto gt = CO2PropertyTable::instance();
+
+	std::size_t oor = 0;
+
+	for (size_t f = 0; f < fr_Net.fractures.size(); ++f)
+	{
+		const auto& F = fr_Net.fractures[f];
+		const size_t base = idx.offset[f]; //本条裂缝的全局起点
+		for (std::size_t e = 0; e < F.elements.size(); ++e)
+		{
+			const size_t g = base + e; //裂缝段全局索引
+
+			double pw = (*pf_w)[g];
+			double T = (*Tf)[g];
+
+			// fracture gas pressure：用 vG 由 Sf_w → pc_f，再 pg_f = pw + pc_f
+			const double pc_f = pc_vG((*Sf_w)[g], vg);
+			double pg = pw + pc_f;
+
+			Initializer::clampPT(pw, T); Initializer::clampPT(pg, T);
+
+			double rho_w = 1000, mu_w = 1e-3, cp_w = 4200, k_w = 0.6;
+			double rho_g = 600, mu_g = 1e-4, cp_g = 850, k_g = 0.08;
+
+			try {
+				const auto W = wt.getProperties(pw, T);
+				rho_w = W.rho; mu_w = W.mu; cp_w = W.cp; k_w = W.k;
+			}
+			catch (...) { ++oor; }
+
+			try {
+				const auto G = gt.getProperties(pg, T);
+				rho_g = G.rho; mu_g = G.mu; cp_g = G.cp; k_g = G.k;
+			}
+			catch (...) { ++oor; }
+			(*fr_rho_w)[g] = rho_w; (*fr_mu_w)[g] = mu_w; (*fr_cp_w)[g] = cp_w; (*fr_k_w)[g] = k_w;
+			(*fr_rho_g)[g] = rho_g; (*fr_mu_g)[g] = mu_g; (*fr_cp_g)[g] = cp_g; (*fr_k_g)[g] = k_g;
+		}
+		if (oor) std::cout << "[PPM] InitializeFractureFluidProperties: property-table OOR hits = " << oor << "\n";
+	}
+	
+}
+
+void  PhysicalPropertiesManager::UpdateFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg)
+{
+	InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
 }
