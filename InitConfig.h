@@ -41,7 +41,7 @@ struct RockDefaults  //当前已经进行了分区处理
 struct InitFields
 {
 	//基础场：uniform+线性梯度（可都为0）
-	double p0 = 1e6; //基岩内部初始水相压力，单位 Pa
+	double p0 = 5e6; //基岩内部初始水相压力，单位 Pa
 	double dpdx = 0.0; //基岩压力梯度，单位 Pa/m
 	double dpdy = 0.0; //基岩压力梯度，单位 Pa/m
 	double dpdz = 0.0; //基岩压力梯度，单位 Pa/m

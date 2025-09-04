@@ -135,9 +135,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
     for (size_t i = 0; i < nodeTags.size(); i++)
     {
 		int id = static_cast<int>(nodeTags[i]); // 获取节点编号
-		//cout << "Node ID = " << id << endl;
-        Vector coord(nodeCoords[3 * i], nodeCoords[3 * i + 1], nodeCoords[3 * i + 2]);
-		//cout << "Node Coord = (" << coord.m_x << ", " << coord.m_y << ", " << coord.m_z << ")" << endl;
+		Vector coord(nodeCoords[3 * i], nodeCoords[3 * i + 1], nodeCoords[3 * i + 2]);
         nodes_.emplace_back(id, coord);        // 括号法定义，添加到节点列表
         nodesMap_[id] = Node(id, coord);        // 建立映射关系
     }

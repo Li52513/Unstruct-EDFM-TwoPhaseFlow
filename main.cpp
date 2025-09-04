@@ -36,7 +36,7 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =1, sectionNumY =1, sectionNumZ =0;
+    int sectionNumX =4, sectionNumY =4, sectionNumZ =0;
 	bool usePrism = true;       /// true-使用棱柱单元 false-使用四面体单元
 	bool useQuadBase = false;    /// true-是用四边形底面 false -使用三角形底面
     /*----------------------------------------------------------------------*/
@@ -70,18 +70,18 @@ int main()
   */
 	auto t2 = std::chrono::high_resolution_clock::now(); // 计时开始
 
-	mgr.setDFNRandomSeed(12345); // 设置随机种子
-	mgr.generateDFN
-	(
-		/*N=*/100,
-		/*minPoint=*/{ 0.0,0.0,0.0 },
-		/*maxPoint=*/{ 1.0,1.0,0.0 },
-		/*Lmin=*/0.5,
-		/*Lmax=*/1.4,
-		/*alpha=*/0,
-		/*kappa=*/0,
-		/*avoidOverlap=*/true
-	);
+	//mgr.setDFNRandomSeed(12345); // 设置随机种子
+	//mgr.generateDFN
+	//(
+	//	/*N=*/100,
+	//	/*minPoint=*/{ 0.0,0.0,0.0 },
+	//	/*maxPoint=*/{ 1.0,1.0,0.0 },
+	//	/*Lmin=*/0.5,
+	//	/*Lmax=*/1.4,
+	//	/*alpha=*/0,
+	//	/*kappa=*/0,
+	//	/*avoidOverlap=*/true
+	//);
     auto t8 = std::chrono::high_resolution_clock::now();
     mgr.DetectAndSubdivideFractures();
     auto t9 = std::chrono::high_resolution_clock::now(); // 计时结束
