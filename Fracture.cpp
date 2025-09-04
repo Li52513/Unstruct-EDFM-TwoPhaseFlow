@@ -270,12 +270,12 @@ void Fracture::computeGeometryCouplingCoefficientgeomCIandgeomAlpha()
     {
         //基岩网格各端点到裂缝段的平均距离d 
         double d = max(elem.avgDistance, eps_d);
-        // 横截面积 = 段长 * 裂缝开度
-        double A_fr = elem.length * elem.aperture;
+        // 横截面积 = 段长 * 裂缝厚度（2D 为1）
+        double A_fr = elem.length * 1;  //Note: 2D中 此时为1m 
         // geomCI: 纯几何耦合  CI = Af/d  ref:Modeling study of the thermal-hydraulic-mechanical coupling process for EGS based on the framework of EDFM and XFEM
         elem.geomCI = A_fr / d;
-		// geomAlpha: 纯几何 α  alpha= 2·Af / L ref:Modeling study of the thermal-hydraulic-mechanical coupling process for EGS based on the framework of EDFM and XFEM
-        elem.geomAlpha = 2.0 * elem.aperture / elem.length;
+		// geomAlpha: 纯几何 α  alpha= 2/ L ref:Modeling study of the thermal-hydraulic-mechanical coupling process for EGS based on the framework of EDFM and XFEM
+        elem.geomAlpha = 2.0 / elem.length;
     }
 }
 

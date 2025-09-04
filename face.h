@@ -54,6 +54,13 @@ public:
         NormalVectorCorrectionMethod method = NormalVectorCorrectionMethod::MinimumCorrection
     );
 
+    void computeFaceVectorsBoundary(
+        const Vector& Cp,
+        NormalVectorCorrectionMethod method = NormalVectorCorrectionMethod::OrthogonalCorrection
+    );
+
+
+
 
 private:
     void computeGeometry();  // 根据维度自动计算几何属性（中点、法向量、长度或面积）

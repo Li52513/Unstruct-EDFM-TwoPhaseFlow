@@ -117,3 +117,31 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     // 4) 非正交分量
     vectorT = Aj - vectorE;
 }
+
+
+/**
+ * @brief 处理边界面时的分解 A_j = E_j + T_j
+ *
+ * @param Cp      ownerCell 的重心坐标
+ * @param method  选择三种校正策略之一（目前未使用）
+ * 边界面没邻居中心坐标 Cn，但做 E/T 分解只需面法向和模长即可
+ * 用 rPF 保证 normal 始终朝外，避免节点序反向导致的“内法向”。
+ */
+void Face::computeFaceVectorsBoundary(const Vector& Cp,
+    NormalVectorCorrectionMethod /*method*/)
+{
+    // 1) 依据 owner中心 -> 面心 的向量与当前 normal 的夹角，修正法向指向外侧
+    Vector rPF = midpoint - Cp;                 // owner中心 -> 面心
+    double sgn = (normal * rPF) >= 0.0 ? 1.0 : -1.0;
+    Vector nhat = normal * sgn;                 // 外法向（单位向量）
+
+    // 2) 面积矢量 A = |A| * n_hat；2D 情况下 |A| = 边长 length
+    Vector Aj = nhat * length;
+
+    // 3) 边界面分解：取正交主分量，非正交分量置零（T=0）
+    vectorE = Aj;                               // = |A| n_hat
+    vectorT = Vector(0.0, 0.0, 0.0);
+
+    // 4) 给 ownerToNeighbor 一个有意义的单位方向（外法向），便于后续使用
+    ownerToNeighbor = nhat;
+}

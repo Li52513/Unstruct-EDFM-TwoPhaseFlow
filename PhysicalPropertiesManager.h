@@ -63,6 +63,9 @@ public:
     void UpdateFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg);
 
 
+    void MatrixFluidPropertiesTest(const double& T, const double& P);
+
+
 
 
 

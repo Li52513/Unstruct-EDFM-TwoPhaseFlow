@@ -16,7 +16,6 @@ void MeshManager::BuildSolidMatrixGrid(NormalVectorCorrectionMethod corr)
     mesh_.BuildMesh(lx_, ly_, lz_, nx_, ny_, nz_, usePrism_, useQuadBase_);
     mesh_.ClassifySolidMatrixCells();
     BoundaryClassify::ClassifySolidMatrixMeshBoundaryFaces(mesh_, lx_, ly_);
-    //mesh_.CreateSolidMatrixGhostCells();
     mesh_.ComputeSolidMatrixMeshFaceGeometricInfor(corr);
 }
 
@@ -34,7 +33,7 @@ void MeshManager::DetectAndSubdivideFractures()
     int totalFaces = mesh_.getFaces().size();
     int totalCandidates = 0;
 
-	// 2) 然后找裂缝–网格面的交点
+	// 2) 然后找裂缝–网格面的交点  可以选取AABB加速算法
     for (auto& F : frNet_.fractures)
     {
 		if (useAABBAcceleration)
@@ -68,7 +67,7 @@ void MeshManager::DetectAndSubdivideFractures()
     for (auto& F : frNet_.fractures)
     {
         F.sortAndRenumberIntersections();
-        F.subdivide(mesh_.getCells(), mesh_.getNodesMap());
+        F.subdivide(mesh_.getCells(), mesh_.getNodesMap(),true);
     }
 }
 

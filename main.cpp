@@ -27,6 +27,7 @@
 #include "MeshManager.h"
 #include "PhysicalPropertiesManager.h"
 #include "Initializer.h"
+#include "PostProcessor.h"
 
 
 
@@ -36,7 +37,7 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =4, sectionNumY =4, sectionNumZ =0;
+    int sectionNumX =5, sectionNumY =5, sectionNumZ =0;
 	bool usePrism = true;       /// true-使用棱柱单元 false-使用四面体单元
 	bool useQuadBase = false;    /// true-是用四边形底面 false -使用三角形底面
     /*----------------------------------------------------------------------*/
@@ -73,7 +74,7 @@ int main()
 	//mgr.setDFNRandomSeed(12345); // 设置随机种子
 	//mgr.generateDFN
 	//(
-	//	/*N=*/100,
+	//	/*N=*/2,
 	//	/*minPoint=*/{ 0.0,0.0,0.0 },
 	//	/*maxPoint=*/{ 1.0,1.0,0.0 },
 	//	/*Lmin=*/0.5,
@@ -87,7 +88,7 @@ int main()
     auto t9 = std::chrono::high_resolution_clock::now(); // 计时结束
     auto ms10 = std::chrono::duration_cast<std::chrono::milliseconds>(t9 - t8).count();
     std::cout << "FractureDetect in " << ms10 << " ms.\n";
-    mgr.ComputeFractureGeometryCouplingCoefficient();
+	mgr.ComputeFractureGeometryCouplingCoefficient();   //明确一点： 因为这里还没有给出物性参数，这里计算的只是几何耦合系数 CI_geo和 geomAlpha 各自的表达式分别为：CI_geo = L*1/d_avg geomAlpha = 2 / L;
 
     /**************************物性参数设置模块******************************/
     /*----------------------------------------------------------------------*/
@@ -130,10 +131,18 @@ int main()
     RockDefaults rock;      // 基岩默认热物性
     InitDiagnostics diag;   // 诊断统计
     // 5) 基岩“主变量场”创建与填充：p_w, S_w, T (+ p_c, p_g, kr_w, kr_g)
-    Initializer::createPrimaryFields(mgr.mesh(), reg); //创建基岩的主变量场
-    Initializer::fillBaseDistributions(mgr.mesh(), reg, ic); //填充基岩主变量场
-    Initializer::enforceSaturationBounds(reg, vg, diag); //对水相饱和度进行限幅并记录限制修改的次数
-    Initializer::computeClosure(mgr.mesh(), reg, vg, rp, diag); //计算闭合关系包括毛细压力和相对渗透率
+
+    //创建基岩的主变量场
+    Initializer::createPrimaryFields(mgr.mesh(), reg); 
+
+    //填充基岩主变量场
+    Initializer::fillBaseDistributions(mgr.mesh(), reg, ic); 
+
+    //对水相饱和度进行限幅并记录限制修改的次数
+    Initializer::enforceSaturationBounds(reg, vg, diag); 
+
+    //计算闭合关系包括毛细压力和相对渗透率
+    Initializer::computeClosure(mgr.mesh(), reg, vg, rp, diag);
 
     // 6) 基岩有效热物性（C_eff, lambda_eff）
     Initializer::computerEffectiveThermals(mgr.mesh(), reg, rock, diag);
@@ -148,6 +157,12 @@ int main()
     // 9) 基岩/裂缝流体物性场：查 WaterPropertyTable / CO2PropertyTable
     //    - 基岩用 p_w/p_g/T
     //    - 裂缝用 pf_w/Tf 与 pg_f = pf_w + pc_vG(Sf_w)
+
+	ppm.MatrixFluidPropertiesTest(315.54930556, 5027664.1668); // 测试水和 CO2 物性表
+
+
+
+
     ppm.InitializeMatrixFluidProperties(mgr, reg, vg);
     ppm.InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
 
@@ -166,6 +181,34 @@ int main()
     mgr.printFractureInfo();
 	mgr.printCISourceTerms();
     cout << "Finished initial setup and property assignment.\n";
+
+    // —— 关键：导出 t=0、step=0 的场，用于初始时刻可视化 ——
+    const double time0 = 0.0;
+    const int    step0 = 0;
+
+    PostProcessor outM("out\\matrix");
+    PostProcessor outF("out\\fracture");
+
+    // 可选自检：确保裂缝三大主变量长度与全局段数一致
+    {
+        size_t Nseg = 0; for (auto& F : mgr.fracture_network().fractures) Nseg += F.elements.size();
+        auto pf = reg_fr.get<volScalarField>("pf_w");
+        auto sf = reg_fr.get<volScalarField>("Sf_w");
+        auto Tf = reg_fr.get<volScalarField>("Tf");
+        std::cout << "[fracture] Nseg=" << Nseg
+            << " pf_w=" << (pf ? pf->data.size() : 0)
+            << " Sf_w=" << (sf ? sf->data.size() : 0)
+            << " Tf=" << (Tf ? Tf->data.size() : 0) << "\n";
+    }
+
+    // 分开导出：矩阵 / 裂缝
+    outM.exportMatrixValue(mgr.mesh(), reg, time0, step0);
+    outF.exportFractureValue(mgr.mesh(), mgr.fracture_network(), reg_fr, time0, step0);
+
+    std::cout << "Finished initial setup and wrote t=0 state for MATLAB.\n";
+    return 0;
+
+
     return 0; 
 
     //
@@ -285,3 +328,5 @@ int main()
  //   fractureNetwork.printFractureInfo();
  //    ==========6. 可视化裂缝信息 ==========
  //   fractureNetwork.exportToTxt("fracture_network");
+
+

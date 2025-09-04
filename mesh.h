@@ -23,14 +23,14 @@ public:
 
 	//==============基岩网格空间划分函数声明=================//
 	void buildFaceBins(); // 构建面空间划分
-	vector<int>getCandidateFacesFromBins(const AABB& box) const;
+	
+    vector<int>getCandidateFacesFromBins(const AABB& box) const;
 
     
 	int getGridCount() const { return gridCount_; } // 获取网格总数
 
     vector<reference_wrapper<const Cell>> getInnerCells() const;
     vector<reference_wrapper<const Cell>> getBoundaryCells() const;
-	int getGhostStartIndex() const { return ghostStartIndex_; } // 获取 Ghost Cell 起始索引   
     
     //------------------其他接口------------------------------//
     double getCellArea(int cellID)  const;
@@ -44,8 +44,6 @@ public:
     void ComputeSolidMatrixMeshFaceGeometricInfor(NormalVectorCorrectionMethod method);   
    
     // （可选）Dirichlet 边界压力  //待优化
-    void CreateSolidMatrixGhostCells();    // 新增：生成 Ghost Cell
-    void exportGhostInfo(const std::string& prefix) const;
 
 private:
     vector<Node> nodes_;
@@ -54,15 +52,14 @@ private:
     unordered_map<int, Node> nodesMap_;
     unordered_map<int, int> cellId2index_;
 
-	int binCountX_; // X 方向网格划分数
-	int binCountY_; // Y 方向网格划分数
-    double binSizeX_;   // X 方向实际 bin 宽度
-    double binSizeY_;   // Y 方向实际 bin 高度
+	int binCountX_=0; // X 方向网格划分数
+	int binCountY_ = 0; // Y 方向网格划分数
+    double binSizeX_ = 0;   // X 方向实际 bin 宽度
+    double binSizeY_ = 0;   // Y 方向实际 bin 高度
 
 	unordered_map<int, vector<int>> faceBins_; // 面空间划分的 bin
  
 	int gridCount_ = 0; // 网格总数
-    int ghostStartIndex_ = 0;
 
 };
 

@@ -642,3 +642,36 @@ void  PhysicalPropertiesManager::UpdateFractureFluidProperties(MeshManager& mgr,
 {
 	InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
 }
+
+
+void PhysicalPropertiesManager:: MatrixFluidPropertiesTest(const double& T, const double& P)
+{
+	auto wt = WaterPropertyTable::instance();
+	auto gt = CO2PropertyTable::instance();
+
+	try {
+		const auto W = wt.getProperties(P, T);
+		std::cout << "Water @ " << P << " Pa, " << T << " K: "
+			<< " rho=" << W.rho << " kg/m^3"
+			<< ", mu=" << W.mu << " Pa·s"
+			<< ", cp=" << W.cp << " J/(kg·K)"
+			<< ", k=" << W.k << " W/(m·K)\n";
+	}
+	catch (...) {
+		std::cout << "[Error] WaterPropertyTable: OOR for P=" << P << " Pa, T=" << T << " K\n";
+	}
+
+	try {
+		const auto G = gt.getProperties(P, T);
+		std::cout << "CO2 @ " << P << " Pa, " << T << " K: "
+			<< " rho=" << G.rho << " kg/m^3"
+			<< ", mu=" << G.mu << " Pa·s"
+			<< ", cp=" << G.cp << " J/(kg·K)"
+			<< ", k=" << G.k << " W/(m·K)\n";
+
+
+	}
+	catch (...) {
+		std::cout << "[Error] CO2PropertyTable: OOR for P=" << P << " Pa, T=" << T << " K\n";
+	}
+}
