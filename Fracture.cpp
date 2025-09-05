@@ -15,6 +15,77 @@ Fracture::Fracture(const Vector& s, const Vector& e)
 
 }
 
+// ====== 小工具：2D 叉积z分量、三角形面积与重心、多边形重心 ======
+static inline double cross2D(const Vector& a, const Vector& b) {
+    return a.m_x * b.m_y - a.m_y * b.m_x;
+}
+
+static inline double triArea(const Vector& A, const Vector& B, const Vector& C) {
+    return 0.5 * std::abs(cross2D(B - A, C - A));
+}
+
+static inline Vector triCentroid(const Vector& A, const Vector& B, const Vector& C) {
+    return (A + B + C) / 3.0;
+}
+
+//这是在计算多边形的重心
+static inline Vector polygonCentroid(const std::vector<Vector>& P, double& areaAbs) {
+    const size_t n = P.size();
+    double A2 = 0.0, Cx = 0.0, Cy = 0.0; // A2=2*Area(with sign)
+    for (size_t i = 0; i < n; ++i) {
+        const auto& p = P[i];
+        const auto& q = P[(i + 1) % n];
+        double cr = p.m_x * q.m_y - q.m_x * p.m_y;
+        A2 += cr; Cx += (p.m_x + q.m_x) * cr; Cy += (p.m_y + q.m_y) * cr;
+    }
+    double A = 0.5 * A2; areaAbs = std::abs(A);
+    if (std::abs(A) < 1e-16) { // 退化：用顶点均值
+        double mx = 0, my = 0;
+        for (auto& p : P) { mx += p.m_x; my += p.m_y; }
+        return Vector{ mx / n, my / n, 0.0 };
+    }
+    return Vector{ Cx / (3.0 * A2), Cy / (3.0 * A2), 0.0 };
+}
+
+double Fracture::computeAreaWeightedDistance(const Cell& cell,
+    const std::unordered_map<int, Node>& meshNodes,
+    const Vector& segStart, const Vector& segEnd)
+{
+    // 取多边形顶点（按 cell 拓扑顺序）
+    std::vector<Vector> poly;
+    poly.reserve(cell.CellNodeIDs.size());
+    for (int nid : cell.CellNodeIDs) poly.push_back(meshNodes.at(nid).coord);
+
+    if (poly.size() < 3) {
+        // 极端/退化：回退到中心距离
+        return pointToSegmentDistance(cell.center, segStart, segEnd);
+    }
+
+    double polyArea = 0.0;
+	Vector C = polygonCentroid(poly, polyArea); // 多边形重心
+
+    double sum = 0.0, sumA = 0.0;
+    const size_t n = poly.size();
+    for (size_t i = 0; i < n; ++i) {
+        const Vector& A = poly[i];
+        const Vector& B = poly[(i + 1) % n];
+        double Ai = triArea(C, A, B);
+        if (Ai <= 0) continue;
+        Vector Gi = triCentroid(C, A, B);
+        double di = pointToSegmentDistance(Gi, segStart, segEnd);
+        sum += di * Ai;
+        sumA += Ai;
+    }
+
+    if (sumA <= 0) {
+        // 再次回退
+        return pointToSegmentDistance(cell.center, segStart, segEnd);
+    }
+    return sum / sumA;
+}
+
+
+
 void Fracture::computeAABB()
 {
     Vector minCoord, maxCoord;
@@ -191,67 +262,149 @@ void Fracture::DetectFracturetoMeshFaceIntersections(const Mesh& mesh,const vect
     intersections.swap(cleaned);
 }
 /*==根据裂缝交点划分裂缝单元，并计算每个单元的长度（computeSegmentLength）、所属网格单元（findContainingCell）以及平均距离（computeDistanceFromCenter&computeAverageDistanceFromNodes）===*/
-void Fracture::subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
+//void Fracture::subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance)   //useCenterDistance 默认采用computeAverageDistanceFromNodes 如果给定true 则采用computeDistanceFromCenter计算
+//{
+//    elements.clear();
+//    constexpr double tolLen = 1e-10;     // 段长阈值
+//    constexpr double tolPoint = 1e-8;    // 判断中点在三角形内部时的容差
+//
+//    for (int i = 0; i + 1 < (int)intersections.size(); ++i)
+//    {
+//        const auto& I0 = intersections[i];
+//        const auto& I1 = intersections[i + 1];
+//       
+//        Vector P0 = I0.point, P1 = I1.point;
+//        double segLen = computeSegmentLength(P0, P1);
+//
+//		if (segLen < tolLen)
+//		{
+//            cerr << "Warning: Zero-length fracture segment detected, "
+//                "check duplicate intersection points." <<"point is:"<<"("<< P0.m_x<<","<< P0.m_y<<")" << endl;
+//			continue;   // 跳过该段，防止除零
+//		}
+//
+//        Vector mid = computeMidpoint(P0, P1);
+//        int associatedCellID = findContainingCell(mid, meshCells, meshNodes);
+//        if (associatedCellID < 0) 
+//        {
+//            std::cerr << "[提示] 裂缝段 param=["
+//                << I0.param << "," << I1.param
+//                << "] 与任何单元不匹配，可能与网格面平行或擦肩而过，已跳过\n";
+//            continue;
+//        }
+//
+//        double avgDist = -1;
+//        if (associatedCellID != -1)
+//        {
+//            for (const auto& cell : meshCells)
+//            {
+//                if (cell.id == associatedCellID)
+//                {
+//                    avgDist = useCenterDistance
+//                        ? computeDistanceFromCenter(cell, P0, P1)
+//                        : computeAverageDistanceFromNodes(cell, meshNodes, P0, P1);
+//                    break;
+//                }
+//            }
+//        }
+//        else
+//        {
+//            cerr << "Warning: Midpoint of segment " << i + 1 << " not inside any cell." << std::endl;
+//            avgDist = -1.0;
+//        }
+//        int newElemId = static_cast<int>(elements.size()) + 1;
+//        FractureElement elem(newElemId, associatedCellID, segLen, avgDist);
+//        elem.param0 = I0.param;
+//        elem.param1 = I1.param;
+//        elem.isFFatStart = I0.isFF;
+//        elem.isFFatEnd = I1.isFF;
+//        elem.gIDstart = I0.globalFFID;
+//        elem.gIDend = I1.globalFFID;
+//        elements.push_back(elem);
+//    }
+//}
+
+// ====== 三个重载：首选显式策略，其它两个是兼容转发 ======
+void Fracture::subdivide(const std::vector<Cell>& meshCells,
+    const std::unordered_map<int, Node>& meshNodes,
+    DistanceMetric metric)
 {
     elements.clear();
-    constexpr double tolLen = 1e-10;     // 段长阈值
-    constexpr double tolPoint = 1e-8;    // 判断中点在三角形内部时的容差
+    constexpr double tolLen = 1e-10;
+    constexpr double tolPoint = 1e-8;
 
     for (int i = 0; i + 1 < (int)intersections.size(); ++i)
     {
         const auto& I0 = intersections[i];
         const auto& I1 = intersections[i + 1];
-       
+
         Vector P0 = I0.point, P1 = I1.point;
         double segLen = computeSegmentLength(P0, P1);
-
-		if (segLen < tolLen)
-		{
-            cerr << "Warning: Zero-length fracture segment detected, "
-                "check duplicate intersection points." <<"point is:"<<"("<< P0.m_x<<","<< P0.m_y<<")" << endl;
-			continue;   // 跳过该段，防止除零
-		}
-
-        Vector mid = computeMidpoint(P0, P1);
-        int associatedCellID = findContainingCell(mid, meshCells, meshNodes);
-        if (associatedCellID < 0) 
-        {
-            std::cerr << "[提示] 裂缝段 param=["
-                << I0.param << "," << I1.param
-                << "] 与任何单元不匹配，可能与网格面平行或擦肩而过，已跳过\n";
+        if (segLen < tolLen) {
+            std::cerr << "Warning: Zero-length fracture segment @("
+                << P0.m_x << "," << P0.m_y << ")\n";
             continue;
         }
 
-        double avgDist = -1;
-        if (associatedCellID != -1)
-        {
-            for (const auto& cell : meshCells)
-            {
-                if (cell.id == associatedCellID)
-                {
-                    avgDist = useCenterDistance
-                        ? computeDistanceFromCenter(cell, P0, P1)
-                        : computeAverageDistanceFromNodes(cell, meshNodes, P0, P1);
-                    break;
-                }
-            }
+        Vector mid = computeMidpoint(P0, P1);
+        int associatedCellID = findContainingCell(mid, meshCells, meshNodes);
+        if (associatedCellID < 0) {
+            std::cerr << "[提示] 裂缝段 param=[" << I0.param << "," << I1.param
+                << "] 未匹配到单元，已跳过\n";
+            continue;
         }
-        else
-        {
-            cerr << "Warning: Midpoint of segment " << i + 1 << " not inside any cell." << std::endl;
-            avgDist = -1.0;
+
+        double avgDist = -1.0;
+        // 找到 cell 对象
+        const Cell* host = nullptr;
+        for (const auto& c : meshCells) if (c.id == associatedCellID) { host = &c; break; }
+        if (!host) {
+            std::cerr << "[警告] 找不到 id=" << associatedCellID << " 的单元\n";
+            continue;
         }
+
+        // ——— 这里切换三种算法 ———
+        switch (metric) {
+        case DistanceMetric::CellCenter:
+            avgDist = computeDistanceFromCenter(*host, P0, P1);
+            break;
+        case DistanceMetric::NodeAverage:
+            avgDist = computeAverageDistanceFromNodes(*host, meshNodes, P0, P1);
+            break;
+        case DistanceMetric::AreaWeight:
+        default:
+            avgDist = computeAreaWeightedDistance(*host, meshNodes, P0, P1);
+            break;
+        }
+
         int newElemId = static_cast<int>(elements.size()) + 1;
         FractureElement elem(newElemId, associatedCellID, segLen, avgDist);
-        elem.param0 = I0.param;
-        elem.param1 = I1.param;
-        elem.isFFatStart = I0.isFF;
-        elem.isFFatEnd = I1.isFF;
-        elem.gIDstart = I0.globalFFID;
-        elem.gIDend = I1.globalFFID;
+        elem.param0 = I0.param; elem.param1 = I1.param;
+        elem.isFFatStart = I0.isFF; elem.isFFatEnd = I1.isFF;
+        elem.gIDstart = I0.globalFFID; elem.gIDend = I1.globalFFID;
         elements.push_back(elem);
     }
 }
+
+// 兼容旧：bool 转策略
+void Fracture::subdivide(const std::vector<Cell>& meshCells,
+    const std::unordered_map<int, Node>& meshNodes,
+    bool useCenterDistance)
+{
+    subdivide(meshCells, meshNodes,
+        useCenterDistance ? DistanceMetric::CellCenter
+        : DistanceMetric::NodeAverage);
+}
+
+// 兼容旧：无参版本（默认用面积加权）
+void Fracture::subdivide(const std::vector<Cell>& meshCells,
+    const std::unordered_map<int, Node>& meshNodes)
+{
+    subdivide(meshCells, meshNodes, DistanceMetric::AreaWeight);
+}
+
+
+
 
 int Fracture::locateSegment(double param) const
 {

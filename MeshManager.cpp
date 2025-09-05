@@ -67,7 +67,8 @@ void MeshManager::DetectAndSubdivideFractures()
     for (auto& F : frNet_.fractures)
     {
         F.sortAndRenumberIntersections();
-        F.subdivide(mesh_.getCells(), mesh_.getNodesMap(),true);
+        /*F.subdivide(mesh_.getCells(), mesh_.getNodesMap(),true);*/
+        F.subdivide(mesh_.getCells(), mesh_.getNodesMap(), distanceMetric_);
     }
 }
 

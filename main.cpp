@@ -84,7 +84,10 @@ int main()
 	//	/*avoidOverlap=*/true
 	//);
     auto t8 = std::chrono::high_resolution_clock::now();
+
+	mgr.setDistanceMetric(DistanceMetric::NodeAverage); // 设置距离度量方式AreaWeight CellCenter NodeAverage
     mgr.DetectAndSubdivideFractures();
+
     auto t9 = std::chrono::high_resolution_clock::now(); // 计时结束
     auto ms10 = std::chrono::duration_cast<std::chrono::milliseconds>(t9 - t8).count();
     std::cout << "FractureDetect in " << ms10 << " ms.\n";
@@ -160,9 +163,6 @@ int main()
 
 	ppm.MatrixFluidPropertiesTest(315.54930556, 5027664.1668); // 测试水和 CO2 物性表
 
-
-
-
     ppm.InitializeMatrixFluidProperties(mgr, reg, vg);
     ppm.InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
 
@@ -182,7 +182,7 @@ int main()
 	mgr.printCISourceTerms();
     cout << "Finished initial setup and property assignment.\n";
 
-    // —— 关键：导出 t=0、step=0 的场，用于初始时刻可视化 ——
+    // —— 导出 t=0、step=0 的场，用于初始时刻可视化 ——
     const double time0 = 0.0;
     const int    step0 = 0;
 
@@ -207,9 +207,6 @@ int main()
 
     std::cout << "Finished initial setup and wrote t=0 state for MATLAB.\n";
     return 0;
-
-
-    return 0; 
 
     //
 //  用 PhysicalPropertiesManager 中的物性来做物性耦合
@@ -257,76 +254,5 @@ int main()
 //           << "\n";
 //   }
 
-/*未封装前的网格划分代码*/
- //   // ========== 1. 构造网格 ==========
- //   // 构造 Mesh 对象，并构建网格
- //   Mesh mesh;
- //   mesh.BuildMesh(lengthX, lengthY, lengthZ, sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
-    //// 根据每个单元所包含的面判断内部单元与边界单元
- //   mesh.ClassifySolidMatrixCells();
- //   // 拿到所有边界面并分配各自位置*******  这行代码在处理边界条件是要用
- //   auto groups = BoundaryClassify::ClassifySolidMatrixMeshBoundaryFaces(mesh, lengthX, lengthY);
- //   //auto bfaceIDs = mesh.getBoundaryFaceIDs(); 
- //   mesh.CreateSolidMatrixGhostCells();
- //   // 4) 这时候再进行 A=E+T 分解
- //   mesh.ComputeSolidMatrixMeshFaceGeometricInfor(CorrectionMethod::OrthogonalCorrection); //MinimumCorrection,OrthogonalCorrection,OverRelaxed
- //   // **调试输出—检查面分解结果**
- //   cout << "\n=== Face decomposition (A, |E|, |T|) ===\n";
- //   for (const auto& face : mesh.faces) 
- //   {
- //  
- //       Vector A_vec = face.normal * face.length;
- //       double A_mag = A_vec.Mag();
- //       double E_mag = face.vectorE.Mag();
- //       double T_mag = face.vectorT.Mag();
- //       std::cout
- //           << "Face " << face.id
- //           << ": |A|=" << A_mag
- //           << ", |E|=" << E_mag
- //           << ", |T|=" << T_mag
- //           << "  (E+A·e dot/|d|?)\n";
- //   }
-    ////给基岩网格分配物性参数
- //   mesh.assignRockProperties(matrix);
- //   // 输出分配后的基岩物性参数
- //   cout << "\n―― 基岩物性参数分配 ――" << endl;
- //   for (const auto& cell : mesh.cells)
- //   {
- //       cout << "Cell " << cell.id << " 孔隙度: " << cell.materialProps.matrix_Porosity
- //           << ", 渗透率: " << cell.materialProps.matrix_Permeability
- //           << ", 压缩系数: " << cell.materialProps.matrix_Beta << endl;
- //   }
-    //// 输出及可视化网格基本信息
- //   mesh.printMeshInfo();
- //   mesh.exportToTxt("mesh");
-    // 输出部分网格信息（节点、单元、面）
- //========== 2. 构造裂缝网络 ==========
- //   FractureNetwork fractureNetwork;
- //   fractureNetwork.addFracture(Vector(0.1, 0.2, 0.0), Vector(0.3, 0.8, 0.0));  // 裂缝 1
- //   fractureNetwork.addFracture(Vector(0.7, 0.1, 0.0), Vector(0.1, 0.8, 0.0));  // 裂缝 2
- //   fractureNetwork.addFracture(Vector(0.1, 0.5, 0.0), Vector(0.8, 0.5, 0.0));  // 裂缝 3
- //    2) 构造裂缝几何：交点 + 分段（但不计算离散系数）
- //   fractureNetwork.detectFractureIntersections();
- //   for (auto& F : fractureNetwork.fracture_network)
- //       F.DetectFracturetoMeshFaceIntersections(mesh.faces);
- //   fractureNetwork.DeduplicateAndRenumberFractureToFractureIntersections();
- //   for (auto& F : fractureNetwork.fracture_network)
- //       F.sortAndRenumberIntersections();
- //   for (auto& F : fractureNetwork.fracture_network)
- //       F.subdivide(mesh.cells, mesh.nodesMap);
- //    ==========7. 基岩与裂缝初始化 ==========
- //   initializePressure(mesh.cells, mesh.cellId2index, fractureNetwork.fracture_network, 1e5);
- //    ==========5. 裂缝物性参数分配 ==========
- //   fractureNetwork.setFractureProperties(0, porosity_f_1, permeability_f_1, compressibility_f_1, aperture_1);
- //   fractureNetwork.setFractureProperties(1, porosity_f_2, permeability_f_2, compressibility_f_2, aperture_2);
- //    4) 现在做离散系数计算
- //   for (auto& F : fractureNetwork.fracture_network)
- //   {
- //       F.computeFractureDiscreteCoefficients(fluid, matrix, mesh);
- //   }
- //    ========== 4. 输出裂缝信息 ==========
- //   fractureNetwork.printFractureInfo();
- //    ==========6. 可视化裂缝信息 ==========
- //   fractureNetwork.exportToTxt("fracture_network");
 
 

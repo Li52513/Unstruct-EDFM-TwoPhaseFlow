@@ -22,14 +22,20 @@ enum class IntersectionOrigin
     FracEnd         // 裂缝终点
 };
 
+enum class DistanceMetric {
+	CellCenter, // 使用单元中心点距离
+	NodeAverage, // 使用单元节点平均位置距离
+	AreaWeight   // 使用面积加权的“数值积分” <d> = sum(d_j * ΔS_j) / S
+};
+
 struct FractureIntersectionPointByMatrixMesh  //// 用于描述裂缝与基岩网格边界交点的结构体
 {
 	int id; // 交点编号
 	Vector point; // 交点坐标
 	int edgeID; // 与之相交的边（Face）的编号；若无则为 -1
 	double param; // 裂缝起点到交点在裂缝线段上的归一化参数（0～1）
-    bool    isFF;         // <<< 新增：是否是裂缝–裂缝交点
-    int     globalFFID;   // <<< 新增：全局 FF 交点的 ID（face 交点填 0）
+    bool    isFF;         // <<< 是否是裂缝–裂缝交点
+    int     globalFFID;   // <<< 全局 FF 交点的 ID（face 交点填 0）
     IntersectionOrigin origin;   ///交点的“来源”
     
     FractureIntersectionPointByMatrixMesh(int _id,
@@ -157,6 +163,13 @@ public:
     void computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
         
     /*==裂缝段离散====*/
+
+    void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes, DistanceMetric metric);
+
+    // 兼容旧：无第三参数（默认采用 AreaWeighted）
+    void subdivide(const std::vector<Cell>& meshCells,const std::unordered_map<int, Node>& meshNodes);
+
+    // 兼容旧：只有两分支的 bool（true=CellCenter, false=NodeAverage）
     void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance = false);
 
     /*== 给定 param，定位它属于哪一段====*/
@@ -176,5 +189,6 @@ private:
     int findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::unordered_map<int, Node>& nodes);
     static double computeAverageDistanceFromNodes(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
     static double computeDistanceFromCenter(const Cell& cell, const Vector& segStart, const Vector& segEnd);
+    static double computeAreaWeightedDistance(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
 };
 
