@@ -48,6 +48,11 @@ public:
 	{
 		return sqrt(m_x * m_x + m_y * m_y + m_z * m_z);
 	}
+
+	double Mag2() const noexcept {
+		return m_x * m_x + m_y * m_y + m_z * m_z;
+	}
+
 	void Normalize()
 	{
 		double mag = Mag();

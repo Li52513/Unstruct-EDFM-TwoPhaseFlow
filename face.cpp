@@ -1,4 +1,5 @@
 #include "Face.h"
+#include "UserDefineVarType.h"
 
 Face::Face(int id, const std::vector<int>& nodeIDs, const std::vector<Vector>& nodeCoords)
     : id(id), FaceNodeIDs(nodeIDs), FaceNodeCoords(nodeCoords), length(0.0), ownerCell(-1), neighborCell(-1)
@@ -77,31 +78,42 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         return;
     }
     Vector ej = ownerToNeighbor / d_norm;  // 单位方向向量
+    cout << "Face " << id << " 的单位方向向量 e_j: ("
+        << ej.m_x << ", " << ej.m_y << ", " << ej.m_z << ")  "
+        << endl;
 
     // 2) 构造面积矢量 A_j = normal * length
     Vector Aj = normal * length;
+    double Aj_dot_ej = Aj * ej;  // 点积
     
     if ((Aj * ej) < 0)
     {
 		Aj = -Aj; //		// 确保法向量与单位向量同向
+        Aj_dot_ej = -Aj_dot_ej;
     }
-   /* cout << "Face " << id << " 的面积矢量 A_j: (" 
+    // —— 关键容错：近正交（Aj·ej≈0）时的保护 —— 
+    const double eps = 1e-14;   // 可按你的坐标尺度调整
+    if (Aj_dot_ej < eps) Aj_dot_ej = eps;
+
+   cout << "Face " << id << " 的面积矢量 A_j: (" 
          << Aj.m_x << ", " << Aj.m_y << ", " << Aj.m_z << ") 长度: " 
-         << length << endl;*/
+         << length << endl;
+
 
     // 3) 依据不同算法分解 A_j = E_j + T_j
-    double Aj_dot_ej = Aj * ej;  // 点积
-
     switch (method) 
     {
     case NormalVectorCorrectionMethod::MinimumCorrection:
         // E_j = (A_j·e_j) e_j
         vectorE = ej * Aj_dot_ej;
+        cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
+
         break;
 
     case NormalVectorCorrectionMethod::OrthogonalCorrection:
         // E_j = |A_j| e_j, 其中 |A_j| = length (normal 已单位化)
         vectorE = ej * length;
+        cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
         break;
 
     case NormalVectorCorrectionMethod::OverRelaxed:
@@ -110,12 +122,14 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         double Aj_norm = length;
         double factor = (Aj_norm * Aj_norm) / Aj_dot_ej;
         vectorE = ej * factor;
+        cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
         break;
     }
     }
 
     // 4) 非正交分量
     vectorT = Aj - vectorE;
+    cout << "Face :" << id << "的T矢量:(" << vectorT.m_x << ", " << vectorT.m_y << ", " << vectorT.m_z << ")" << endl;
 }
 
 
@@ -131,17 +145,24 @@ void Face::computeFaceVectorsBoundary(const Vector& Cp,
     NormalVectorCorrectionMethod /*method*/)
 {
     // 1) 依据 owner中心 -> 面心 的向量与当前 normal 的夹角，修正法向指向外侧
-    Vector rPF = midpoint - Cp;                 // owner中心 -> 面心
+    Vector rPF = midpoint - Cp;
     double sgn = (normal * rPF) >= 0.0 ? 1.0 : -1.0;
-    Vector nhat = normal * sgn;                 // 外法向（单位向量）
 
-    // 2) 面积矢量 A = |A| * n_hat；2D 情况下 |A| = 边长 length
-    Vector Aj = nhat * length;
+    // ↓↓↓ 新增：把外指法向写回，并确保为单位向量 ↓↓↓
+    normal = normal * sgn;
+    double nmag2 = normal.m_x * normal.m_x + normal.m_y * normal.m_y + normal.m_z * normal.m_z;
+    if (nmag2 > 0.0) {
+        double invn = 1.0 / std::sqrt(nmag2);
+        normal = normal * invn;
+    }
 
-    // 3) 边界面分解：取正交主分量，非正交分量置零（T=0）
-    vectorE = Aj;                               // = |A| n_hat
+    // 2) 面积矢量 A = |A| * n_hat；2D 情况下 |A| = 边长 length（3D 为面积）
+    Vector Aj = normal * length;
+
+    // 3) 边界面分解
+    vectorE = Aj;
     vectorT = Vector(0.0, 0.0, 0.0);
 
-    // 4) 给 ownerToNeighbor 一个有意义的单位方向（外法向），便于后续使用
-    ownerToNeighbor = nhat;
+    // 4) owner→外部 的方向（与 normal 一致）
+    ownerToNeighbor = normal;
 }

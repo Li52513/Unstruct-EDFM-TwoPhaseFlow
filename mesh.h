@@ -45,6 +45,9 @@ public:
    
     // （可选）Dirichlet 边界压力  //待优化
 
+    //-----------------------网格边界识别--------------------//
+  
+
 private:
     vector<Node> nodes_;
 	vector<Face> faces_;

@@ -22,11 +22,14 @@ enum class IntersectionOrigin
     FracEnd         // 裂缝终点
 };
 
-enum class DistanceMetric {
+enum class DistanceMetric 
+{
 	CellCenter, // 使用单元中心点距离
 	NodeAverage, // 使用单元节点平均位置距离
-	AreaWeight   // 使用面积加权的“数值积分” <d> = sum(d_j * ΔS_j) / S
+	AreaWeight,   // 使用面积加权的“数值积分” <d> = sum(d_j * ΔS_j) / S
+    CrossAwareGauss 
 };
+
 
 struct FractureIntersectionPointByMatrixMesh  //// 用于描述裂缝与基岩网格边界交点的结构体
 {
@@ -101,10 +104,13 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     // —— 裂缝–裂缝 TI 交换信息 ——
     struct FFF_Exchange
     {
-        int    peerFracID;      ///< 对端裂缝索引
-        int    peerSegID;       ///< 对端裂缝段索引
-        double TI;              ///< 交换系数
-        double* peerPressure;   ///< 指向对端段的 p_fr
+        int peerFracID{ -1 };
+        int peerSegID{ -1 };
+        int peerGlobalSeg{ -1 };   // 新增：对端全局段索引（便于快速定位）
+        int atGlobalFF{-1};
+        double TIw{ 0.0 };         // 新增：水相交汇导纳（Star–Delta 后的“边”）
+        double TIg{ 0.0 };         // 新增：气相交汇导纳
+        // 其他你已有的字段保持不变
     };
     vector<FFF_Exchange> ffEx;
 
@@ -158,8 +164,8 @@ public:
 
 /// -/*=== 计算几何耦合系数 geomCI 和 geomAlpha======*/
 /// 仅基于几何：计算每段的 geomCI 和 geomAlpha
-/// geomCI   = (段长 * aperture) / avgDistance
-/// geomAlpha= 2 * aperture / 段长
+/// geomCI   = (段长 ) / avgDistance
+/// geomAlpha= 2 / 段长
     void computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
         
     /*==裂缝段离散====*/
@@ -190,5 +196,6 @@ private:
     static double computeAverageDistanceFromNodes(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
     static double computeDistanceFromCenter(const Cell& cell, const Vector& segStart, const Vector& segEnd);
     static double computeAreaWeightedDistance(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
+    static double computeCrossAwareAverageDistance(const Cell& cell, const std::unordered_map<int, Node>& meshNodes, const Vector& segStart, const Vector& segEnd);
 };
 

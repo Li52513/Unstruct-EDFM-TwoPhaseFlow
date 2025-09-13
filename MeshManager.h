@@ -1,7 +1,8 @@
 #pragma once
 #include "Mesh.h"
 #include "FractureNetwork.h"
-#include "BoundaryClassify.h"
+#include "BoundaryFaceClassify.h"
+
 
 
 
@@ -10,7 +11,7 @@
  * @brief 统一管理基岩 & 裂缝网格及几何参数、CI 计算、物性赋值
  */
 
-extern enum class DistanceMetric;
+//extern enum class DistanceMetric;
 
 class MeshManager
 {
@@ -56,6 +57,11 @@ public:
     /// 只算几何耦合（调用 computeGeometryCoupling）
     void ComputeFractureGeometryCouplingCoefficient();
 
+    ///访问边界面
+    const BoundaryFaceClassify::FaceGroups& boundaryFaces() const { return bcGroups_; }
+    // 统计所有边界面总数（自检用）
+    size_t countBoundaryFaces() const { return boundaryCount_; }
+
     // —— 输出 & 调试 ——————————————————————————————————
     void exportMesh(const std::string& prefix) const;
     void exportFractures(const std::string& prefix) const;
@@ -75,5 +81,7 @@ private:
     int nx_, ny_, nz_; // 网格数量成员对象
     bool usePrism_, useQuadBase_; // 网格单元类型成员对象
     DistanceMetric distanceMetric_ = DistanceMetric::AreaWeight;
+    BoundaryFaceClassify::FaceGroups bcGroups_;
+    size_t boundaryCount_ = 0;
 
 };

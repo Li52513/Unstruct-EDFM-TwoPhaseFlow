@@ -28,7 +28,157 @@ static inline Vector triCentroid(const Vector& A, const Vector& B, const Vector&
     return (A + B + C) / 3.0;
 }
 
-//这是在计算多边形的重心
+static inline Vector lerp(const Vector& a, const Vector& b, double t) {
+    return a * (1.0 - t) + b * t;
+}
+
+static inline double pointToSegmentDistance_local(const Vector& p,
+    const Vector& a,
+    const Vector& b)
+{
+    Vector ab = b - a;
+    double L2 = ab.m_x * ab.m_x + ab.m_y * ab.m_y + ab.m_z * ab.m_z;
+    if (L2 <= 1e-30) {
+        double dx = p.m_x - a.m_x, dy = p.m_y - a.m_y, dz = p.m_z - a.m_z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    double t = ((p - a) * ab) / L2;
+    if (t < 0.0) t = 0.0; else if (t > 1.0) t = 1.0;
+    Vector proj = a + ab * t;
+    double dx = p.m_x - proj.m_x, dy = p.m_y - proj.m_y, dz = p.m_z - proj.m_z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+
+// 线段-线段相交（严格在内部相交，端点相交视作相交；平行/共线返回 false）
+static bool segSegIntersect2D(const Vector& p, const Vector& p2,
+    const Vector& q, const Vector& q2,
+    Vector& out, double eps = 1e-12)
+{
+    Vector r = p2 - p;
+    Vector s = q2 - q;
+    double denom = cross2D(r, s);
+    if (std::fabs(denom) < eps) return false; // 平行或几乎平行
+
+    Vector qp = q - p;
+    double t = cross2D(qp, s) / denom;
+    double u = cross2D(qp, r) / denom;
+    if (t < -eps || t > 1.0 + eps || u < -eps || u > 1.0 + eps) return false;
+
+    // 夹在两段范围内
+    t = std::min(1.0, std::max(0.0, t));
+    out = p + r * t;
+    return true;
+}
+
+// 统计裂缝段与单元多边形边的交点数
+static int countIntersectionsWithPolygon(const std::vector<Vector>& poly,
+    const Vector& s0, const Vector& s1,
+    std::vector<Vector>& hits,
+    double eps = 1e-12)
+{
+    hits.clear();
+    if (poly.size() < 3) return 0;
+    const size_t n = poly.size();
+    for (size_t i = 0; i < n; ++i) {
+        const Vector& a = poly[i];
+        const Vector& b = poly[(i + 1) % n];
+        Vector x{};
+        if (segSegIntersect2D(s0, s1, a, b, x, eps)) {
+            // 去重：和已收集交点相距很近就跳过
+            bool dup = false;
+            for (const auto& h : hits) {
+                double dx = h.m_x - x.m_x, dy = h.m_y - x.m_y;
+                if (dx * dx + dy * dy < 1e-20) { dup = true; break; }
+            }
+            if (!dup) hits.push_back(x);
+        }
+    }
+    return (int)hits.size();
+}
+
+// 按直线 s0->s1 劈分多边形（Sutherland–Hodgman 风格，生成两侧多边形）
+static void splitPolygonByLine(const std::vector<Vector>& poly,
+    const Vector& s0, const Vector& s1,
+    std::vector<Vector>& pos, // 叉积>=0 一侧
+    std::vector<Vector>& neg, // 叉积<=0 另一侧
+    double eps = 1e-12)
+{
+    pos.clear(); neg.clear();
+    const size_t n = poly.size();
+    if (n < 3) return;
+
+    Vector nvec = s1 - s0; // 直线方向
+    auto sideVal = [&](const Vector& p)->double {
+        return cross2D(nvec, p - s0); // >0 在“左侧”，<0 在“右侧”
+        };
+
+    for (size_t i = 0; i < n; ++i) {
+        const Vector& A = poly[i];
+        const Vector& B = poly[(i + 1) % n];
+        double sa = sideVal(A);
+        double sb = sideVal(B);
+
+        bool AinPos = (sa > eps);
+        bool AinNeg = (sa < -eps);
+        bool Aon = (!AinPos && !AinNeg);
+
+        bool BinPos = (sb > eps);
+        bool BinNeg = (sb < -eps);
+        bool Bon = (!BinPos && !BinNeg);
+
+        // 把 A 放到对应侧（边界点放两侧，以保守封闭）
+        if (AinPos || Aon) pos.push_back(A);
+        if (AinNeg || Aon) neg.push_back(A);
+
+        // 边 AB 是否跨越直线？
+        if ((AinPos && BinNeg) || (AinNeg && BinPos)) {
+            Vector X{};
+            segSegIntersect2D(A, B, s0, s1, X, eps); // 与无限直线的交点
+            pos.push_back(X);
+            neg.push_back(X);
+        }
+    }
+
+    // 可能出现重复点/共线退化；去掉连续重复
+    auto dedup = [](std::vector<Vector>& P) {
+        if (P.size() < 3) return;
+        std::vector<Vector> out; out.reserve(P.size());
+        for (size_t i = 0; i < P.size(); ++i) {
+            const auto& cur = P[i];
+            const auto& prv = P[(i + P.size() - 1) % P.size()];
+            double dx = cur.m_x - prv.m_x, dy = cur.m_y - prv.m_y;
+            if (dx * dx + dy * dy > 1e-24) out.push_back(cur);
+        }
+        P.swap(out);
+        };
+    dedup(pos); dedup(neg);
+}
+
+
+// 三角形三点高斯对 ∫_△ d(x) dS 的数值近似（返回“积分值”，不是均值）
+// 顶点：V1,V2,V3
+static double triGauss3Integral(const Vector& V1, const Vector& V2, const Vector& V3,
+    const Vector& segStart, const Vector& segEnd)
+{
+    // 三点：barycentric (1/6,1/6,2/3) 的全排列；权重 = Area/3
+    auto area = triArea(V1, V2, V3);
+    if (area <= 0) return 0.0;
+
+    // 三个采样点
+    Vector P1 = V1 * (1.0 / 6.0) + V2 * (1.0 / 6.0) + V3 * (2.0 / 3.0);
+    Vector P2 = V1 * (1.0 / 6.0) + V2 * (2.0 / 3.0) + V3 * (1.0 / 6.0);
+    Vector P3 = V1 * (2.0 / 3.0) + V2 * (1.0 / 6.0) + V3 * (1.0 / 6.0);
+
+    double d1 = pointToSegmentDistance_local(P1, segStart, segEnd);
+    double d2 = pointToSegmentDistance_local(P2, segStart, segEnd);
+    double d3 = pointToSegmentDistance_local(P3, segStart, segEnd);
+
+    // ∫ ≈ (Area/3) * (d1 + d2 + d3)
+    return (area / 3.0) * (d1 + d2 + d3);
+}
+
+//计算多边形的重心
 static inline Vector polygonCentroid(const std::vector<Vector>& P, double& areaAbs) {
     const size_t n = P.size();
     double A2 = 0.0, Cx = 0.0, Cy = 0.0; // A2=2*Area(with sign)
@@ -46,6 +196,69 @@ static inline Vector polygonCentroid(const std::vector<Vector>& P, double& areaA
     }
     return Vector{ Cx / (3.0 * A2), Cy / (3.0 * A2), 0.0 };
 }
+
+// 对一个简单多边形做“中心扇形 + 三点高斯”，返回“平均距离”
+static double fanGaussAverage(const std::vector<Vector>& poly,
+    const Vector& segStart, const Vector& segEnd)
+{
+    if (poly.size() < 3) return 0.0;
+    double polyArea = 0.0;
+    Vector C = polygonCentroid(poly, polyArea);
+    if (polyArea <= 0) return 0.0;
+
+    double integral = 0.0;
+    const size_t n = poly.size();
+    for (size_t i = 0; i < n; ++i) {
+        const Vector& A = poly[i];
+        const Vector& B = poly[(i + 1) % n];
+        integral += triGauss3Integral(C, A, B, segStart, segEnd);
+    }
+    return integral / polyArea;
+}
+
+
+// ====== 新增：穿越感知 + 三点高斯的平均距离 ======
+double Fracture::computeCrossAwareAverageDistance(
+    const Cell& cell,
+    const std::unordered_map<int, Node>& meshNodes,
+    const Vector& segStart, const Vector& segEnd)
+{
+    // 取单元多边形
+    std::vector<Vector> poly; poly.reserve(cell.CellNodeIDs.size());
+    for (int nid : cell.CellNodeIDs) poly.push_back(meshNodes.at(nid).coord);
+    if (poly.size() < 3) {
+        // 退化：回退到中心点距离
+        return pointToSegmentDistance(cell.center, segStart, segEnd);
+    }
+
+    // 判断是否“穿越”
+    std::vector<Vector> hits;
+    int nHit = countIntersectionsWithPolygon(poly, segStart, segEnd, hits);
+    if (nHit >= 2) {
+        // 按直线把多边形一分为二，两个子多边形分别 fan + Gauss，再面积加权
+        std::vector<Vector> Ppos, Pneg;
+        splitPolygonByLine(poly, segStart, segEnd, Ppos, Pneg);
+
+        double areaPos = 0.0, areaNeg = 0.0;
+        if (Ppos.size() >= 3) { Vector c = polygonCentroid(Ppos, areaPos); (void)c; }
+        if (Pneg.size() >= 3) { Vector c = polygonCentroid(Pneg, areaNeg); (void)c; }
+        double A = areaPos + areaNeg;
+        if (A <= 0) {
+            // 极端退化：回退到原扇形 + 高斯
+            return fanGaussAverage(poly, segStart, segEnd);
+        }
+
+        double favPos = (areaPos > 0 && Ppos.size() >= 3) ? fanGaussAverage(Ppos, segStart, segEnd) : 0.0;
+        double favNeg = (areaNeg > 0 && Pneg.size() >= 3) ? fanGaussAverage(Pneg, segStart, segEnd) : 0.0;
+
+        return (favPos * areaPos + favNeg * areaNeg) / A;
+    }
+    else {
+        // 不穿越：直接对原多边形做扇形 + 三点高斯
+        return fanGaussAverage(poly, segStart, segEnd);
+    }
+}
+
 
 double Fracture::computeAreaWeightedDistance(const Cell& cell,
     const std::unordered_map<int, Node>& meshNodes,
@@ -372,6 +585,11 @@ void Fracture::subdivide(const std::vector<Cell>& meshCells,
             avgDist = computeAverageDistanceFromNodes(*host, meshNodes, P0, P1);
             break;
         case DistanceMetric::AreaWeight:
+            avgDist = computeAreaWeightedDistance(*host, meshNodes, P0, P1);
+            break;
+        case DistanceMetric::CrossAwareGauss:   // ★ 新增
+            avgDist = computeCrossAwareAverageDistance(*host, meshNodes, P0, P1);
+            break;
         default:
             avgDist = computeAreaWeightedDistance(*host, meshNodes, P0, P1);
             break;
@@ -508,24 +726,108 @@ Vector Fracture::computeMidpoint(const Vector& a, const Vector& b)
     return (a + b) / 2.0;
 }
 
-/*====判断交点是否在基岩网格内，并找到包含该点的 Cell（findContainingCell）====*/
-int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::unordered_map<int, Node>& nodes)
+
+// —— 工具1：点是否在二维线段上（含端点）——
+static inline bool pointOnSegment2D(const Vector& P, const Vector& A, const Vector& B, double eps = 1e-12) {
+    Vector AP = P - A, AB = B - A;
+    // 面积（叉积模）≈0 表示共线
+    double cross = std::fabs(AP.m_x * AB.m_y - AP.m_y * AB.m_x);
+    if (cross > eps) return false;
+    // 点积范围判断（投影在线段内部）
+    double dot = AP.m_x * AB.m_x + AP.m_y * AB.m_y;
+    if (dot < -eps) return false;
+    double ab2 = AB.m_x * AB.m_x + AB.m_y * AB.m_y;
+    if (dot - ab2 > eps) return false;
+    return true;
+}
+
+// —— 工具2：二维多边形点内测（奇偶规则），包含边界 ——
+// 顶点按环序给出（你的 CellNodeIDs 就是环序）
+static bool pointInPolygon2D(const Vector& P,
+    const std::vector<int>& polyNodeIDs,
+    const std::unordered_map<int, Node>& nodes,
+    double eps = 1e-12)
 {
-    for (const auto& cell : cells) 
-    {
-        if (cell.CellNodeIDs.size() != 3) 
-            continue;
-        Vector a = nodes.at(cell.CellNodeIDs[0]).coord;
-        Vector b = nodes.at(cell.CellNodeIDs[1]).coord;
-        Vector c = nodes.at(cell.CellNodeIDs[2]).coord;
-        if (pointInTriangle(point, a, b, c)) 
-            return cell.id;
-        else if (pointInTriangle(point, a, b, c))
-        {
-            std::cerr << "中点落在单元边界或顶点上，建议加密网格或调整裂缝。" << std::endl;
+    const int n = (int)polyNodeIDs.size();
+    if (n < 3) return false;
+
+    // 边界命中优先
+    for (int i = 0; i < n; ++i) {
+        const Vector& A = nodes.at(polyNodeIDs[i]).coord;
+        const Vector& B = nodes.at(polyNodeIDs[(i + 1) % n]).coord;
+        if (pointOnSegment2D(P, A, B, eps)) return true;
+    }
+
+    // 射线法：向 +x 发射
+    bool inside = false;
+    for (int i = 0, j = n - 1; i < n; j = i++) {
+        const Vector& Pi = nodes.at(polyNodeIDs[i]).coord;
+        const Vector& Pj = nodes.at(polyNodeIDs[j]).coord;
+
+        // 只用 xy；忽略 z
+        bool intersect = ((Pi.m_y > P.m_y) != (Pj.m_y > P.m_y));
+        if (intersect) {
+            double x_cross = Pj.m_x + (Pi.m_x - Pj.m_x) * ((P.m_y - Pj.m_y) / (Pi.m_y - Pj.m_y + 1e-30));
+            if (x_cross > P.m_x - eps) inside = !inside;
         }
     }
-    return -1;
+    return inside;
+}
+
+
+/*====判断交点是否在基岩网格内，并找到包含该点的 Cell（findContainingCell）====*/
+//int Fracture::findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::unordered_map<int, Node>& nodes)
+//{
+//    for (const auto& cell : cells) 
+//    {
+//        if (cell.CellNodeIDs.size() != 3) 
+//            continue;
+//        Vector a = nodes.at(cell.CellNodeIDs[0]).coord;
+//        Vector b = nodes.at(cell.CellNodeIDs[1]).coord;
+//        Vector c = nodes.at(cell.CellNodeIDs[2]).coord;
+//        if (pointInTriangle(point, a, b, c)) 
+//            return cell.id;
+//        else if (pointInTriangle(point, a, b, c))
+//        {
+//            std::cerr << "中点落在单元边界或顶点上，建议加密网格或调整裂缝。" << std::endl;
+//        }
+//    }
+//    return -1;
+//}
+
+// —— 替换你的函数：支持三角/四边形/任意 2D 多边形 ——
+// 约定：工作在 XY 平面（你的裂缝/基岩2D情形正是如此）
+int Fracture::findContainingCell(const Vector& point,
+    const std::vector<Cell>& cells,
+    const std::unordered_map<int, Node>& nodes)
+{
+    int bestCid = -1;
+    double bestD2 = 1e300;
+
+    for (const auto& cell : cells) {
+        const auto& ids = cell.CellNodeIDs;
+        if ((int)ids.size() < 3) continue; // 至少三点
+
+        // 快速 AABB 剪枝（提速）
+        double xmin = 1e300, xmax = -1e300, ymin = 1e300, ymax = -1e300;
+        for (int nid : ids) {
+            const Vector& v = nodes.at(nid).coord;
+            xmin = std::min(xmin, v.m_x); xmax = std::max(xmax, v.m_x);
+            ymin = std::min(ymin, v.m_y); ymax = std::max(ymax, v.m_y);
+        }
+        if (point.m_x < xmin - 1e-12 || point.m_x > xmax + 1e-12 ||
+            point.m_y < ymin - 1e-12 || point.m_y > ymax + 1e-12) continue;
+
+        // 真正点内测：任意多边形（含三角/四边形）
+        if (pointInPolygon2D(point, ids, nodes)) 
+        {
+            // 多个候选时，选重心更近者（更稳）
+
+            double d2 = (point - cell.center).Mag2();
+            if (d2 < bestD2) { bestD2 = d2; bestCid = cell.id; }
+        }
+    }
+    return bestCid; // -1 表示未找到
 }
 
 /*====计算裂缝段到基岩网格单元的平均距离--方法1利用 Cell 中的各节点计算====*/

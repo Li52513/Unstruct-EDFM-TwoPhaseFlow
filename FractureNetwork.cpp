@@ -361,8 +361,8 @@ void FractureNetwork::printFractureInfo() const
                 {
                     std::cout << "        → Frac "
                         << ex.peerFracID + 1 << "  Seg "
-                        << ex.peerSegID + 1 << " : TI="
-                        << ex.TI << "\n";
+                        << ex.peerSegID + 1 << " : TI=";
+                        //<< ex.TI << "\n";
                 }
             }
         }
@@ -428,27 +428,18 @@ void FractureNetwork::exportToTxt(const std::string& prefix) const
     fsFF.close();
 
     /*================ 3. 可选：TI 系数  ===================*/
-    std::ofstream fsTI(prefix + "_ffTI.txt");
-    fsTI << "fracA segA  fracB segB  TI\n";
-
-    for (size_t fid = 0; fid < fractures.size(); ++fid)
-    {
+    std::ofstream fsTI(prefix + "_ffTI.csv");
+    fsTI << "fracA,segA,fracB,segB,TIw,TIg\n";
+    for (size_t fid = 0; fid < fractures.size(); ++fid) {
         const auto& F = fractures[fid];
-        for (size_t sid = 0; sid < F.elements.size(); ++sid)
-        {
+        for (size_t sid = 0; sid < F.elements.size(); ++sid) {
             const auto& elem = F.elements[sid];
-            for (const auto& ex : elem.ffEx)
-            {
-                /* 只写一次——保证 (fid,sid) < (peer) 可避免重复 */
-                if (fid < static_cast<size_t>(ex.peerFracID) ||
-                    (fid == static_cast<size_t>(ex.peerFracID) &&
-                        sid < static_cast<size_t>(ex.peerSegID)))
-                {
-                    fsTI << fid + 1 << " "
-                        << sid + 1 << " "
-                        << ex.peerFracID + 1 << " "
-                        << ex.peerSegID + 1 << " "
-                        << ex.TI << "\n";
+            for (const auto& ex : elem.ffEx) {
+                // 只写一次（避免重复）：
+                if (fid < (size_t)ex.peerFracID || (fid == (size_t)ex.peerFracID && sid < (size_t)ex.peerSegID)) {
+                    fsTI << (fid + 1) << "," << (sid + 1) << ","
+                        << (ex.peerFracID + 1) << "," << (ex.peerSegID + 1) << ","
+                        << ex.TIw << "," << ex.TIg << "\n";
                 }
             }
         }

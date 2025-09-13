@@ -71,7 +71,7 @@ public:
 
 	void computeCenterAndVolume(const unordered_map<int, Node>& allNodes); //计算单元的几何中心和面积
 
-	vector <vector<int>> getLocalFaces() const; // 获取单元的局部面信息
+    vector<vector<int>> getLocalFaces(const std::unordered_map<int, Node>& allNodes) const; // 获取单元的局部面信息
    
 
 };

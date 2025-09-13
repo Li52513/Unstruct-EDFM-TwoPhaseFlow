@@ -42,13 +42,13 @@ struct InitFields
 {
 	//基础场：uniform+线性梯度（可都为0）
 	double p0 = 5e6; //基岩内部初始水相压力，单位 Pa
-	double dpdx = 1000.0; //基岩压力梯度，单位 Pa/m
-	double dpdy = 2200.0; //基岩压力梯度，单位 Pa/m
+	double dpdx = 0.0; //基岩压力梯度，单位 Pa/m
+	double dpdy = 0.0; //基岩压力梯度，单位 Pa/m
 	double dpdz = 0.0; //基岩压力梯度，单位 Pa/m
 
 	double T0 = 303.15; //基岩初始温度，单位 K
-	double dTdx = 10.0; //基岩温度梯度，单位 K/m
-	double dTdy = 10.0; //基岩温度梯度，单位 K/m
+	double dTdx = 0.0; //基岩温度梯度，单位 K/m
+	double dTdy = 0.0; //基岩温度梯度，单位 K/m
 	double dTdz = 0.0; //基岩温度梯度，单位 K/m
 
 	double sw0 = 0.9; //基岩初始水相饱和度 (最好等于1-Sgr)
