@@ -130,6 +130,17 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     // 4) 非正交分量
     vectorT = Aj - vectorE;
     cout << "Face :" << id << "的T矢量:(" << vectorT.m_x << ", " << vectorT.m_y << ", " << vectorT.m_z << ")" << endl;
+
+    //5） 正交插值权重gamma 投影到 e_j（0..1 之间）
+    double D = ownerToNeighbor * ej;     // 应等于 d_norm
+    cout << "Face " << id << "D: " << D << endl;
+    cout << "Face " << id << "d_norm: " << d_norm << endl;
+    double s = (midpoint - Cp) * ej;     // owner 到 面心 在 e_j 上的投影
+    double gamma = (std::abs(D) > 1e-14) ? (s / D) : 0.5; // 容错
+    if (gamma < 0.0) gamma = 0.0;
+    if (gamma > 1.0) gamma = 1.0;
+    f_linearInterpolationCoef = gamma;
+
 }
 
 
@@ -148,7 +159,7 @@ void Face::computeFaceVectorsBoundary(const Vector& Cp,
     Vector rPF = midpoint - Cp;
     double sgn = (normal * rPF) >= 0.0 ? 1.0 : -1.0;
 
-    // ↓↓↓ 新增：把外指法向写回，并确保为单位向量 ↓↓↓
+    // ↓↓↓ 把外指法向写回，并确保为单位向量 ↓↓↓
     normal = normal * sgn;
     double nmag2 = normal.m_x * normal.m_x + normal.m_y * normal.m_y + normal.m_z * normal.m_z;
     if (nmag2 > 0.0) {
@@ -165,4 +176,5 @@ void Face::computeFaceVectorsBoundary(const Vector& Cp,
 
     // 4) owner→外部 的方向（与 normal 一致）
     ownerToNeighbor = normal;
+    f_linearInterpolationCoef = 1.0;
 }

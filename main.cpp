@@ -30,6 +30,8 @@
 #include "PostProcessor.h"
 #include "CouplingAssembler.h" 
 #include "BoundaryFaceClassify.h"
+#include "PressureBC.h"
+#include "SinglePhaseInnerCoeff.h"
 
 
 int main()
@@ -167,6 +169,8 @@ int main()
     ppm.InitializeMatrixFluidProperties(mgr, reg, vg);
     ppm.InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
 
+    /**************************边界条件设置模块******************************/
+
     //边界面识别
     const auto& bfaces = mgr.boundaryFaces();
 
@@ -177,6 +181,34 @@ int main()
         << " yL=" << bfaces.yL.size()
         << " z0=" << bfaces.z0.size()
         << " zL=" << bfaces.zL.size() << "\n";
+
+    //给定参数：2D情况，给定基岩四个边界条件系数
+    PressureBC::BoundaryCoefficient Left { 1.0, 0.0,1e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient Right{ 1.0, 0.0,2e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient Up   { 1.0, 0.0,3e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient Down { 1.0, 0.0,4e5 }; // p = 2e5 Pa
+
+    //边界条件参数写入
+    PressureBC::Registry pbc_pw;
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, Left, Right, Down, Up );   //按照左 右 下 上 的顺序赋值
+    pbc_pw.printInformationofBoundarySetting(mgr);
+
+
+    /**************************基岩裂缝面系数计算 当前系数不考虑裂缝的离散**************************/
+
+    //当前是H2O相渗流
+    //1 设置重力大小及重力方向
+    //2 在对密度进行迎风性判别时，是否需要考虑重力势能
+    GravUpwind gu;
+    gu.g = Vector(0.0, -9.80665, 0.0);
+    gu.use_potential = true;
+
+    //computeInnerFaceCoefficientsPW(mgr, reg, gu, /*k_default=*/rock.k_iso);
+    computerInnerFaceCoeffAndSources_PW(mgr, reg, gu, rock.k_iso, true, 1);
+    computeBoundaryFaceCoeffAndSources_PW(mgr, reg, gu, rock.k_iso, pbc_pw, /*enable_buoy=*/true, /*gradSmoothIters=*/1);
+
+
+
 
 
     // 打印初始化诊断
