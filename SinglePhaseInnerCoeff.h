@@ -378,6 +378,7 @@ inline void computerInnerFaceCoeffAndSources_PW(MeshManager& mgr, const FieldReg
 
 		// ======内部面系数计算=============//
 		F.faceDiscreCoef = beta_f * (Eabs / dperp);
+		cout << "第" << F.id << "个面的离散系数为：" << F.faceDiscreCoef << endl;
 
 		// ======源项的计算： 交叉项 + 浮力项 =======//
 
@@ -421,7 +422,7 @@ inline void computerInnerFaceCoeffAndSources_PW(MeshManager& mgr, const FieldReg
 //  a_PB = a_f * (1 - alpha_f)
 //   s_cross = + beta_f * (gradP_P · T)                 // 与内部面同号约定
 //   s_buoy  = - beta_f * rhoBar * (g·e_hat) * |E|      // 与内部面同号约定
-//   s_BC    = - a_f * betaB_f   我认为这里应该是 ；s_BC    =  a_f * betaB_f
+//   s_BC    = + a_f * betaB_f   我认为这里应该是 ；s_BC    =  a_f * betaB_f
 //   F.faceDiscreCoef = a_PB
 //   F.faceSource     = s_cross + s_buoy + s_BC
 //
@@ -508,6 +509,7 @@ inline void computeBoundaryFaceCoeffAndSources_PW(
 		//------计算面对角系数（装配到P的主对角）——
 		const double a_PB = a_f * (1.0 - alpha_f);
 		F.faceDiscreCoef = a_PB;
+		cout << "第" << F.id << "个面的离散系数为：" << F.faceDiscreCoef << endl;
 
 		// --- 源项三块：交叉 + 浮力 + BC 常数 ---
 		// 交叉项（边界面常用 gP，若 T=0 则此项自动为 0）
@@ -524,7 +526,7 @@ inline void computeBoundaryFaceCoeffAndSources_PW(
 		}
 
 		// BC 常数项
-		const double s_BC = -a_f * betaB_f;
+		const double s_BC = a_f * betaB_f;
 
 		F.faceSource = s_cross + s_buoy + s_BC;
 
