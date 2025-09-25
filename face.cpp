@@ -175,6 +175,6 @@ void Face::computeFaceVectorsBoundary(const Vector& Cp,
     vectorT = Vector(0.0, 0.0, 0.0);
 
     // 4) owner→外部 的方向（与 normal 一致）
-    ownerToNeighbor = normal;
+    ownerToNeighbor = rPF;
     f_linearInterpolationCoef = 1.0;
 }

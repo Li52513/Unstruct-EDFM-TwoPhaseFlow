@@ -1,23 +1,4 @@
-﻿/*
- 
- * @file    main.cpp
- * @brief   当前实现基岩与裂缝网格划分与相关参数的计算
- * @date    2025-04-29
- 
- * --------------------------------------------------------------------------------------
- * @note 历史版本  修改日期    修改内容                                   待修改内容         
- * @note   v1.0   2025-04-28   1.添加了边界虚拟单元 GhostCells            1.整理现在代码将mesh场捋清楚，并解决特殊工况
- *                             2.计算了非结构化网格非正交参数（A  T  E）
- * 
- * @note   v2.0   2025-04-29   1.对基岩和裂缝网格划分功能封装进了MeshManager中  1.子函数解决特殊工况
- *                             2.分离了裂缝CI_geo和CI_phys                      2. 构建物性参数类，实现基岩和裂缝物性参数的赋值
- * 
- * 
- */
-
-
-
-#include <chrono>
+﻿#include <chrono>
 #include <iostream>
 #include "Mesh.h"
 #include "FractureNetwork.h"
@@ -31,7 +12,10 @@
 #include "CouplingAssembler.h" 
 #include "BoundaryFaceClassify.h"
 #include "PressureBC.h"
-#include "SinglePhaseInnerCoeff.h"
+#include "TPFAOperators.h"
+#include "TemperatureBC.h"
+#include "TemperatureBCAdapter.h"
+#include "ConvectiveOperators.h"
 
 
 int main()
@@ -182,17 +166,28 @@ int main()
         << " z0=" << bfaces.z0.size()
         << " zL=" << bfaces.zL.size() << "\n";
 
+
+    /// 压力边界条件设置
+
     //给定参数：2D情况，给定基岩四个边界条件系数
-    PressureBC::BoundaryCoefficient Left { 1.0, 0.0,1e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient Right{ 1.0, 0.0,2e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient Up   { 1.0, 0.0,3e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient Down { 1.0, 0.0,4e5 }; // p = 2e5 Pa
-
-    //边界条件参数写入
     PressureBC::Registry pbc_pw;
-    PressureBC::setBoxBCs2D(pbc_pw, bfaces, Left, Right, Down, Up );   //按照左 右 下 上 的顺序赋值
+    PressureBC::BoundaryCoefficient P_Left { 1.0, 0.0,1e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,2e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Down   { 1.0, 0.0,3e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Up { 1.0, 0.0,4e5 }; // p = 2e5 Pa
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up );   //按照左 右 下 上 的顺序赋值
     pbc_pw.printInformationofBoundarySetting(mgr);
+    PressureBCAdapter bcAdapter{ pbc_pw };
 
+	// /  温度边界条件设置
+    TemperatureBC::Registry tbc;
+    TemperatureBC::BoundaryCoefficient T_Left{ 1.0, 0.0, 300.0 };
+    TemperatureBC::BoundaryCoefficient T_Right{ 1.0, 0.0, 320.0 };
+    TemperatureBC::BoundaryCoefficient T_Down{ 1.0, 0.0, 310.0 };
+    TemperatureBC::BoundaryCoefficient T_Up{ 1.0, 0.0, 330.0 };
+    TemperatureBC::setBoxBCs2D(tbc, bfaces, T_Left, T_Right, T_Down, T_Up);
+    tbc.printInformationofBoundarySetting(mgr);
+    TemperatureBCAdapter TbcA{ tbc };
 
     /**************************基岩裂缝面系数计算 当前系数不考虑裂缝的离散**************************/
 
@@ -203,13 +198,32 @@ int main()
     gu.g = Vector(0.0, -9.80665, 0.0);
     gu.use_potential = true;
 
-    //computeInnerFaceCoefficientsPW(mgr, reg, gu, /*k_default=*/rock.k_iso);
-    computerInnerFaceCoeffAndSources_PW(mgr, reg, gu, rock.k_iso, true, 1);
-    computeBoundaryFaceCoeffAndSources_PW(mgr, reg, gu, rock.k_iso, pbc_pw, /*enable_buoy=*/true, /*gradSmoothIters=*/1);
+	//生成储存储存网格面上离散系数和源项的面场
+	FaceFieldRegistry freg;
 
 
+	//********************求解单相渗流-传热问题***********************//
+	//控制方程包括：质量守恒（单相达西）+能量守恒（基于单相达西速度的对流扩散方程）
+	//质量守恒（单相达西，代求变量为: P_w）：时间项+扩散项=源项
+	//能量守恒（基于单相达西速度的对流扩散方程为: T）：时间项+对流项+扩散项=源项
+
+	// 10) 扩散项离散-针对单相达西流中的质量守恒方程中扩散项的离散系数及源项计算
+	DiffusionIterm_TPFA_water_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, bcAdapter, "a_f_Diff_p_w", "s_f_Diff_p_w", "p_w", /*enable_buoy=*/true, /*gradSmoothIters=*/0);
 
 
+	// 11）扩散项离散-针对基于单相达西速度的能量守恒方程中扩散项的离散系数及源项计算
+    DiffusionIterm_TPFA_Temperature_singlePhase (mgr, reg, freg, gu,"lambda_eff", TbcA, "a_f_Diff_T", "s_f_Diff_T", "T");
+
+
+	// 12）对流项离散-针对基于单相达西速度的能量守恒方程中对流项的离散系数及源项计算
+    Convective_FirstOrder_SinglePhase_Temperature(mgr, reg, freg, TbcA, "cp_w", "p_w", "T", "a_f_Diff_p_w", "s_f_Diff_p_w", "aPP_conv", "aPN_conv", "bP_conv");
+
+	cout << "Convective and Diffusion terms for energy equation discretized.\n";
+	// 13）时间项离散-针对质量守恒方程和能量守恒方程中的时间项离散系数及源项计算
+
+    // 时间项的离散
+
+    // 组装时对单元 P 累加： a_P += a_f[f]; a_N += -a_f[f]; RHS += σ * s_f[f] （σ=+1 组到 owner，σ=−1 组到 neighbor）
 
     // 打印初始化诊断
     Initializer::printDiag(diag);
@@ -287,35 +301,6 @@ int main()
 
 }
 
-//   // 构造 BC 列表
-//   vector<BoundaryCondition> bcs;
-   //for (int fid : groups.bottom) bcs.push_back({ BoundaryType::Dirichlet, fid, 2e5 }); //Directlet边界条件的VALUE  就是给定值
-//   for (int fid : groups.left) bcs.push_back({ BoundaryType::Dirichlet, fid, 1e5 });
-//   for (int fid : groups.right) bcs.push_back({ BoundaryType::Dirichlet, fid, 1e5 });
-
-//   // Neumann（第二类）在下边界，指定通量值 5e3
-//   for (int fid : groups.bottom)
-//       bcs.push_back({ BoundaryType::Neumann, fid, 5e3 });
-//   
-
-//   // **调试输出—检查边界条件到底写到哪个 Cell 上了**
-//   cout << "\n=== Applied boundary conditions ===\n";
-//   for (const auto& bc : bcs) 
-//   {
-//       const auto& face = mesh.faces[bc.faceId - 1];
-//       int owner = face.ownerCell;
-//       const auto& cell = mesh.cells[mesh.cellId2index.at(owner)];
-//           cout
-//           << "Face " << bc.faceId
-//           << " (" << (bc.type == BoundaryType::Dirichlet ? "Dirichlet" :
-//               bc.type == BoundaryType::Neumann ? "Neumann" : "Robin")
-//           << "), value=" << bc.value
-//           << "  to  Cell " << owner
-//           << ": pressure=" << cell.pressure
-//           << ", sourceTerm=" << cell.sourceTerm
-//           << ", faceDiscreCoef=" << cell.faceDiscreCoef
-//           << "\n";
-//   }
 
 
 
