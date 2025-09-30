@@ -5,7 +5,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FieldAcessForDiscre.h"
-#include "TPFA_PermeabilityOperation.h"
+#include "Diff_TPFA_PermeabilityOperation.h"
 
 // 移动率/导热率提供器
 //   double mobilityAlong(const Mesh&, const FieldRegistry&, int cellId,

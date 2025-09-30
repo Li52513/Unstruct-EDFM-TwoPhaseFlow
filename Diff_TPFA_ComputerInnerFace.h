@@ -7,10 +7,10 @@
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
 #include "FieldAcessForDiscre.h"
-#include "TPFA_PermeabilityOperation.h"
-#include "TPFA_GradientsOperation.h"
-#include "TPFA_UpwindforGravityandDensity.h"
-#include "TPFA_Mobility.h"
+#include "Diff_TPFA_PermeabilityOperation.h"
+#include "Diff_TPFA_GradientsOperation.h"
+#include "Diff_TPFA_UpwindforGravityandDensity.h"
+#include "Diff_TPFA_Mobility.h"
 
 // ───────────────────────────────
 //  内部面：TPFA（含可选“达西/纯扩散”两类）
@@ -19,7 +19,9 @@
 //  并将计算得到的网格面离散系数和源项，存入面场 a_f_Diff, s_f_Diff
 // ───────────────────────────────
 template<class MobilityProvider, class DensityPolicy>
-inline void Diffusion_TPFA_InnerFace_SinglePhase(MeshManager& mgr,
+inline void Diffusion_TPFA_InnerFace_SinglePhase
+(
+	MeshManager& mgr,
 	const FieldRegistry& reg,
 	FaceFieldRegistry& freg,
 	const GravUpwind& gu,
@@ -29,7 +31,8 @@ inline void Diffusion_TPFA_InnerFace_SinglePhase(MeshManager& mgr,
 	const std::string& s_name = "s_f_Diff",
 	const std::string& x_name = "p",
 	/*是否计浮力*/ bool enable_buoy = true,
-	/*梯度平滑*/ int gradSmoothIters = 0)
+	/*梯度平滑*/ int gradSmoothIters = 0
+)
 {
 	Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
 	auto faces = const_cast<std::vector<Face>&>(mesh.getFaces());
@@ -78,7 +81,7 @@ inline void Diffusion_TPFA_InnerFace_SinglePhase(MeshManager& mgr,
 		}
 
 		// λ（沿 e 的等效）：调和到面
-		const double lamP = std::max(mob.mobilityAlong(mesh, reg, P, ehat), eps_l);
+		const double lamP = std::max(mob.mobilityAlong(mesh, reg, P, ehat), eps_l);  //涉及到的物性参数为黏度mu
 		const double lamN = std::max(mob.mobilityAlong(mesh, reg, N, ehat), eps_l);
 		const double lam_f = 1.0 / std::max(gamma / lamP + (1.0 - gamma) / lamN, eps_l);
 
@@ -90,7 +93,7 @@ inline void Diffusion_TPFA_InnerFace_SinglePhase(MeshManager& mgr,
 		const Vector& CN = mesh.getCells()[id2idx.at(N)].center;
 
 		const double rho_inter = rhoPol.rhoBar(mesh, reg, P, N,gamma);
-		const double rho_up = rhoPol.rhoUp(mesh, reg, P, N, p_p, p_n, CP, CN, gu);
+		const double rho_up = rhoPol.rhoUp(mesh, reg, P, N, p_p, p_n, CP, CN, gu);  //涉及到的物性参数为密度rho
 
 		// β_f = λ_e * |E| / d_perp
 		const double beta_f = std::max(rho_up * lam_f, 0.0);

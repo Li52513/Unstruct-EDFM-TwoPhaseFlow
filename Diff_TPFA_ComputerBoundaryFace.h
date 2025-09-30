@@ -5,10 +5,10 @@
 #include "FaceFieldRegistry.h"
 #include "BCAdapter.h"
 #include "FieldAcessForDiscre.h"
-#include "TPFA_PermeabilityOperation.h"
-#include "TPFA_GradientsOperation.h"
-#include "TPFA_UpwindforGravityandDensity.h"
-#include "TPFA_Mobility.h"
+#include "Diff_TPFA_PermeabilityOperation.h"
+#include "Diff_TPFA_GradientsOperation.h"
+#include "Diff_TPFA_UpwindforGravityandDensity.h"
+#include "Diff_TPFA_Mobility.h"
 
 // ───────────────────────────────
 //  边界面：TPFA + 通用 ABC（面积化）

@@ -101,12 +101,6 @@ static inline void ensureFracTIDiagFields(FieldRegistry& reg_fr, size_t nSeg) {
     if (!reg_fr.has("diag_kt"))      reg_fr.create<volScalarField>("diag_kt", nSeg, 0.0);
 }
 
-
-
-
-
-
-
 // ------------- 创建/确保 CI 场 -------------
 void ensureFracCouplingFields(FieldRegistry& reg_fr, size_t nSeg) {
     if (!reg_fr.has("CIw")) reg_fr.create<volScalarField>("CIw", nSeg, 0.0);

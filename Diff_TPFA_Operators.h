@@ -8,13 +8,13 @@
 #include "FaceFieldRegistry.h"
 #include "BCAdapter.h"
 #include "FieldAcessForDiscre.h"
-#include "TPFA_PermeabilityOperation.h"
-#include "TPFA_GradientsOperation.h"
-#include "TPFA_UpwindforGravityandDensity.h"
-#include "TPFA_Mobility.h"
-#include "TPFA_ComputerBoundaryFace.h"		
-#include "TPFA_ComputerInnerFace.h"
-#include "TPFA_DebugPrint.h"
+#include "Diff_TPFA_PermeabilityOperation.h"
+#include "Diff_TPFA_GradientsOperation.h"
+#include "Diff_TPFA_UpwindforGravityandDensity.h"
+#include "Diff_TPFA_Mobility.h"
+#include "Diff_TPFA_ComputerBoundaryFace.h"		
+#include "Diff_TPFA_ComputerInnerFace.h"
+#include "Diff_TPFA_DebugPrint.h"
 #include "TemperatureBCAdapter.h"
 
 
@@ -137,7 +137,7 @@ inline void DiffusionIterm_singlePhase_DarcyFlow_CO2_TPFA_BoundaryFace
 		/*max_to_print*/100);
 }
 
-inline void DiffusionIterm_TPFA_CO2_singlePhase_Flow
+inline void DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow
 (
 	MeshManager& mgr,
 	const FieldRegistry& reg,

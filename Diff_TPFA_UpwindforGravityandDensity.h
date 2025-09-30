@@ -22,7 +22,8 @@ struct GravUpwind {
 
 
 
-struct UpwindDensityByPotential_water {
+struct UpwindDensityByPotential_water
+{
 	std::string rho_name = "rho_w";
 	bool use_potential = true;
 	explicit UpwindDensityByPotential_water(bool usePhi = true) : use_potential(usePhi) {}

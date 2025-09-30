@@ -2,8 +2,6 @@
 #include <iostream>
 #include "Mesh.h"
 #include "FractureNetwork.h"
-#include "Fluid.h"
-#include "Matrix.h"
 #include "pressureinit.h"
 #include "MeshManager.h"
 #include "PhysicalPropertiesManager.h"
@@ -12,10 +10,15 @@
 #include "CouplingAssembler.h" 
 #include "BoundaryFaceClassify.h"
 #include "PressureBC.h"
-#include "TPFAOperators.h"
+#include "Diff_TPFA_Operators.h"
 #include "TemperatureBC.h"
 #include "TemperatureBCAdapter.h"
-#include "ConvectiveOperators.h"
+#include "Conv_FirstOrder_Operators.h"
+#include "TimeIterm_Euler_SinglePhase_PressureEq.h"
+#include "TimeIterm_Euler_SinglePhase_TemperatureEq.h"
+#include "Solver_TimeLoopDriver.h"
+#include "Solver_TimeLoopUtils.h" 
+
 
 
 int main()
@@ -80,7 +83,7 @@ int main()
     std::cout << "FractureDetect in " << ms10 << " ms.\n";
 	mgr.ComputeFractureGeometryCouplingCoefficient();   //明确一点： 因为这里还没有给出物性参数，这里计算的只是几何耦合系数 CI_geo和 geomAlpha 各自的表达式分别为：CI_geo = L*1/d_avg geomAlpha = 2 / L;
 
-    /**************************物性参数设置模块******************************/
+    /**************************主变量初始化以及物性参数设置模块******************************/
     /*----------------------------------------------------------------------*/
 	auto t4 = std::chrono::high_resolution_clock::now(); // 计时开始
     
@@ -112,14 +115,15 @@ int main()
 	ppm.classifyFractureElementsByGeometry(mgr, 0, { 0.1, 0.2, 0 }, { 0.3, 0.9, 0 }, FractureElementType::Blocking, FractureElementType::Conductive);
 
 
-	// 4) 主变量场初始化（温度T,水相饱和度Sw,水相压力Pw)
+	// 4) 生成场变量以及设置初始化参数和VG模型（温度T,水相饱和度Sw,水相压力Pw)
     FieldRegistry reg;      // 基岩场
     FieldRegistry reg_fr;   // 裂缝场（与你当前实现一致，用同一类型的注册表管理）
     InitFields ic;          // p0/T0/Sw0 及其梯度（默认为均匀）
-    VGParams vg;            // vG 参数
+    VGParams vg;            // vG 参数 =vg模型
     RelPermParams rp;       // 相对渗透率参数（默认 L=0.5）
     RockDefaults rock;      // 基岩默认热物性
     InitDiagnostics diag;   // 诊断统计
+    
     // 5) 基岩“主变量场”创建与填充：p_w, S_w, T (+ p_c, p_g, kr_w, kr_g)
 
     //创建基岩的主变量场
@@ -131,27 +135,37 @@ int main()
     //对水相饱和度进行限幅并记录限制修改的次数
     Initializer::enforceSaturationBounds(reg, vg, diag); 
 
-    //计算闭合关系包括毛细压力和相对渗透率
+    //计算闭合关系包括毛细压力和相对渗透率 //两相流时启用
     Initializer::computeClosure(mgr.mesh(), reg, vg, rp, diag);
 
-    // 6) 基岩有效热物性（C_eff, lambda_eff）
-    Initializer::computerEffectiveThermals(mgr.mesh(), reg, rock, diag);
+    //6）创建 transient 辅助场，后面时间推进会用
+    //单相渗流-传热问题
+	ensureTransientFields(mgr.mesh(), reg, /*p_name=*/"p_w", /*T_name=*/"T", /*p_old_name=*/"p_w_old", /*T_old_name=*/"T_old", /*p_prev_name=*/"p_w_prev", /*T_prev_name=*/"T_prev"); //p_w T代表当前场变量，*_old代表上一时步变量，*_prev代表上一迭代步的变量,水相
+	ensureTransientFields(mgr.mesh(), reg, /*p_name=*/"p_g", /*T_name=*/"T", /*p_old_name=*/"p_g_old", /*T_old_name=*/"T_old", /*p_prev_name=*/"p_g_prev", /*T_prev_name=*/"T_prev");//p_g T代表当前场变量，*_old代表上一时步变量，*_prev代表上一迭代步的变量,气相
 
-    // 7) 裂缝段主变量场：pf_w, Sf_w, Tf（从宿主基岩单元拷贝）
+	//7）裂缝主变量初始化 （当前还未涉及裂缝）**
     Initializer::initFracturePrimaries(mgr.mesh(), mgr.fracture_network(), reg, reg_fr);
 
-    // 8) 基岩/裂缝固相场：由 region/type + (P,T) 通过你的 computeSolidProperties() 得到
-    ppm.InitializeRockMatrixProperties(mgr, reg);
-    ppm.InitializeFractureElementsProperties(mgr, reg_fr);
+    //8）基岩物性参数设置
+    //   a.固相参数
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
 
-    // 9) 基岩/裂缝流体物性场：查 WaterPropertyTable / CO2PropertyTable
-    //    - 基岩用 p_w/p_g/T
-    //    - 裂缝用 pf_w/Tf 与 pg_f = pf_w + pc_vG(Sf_w)
+	//   b.流体参数
+    ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "CO2");
 
-	ppm.MatrixFluidPropertiesTest(315.54930556, 5027664.1668); // 测试水和 CO2 物性表
+    //   c.有效热物性参数
+    ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "CO2", 1e-12);
 
-    ppm.InitializeMatrixFluidProperties(mgr, reg, vg);
-    ppm.InitializeFractureFluidProperties(mgr, reg, reg_fr, vg);
+	//9）裂缝物性参数设置
+    //   a.固相参数
+	ppm.UpdateFractureRockAt(mgr, reg, reg_fr, "pf_w", "Tf");
+
+    //   b.流体参数
+	ppm.UpdateFractureFluidAt(mgr, reg, reg_fr, "pf_w", "Tf", "CO2");
+
+	//   c.有效热物性参数 (待补充)
+	
+    ppm.MatrixFluidPropertiesTest(315.54930556, 5027664.1668); // 测试水和 CO2 物性表
 
     /**************************边界条件设置模块******************************/
 
@@ -172,9 +186,9 @@ int main()
     //给定参数：2D情况，给定基岩四个边界条件系数
     PressureBC::Registry pbc_pw;
     PressureBC::BoundaryCoefficient P_Left { 1.0, 0.0,1e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,2e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Down   { 1.0, 0.0,3e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Up { 1.0, 0.0,4e5 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,2e6 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Down   { 0.0, 1.0,0}; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Up { 0.0, 1.0,0 }; // p = 2e5 Pa
     PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up );   //按照左 右 下 上 的顺序赋值
     pbc_pw.printInformationofBoundarySetting(mgr);
     PressureBCAdapter bcAdapter{ pbc_pw };
@@ -200,30 +214,6 @@ int main()
 
 	//生成储存储存网格面上离散系数和源项的面场
 	FaceFieldRegistry freg;
-
-
-	//********************求解单相渗流-传热问题***********************//
-	//控制方程包括：质量守恒（单相达西）+能量守恒（基于单相达西速度的对流扩散方程）
-	//质量守恒（单相达西，代求变量为: P_w）：时间项+扩散项=源项
-	//能量守恒（基于单相达西速度的对流扩散方程为: T）：时间项+对流项+扩散项=源项
-
-	// 10) 扩散项离散-针对单相达西流中的质量守恒方程中扩散项的离散系数及源项计算
-	DiffusionIterm_TPFA_water_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, bcAdapter, "a_f_Diff_p_w", "s_f_Diff_p_w", "p_w", /*enable_buoy=*/true, /*gradSmoothIters=*/0);
-
-
-	// 11）扩散项离散-针对基于单相达西速度的能量守恒方程中扩散项的离散系数及源项计算
-    DiffusionIterm_TPFA_Temperature_singlePhase (mgr, reg, freg, gu,"lambda_eff", TbcA, "a_f_Diff_T", "s_f_Diff_T", "T");
-
-
-	// 12）对流项离散-针对基于单相达西速度的能量守恒方程中对流项的离散系数及源项计算
-    Convective_FirstOrder_SinglePhase_Temperature(mgr, reg, freg, TbcA, "cp_w", "p_w", "T", "a_f_Diff_p_w", "s_f_Diff_p_w", "aPP_conv", "aPN_conv", "bP_conv");
-
-	cout << "Convective and Diffusion terms for energy equation discretized.\n";
-	// 13）时间项离散-针对质量守恒方程和能量守恒方程中的时间项离散系数及源项计算
-
-    // 时间项的离散
-
-    // 组装时对单元 P 累加： a_P += a_f[f]; a_N += -a_f[f]; RHS += σ * s_f[f] （σ=+1 组到 owner，σ=−1 组到 neighbor）
 
     // 打印初始化诊断
     Initializer::printDiag(diag);
@@ -297,6 +287,48 @@ int main()
     outF.exportFractureValue(mgr.mesh(), mgr.fracture_network(), reg_fr, time0, step0);
 
     std::cout << "Finished initial setup and wrote t=0 state for MATLAB.\n";
+
+	// 下面进入时间推进模块
+
+    //********************求解单相渗流-传热问题***********************//
+    //控制方程包括：质量守恒（单相达西）+能量守恒（基于单相达西速度的对流扩散方程）
+    //质量守恒（单相达西，代求变量为: P_w）：时间项+扩散项=源项
+    //能量守恒（基于单相达西速度的对流扩散方程为: T）：时间项+对流项+扩散项=源项
+
+
+    //求解器参数：
+    const double Time = 10.0;  // 总模拟时间s
+    const double Time_Steps = 10;  // 时间步数
+    const double dt = Time / Time_Steps;      // 自定
+    const double tol_p_abs = 1e-6;     // 压力收敛绝对误差
+    const double tol_T_abs = 1e-6;     //  温度收敛绝对误差
+    const int    maxOuter = 100;        // 最大外迭代次数
+    const double urf_p = 0.7;      // 欠松弛
+    const double urf_T = 0.7;
+    const double c_phi_const = 1e-12; // 可压缩性
+
+
+    SolverControls sc;
+    sc.maxOuter = maxOuter;     // 你 main 里已有的参数
+    sc.tol_p_abs = tol_p_abs;
+    sc.tol_T_abs = tol_T_abs;
+    sc.urf_p = urf_p;
+    sc.urf_T = urf_T;
+    sc.c_phi_const = c_phi_const;
+    sc.jac_p = { /*maxIt*/500, /*omega*/0.8, /*atol*/1e-8 };
+    sc.jac_T = { /*maxIt*/500, /*omega*/0.8, /*atol*/1e-8 };
+
+    // —— 跑 10000 步，每步 dt —— //
+    runTransient_CO2_singlePhase
+    (
+        mgr, reg, freg, ppm,
+        bcAdapter, TbcA, gu, rock,
+        /*nSteps*/ static_cast<int>(Time_Steps),
+        /*dt*/ dt,
+        sc,
+        /*writeEvery*/ 1000,   // 每 1000 步导一次（按需改）
+        nullptr                  // 不需要导出就传 nullptr
+    );
     return 0;
 
 }

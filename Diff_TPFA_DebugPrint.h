@@ -6,10 +6,10 @@
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
 #include "FieldAcessForDiscre.h"               // cellScalar(...)
-#include "TPFA_PermeabilityOperation.h"        // kEffAlong/getKdiag（若 Mobility 里用到）
-#include "TPFA_GradientsOperation.h"           // computeCellGradients_LSQ_with_GG(...)
-#include "TPFA_Mobility.h"                     // DarcyWaterMobility_singlePhase 等
-#include "TPFA_UpwindforGravityandDensity.h"   // UpwindDensityByPotential_* / GravUpwind
+#include "Diff_TPFA_PermeabilityOperation.h"        // kEffAlong/getKdiag（若 Mobility 里用到）
+#include "Diff_TPFA_GradientsOperation.h"           // computeCellGradients_LSQ_with_GG(...)
+#include "Diff_TPFA_Mobility.h"                     // DarcyWaterMobility_singlePhase 等
+#include "Diff_TPFA_UpwindforGravityandDensity.h"   // UpwindDensityByPotential_* / GravUpwind
 #include "BCAdapter.h"   
 
 // 小工具 ：统一几何（内部/边界）
