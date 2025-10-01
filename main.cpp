@@ -185,8 +185,8 @@ int main()
 
     //给定参数：2D情况，给定基岩四个边界条件系数
     PressureBC::Registry pbc_pw;
-    PressureBC::BoundaryCoefficient P_Left { 1.0, 0.0,1e5 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,2e6 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Left { 1.0, 0.0,6e6 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,8e6 }; // p = 2e5 Pa
     PressureBC::BoundaryCoefficient P_Down   { 0.0, 1.0,0}; // p = 2e5 Pa
     PressureBC::BoundaryCoefficient P_Up { 0.0, 1.0,0 }; // p = 2e5 Pa
     PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up );   //按照左 右 下 上 的顺序赋值
@@ -195,22 +195,17 @@ int main()
 
 	// /  温度边界条件设置
     TemperatureBC::Registry tbc;
-    TemperatureBC::BoundaryCoefficient T_Left{ 1.0, 0.0, 300.0 };
-    TemperatureBC::BoundaryCoefficient T_Right{ 1.0, 0.0, 320.0 };
-    TemperatureBC::BoundaryCoefficient T_Down{ 1.0, 0.0, 310.0 };
-    TemperatureBC::BoundaryCoefficient T_Up{ 1.0, 0.0, 330.0 };
+    TemperatureBC::BoundaryCoefficient T_Left{ 1.0, 0.0, 330.0 };
+    TemperatureBC::BoundaryCoefficient T_Right{ 1.0, 0.0, 330.0 };
+    TemperatureBC::BoundaryCoefficient T_Down{ 0.0, 1.0,0 };
+    TemperatureBC::BoundaryCoefficient T_Up{ 0.0, 1.0,0 };
     TemperatureBC::setBoxBCs2D(tbc, bfaces, T_Left, T_Right, T_Down, T_Up);
     tbc.printInformationofBoundarySetting(mgr);
     TemperatureBCAdapter TbcA{ tbc };
 
     /**************************基岩裂缝面系数计算 当前系数不考虑裂缝的离散**************************/
 
-    //当前是H2O相渗流
-    //1 设置重力大小及重力方向
-    //2 在对密度进行迎风性判别时，是否需要考虑重力势能
-    GravUpwind gu;
-    gu.g = Vector(0.0, -9.80665, 0.0);
-    gu.use_potential = true;
+
 
 	//生成储存储存网格面上离散系数和源项的面场
 	FaceFieldRegistry freg;
@@ -296,39 +291,52 @@ int main()
     //能量守恒（基于单相达西速度的对流扩散方程为: T）：时间项+对流项+扩散项=源项
 
 
-    //求解器参数：
-    const double Time = 10.0;  // 总模拟时间s
-    const double Time_Steps = 10;  // 时间步数
-    const double dt = Time / Time_Steps;      // 自定
-    const double tol_p_abs = 1e-6;     // 压力收敛绝对误差
-    const double tol_T_abs = 1e-6;     //  温度收敛绝对误差
-    const int    maxOuter = 100;        // 最大外迭代次数
-    const double urf_p = 0.7;      // 欠松弛
-    const double urf_T = 0.7;
-    const double c_phi_const = 1e-12; // 可压缩性
+    ////求解器参数：
+    //const double Time = 10.0;  // 总模拟时间s
+    //const double Time_Steps = 1000;  // 时间步数
+    //const double dt = Time / Time_Steps;      // 自定
+    //const double tol_p_abs = 1e-6;     // 压力收敛绝对误差
+    //const double tol_T_abs = 1e-6;     //  温度收敛绝对误差
+    //const int    maxOuter = 100;        // 最大外迭代次数
+    //const double urf_p = 0.7;      // 欠松弛
+    //const double urf_T = 0.7;
+    //const double c_phi_const = 1e-9; // 可压缩性
+
+    //1 设置重力大小及重力方向
+//2 在对密度进行迎风性判别时，是否需要考虑重力势能
+    GravUpwind gu;
+    gu.g = Vector(0.0, -9.80665, 0.0);
+    gu.use_potential = true;
 
 
+    // 求解器参数
     SolverControls sc;
-    sc.maxOuter = maxOuter;     // 你 main 里已有的参数
-    sc.tol_p_abs = tol_p_abs;
-    sc.tol_T_abs = tol_T_abs;
-    sc.urf_p = urf_p;
-    sc.urf_T = urf_T;
-    sc.c_phi_const = c_phi_const;
-    sc.jac_p = { /*maxIt*/500, /*omega*/0.8, /*atol*/1e-8 };
-    sc.jac_T = { /*maxIt*/500, /*omega*/0.8, /*atol*/1e-8 };
+    sc.maxOuter = 100;
+    sc.tol_p_abs = 1e-6;
+    sc.tol_T_abs = 1e-6;
+    sc.urf_p = 0.7;
+    sc.urf_T = 0.7;
+    sc.c_phi_const = 1e-9;
+    sc.jac_p = { 500, 0.8, 1e-8 };
+    sc.jac_T = { 500, 0.8, 1e-8 };
 
-    // —— 跑 10000 步，每步 dt —— //
-    runTransient_CO2_singlePhase
-    (
+    int    nSteps = 1000;
+    double dt = 10.0 / nSteps;
+
+    // 只导出 TXT，每步一份；不导出 CSV / MM：
+    runTransient_singlePhase(
         mgr, reg, freg, ppm,
         bcAdapter, TbcA, gu, rock,
-        /*nSteps*/ static_cast<int>(Time_Steps),
-        /*dt*/ dt,
-        sc,
-        /*writeEvery*/ 1000,   // 每 1000 步导一次（按需改）
-        nullptr                  // 不需要导出就传 nullptr
+        nSteps, dt, sc,
+        /*phase=*/"CO2",
+        /*writeEvery=*/0,
+        /*onWrite=*/nullptr,
+        /*exportCSV=*/false,
+        /*exportTXT=*/true,
+        /*exportMM=*/false
     );
+
+
     return 0;
 
 }

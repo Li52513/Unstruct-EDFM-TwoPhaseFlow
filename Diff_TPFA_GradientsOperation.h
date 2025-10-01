@@ -177,11 +177,11 @@ computeCellGradients_LSQ_with_GG(Mesh& mesh, const FieldRegistry& reg, const cha
 			// 轻微对角正则，避免近奇异
 			G.a[0][0] += 1e-18; G.a[1][1] += 1e-18; G.a[2][2] += 1e-18;
 			ok = G.solve(b, grad[iP]);
-			cout << "对单元" << CP.id << "采用了LSQ算法计算梯度" << endl;
+			//cout << "对单元" << CP.id << "采用了LSQ算法计算梯度" << endl;
 		}
 		if (!ok) {
 			grad[iP] = greenGaussGrad(mesh, reg, name, CP);  // GG 兜底
-			cout << "对单元" << CP.id << "采用了GG算法计算梯度" << endl;;
+			//cout << "对单元" << CP.id << "采用了GG算法计算梯度" << endl;;
 		}
 	}
 
