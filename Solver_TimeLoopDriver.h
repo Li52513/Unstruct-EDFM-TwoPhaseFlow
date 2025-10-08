@@ -4,6 +4,7 @@
 #include <string>
 #include "Solver_TimeLoopSkeleton.h"  // outerIter_OneStep_singlePhase(...)
 #include "Solver_PostChecks.h"        // PostChecks::export_* / dumpCOO_to_matrix_market
+#include "TecplotExporter.h"          // TecplotExport::export_pT_tecplot_after_step
 #include "Solver_AssemblerCOO.h"      // 组装函数的声明（assemblePressure_* / assembleTemperature_*）
 
 // 可选导出回调：用户自定义额外输出
@@ -46,7 +47,8 @@ inline bool runTransient_singlePhase
     WriteCallback onWrite = nullptr,
     bool exportCSV = false,
     bool exportTXT = true,
-    bool exportMM = false
+    bool exportMM = false,
+    bool exportTecplot = false
 )
 {
     if (nSteps <= 0 || dt <= 0.0) {
@@ -80,6 +82,15 @@ inline bool runTransient_singlePhase
         }
         if (exportCSV) {
             PostChecks::export_pT_csv_after_step(mgr, reg, pField, "T", step1, t, outFolderCSV);
+        }
+        if (exportTecplot) {
+            TecplotExport::TecplotOptions opt;
+            opt.folder = std::string("out_tec_") + phase;
+            opt.filePrefix = phase;
+            if (!TecplotExport::export_pT_tecplot_after_step(
+                mgr, reg, freg, Pbc, Tbc, pField, "T", step1, t, opt)) {
+                std::cerr << "[runTransient] Tecplot export failed at step " << step1 << ".\n";
+            }
         }
 
         // ——可选：导出 MatrixMarket（重新装配一次用于外部核查）——

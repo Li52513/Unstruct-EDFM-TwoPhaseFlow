@@ -45,19 +45,19 @@ inline void ensureParentDirExists(const std::string& filepath) {
         char ch = path[i];
         acc.push_back(ch);
         if (ch == '\\' || ch == '/') {
-            _mkdir(acc.c_str()); // 已存在则忽略
+            (void)_mkdir(acc.c_str()); // 已存在则忽略
         }
     }
-    _mkdir(path.c_str());
+    (void)_mkdir(path.c_str());
 }
 inline void ensureDirExists(const std::string& dirpath) {
     // 递归创建
     std::string acc;
     for (char ch : dirpath) {
         acc.push_back(ch);
-        if (ch == '\\' || ch == '/') _mkdir(acc.c_str());
+        if (ch == '\\' || ch == '/') (void)_mkdir(acc.c_str());
     }
-    _mkdir(dirpath.c_str());
+    (void)_mkdir(dirpath.c_str());
 }
 #else
 #include <sys/stat.h>
