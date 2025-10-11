@@ -27,7 +27,7 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =3, sectionNumY =3, sectionNumZ =0;
+    int sectionNumX =5, sectionNumY =5, sectionNumZ =0;
 	bool usePrism = true;       ///  3D情况usePrism=true 进行“扫掠 ”；
 	bool useQuadBase = false;    /// 在 2D 情况：false 为非结构化三角, true  为非结构化四边形； 在 3D 扫掠模式：仅用来选择底面网格类型
     /*----------------------------------------------------------------------*/
@@ -98,14 +98,14 @@ int main()
         {
                 {0.0, 0.5, 0.0},
                 {0.0, 1.0, 0.0},
-                {0.5, 0.5, 0.0}
+                {0.5, 1.0, 0.0}
             }
             },
         // 低渗区
         { Cell::RegionType::Low,
         {
             {0.5, 0.0, 0.0},
-            {0.0, 1.0, 0.0},
+            {1.0, 1.0, 0.0},
             {1.0, 0.5, 0.0}
         }
         }
@@ -148,13 +148,13 @@ int main()
 
     //8）基岩物性参数设置
     //   a.固相参数
-    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
 
 	//   b.流体参数
-    ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "CO2");
+    ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
 
     //   c.有效热物性参数
-    ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "CO2", 1e-12);
+    ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
 
 	//9）裂缝物性参数设置
     //   a.固相参数
@@ -185,20 +185,20 @@ int main()
 
     //给定参数：2D情况，给定基岩四个边界条件系数
     PressureBC::Registry pbc_pw;
-    PressureBC::BoundaryCoefficient P_Left { 1.0, 0.0,6e6 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,8e6 }; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Down   { 0.0, 1.0,0}; // p = 2e5 Pa
-    PressureBC::BoundaryCoefficient P_Up { 0.0, 1.0,0 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Left { 1.0, 0.0,8e6 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0,6e6 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Down   { 1.0, 0.0,6e6 }; // p = 2e5 Pa
+    PressureBC::BoundaryCoefficient P_Up { 1.0, 0.0,8e6 }; // p = 2e5 Pa
     PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up );   //按照左 右 下 上 的顺序赋值
     pbc_pw.printInformationofBoundarySetting(mgr);
     PressureBCAdapter bcAdapter{ pbc_pw };
 
 	// /  温度边界条件设置
     TemperatureBC::Registry tbc;
-    TemperatureBC::BoundaryCoefficient T_Left{ 1.0, 0.0, 330.0 };
-    TemperatureBC::BoundaryCoefficient T_Right{ 1.0, 0.0, 330.0 };
-    TemperatureBC::BoundaryCoefficient T_Down{ 0.0, 1.0,0 };
-    TemperatureBC::BoundaryCoefficient T_Up{ 0.0, 1.0,0 };
+    TemperatureBC::BoundaryCoefficient T_Left{ 1.0, 0.0, 450.0 };
+    TemperatureBC::BoundaryCoefficient T_Right{ 1.0, 0.0, 373.15 };
+    TemperatureBC::BoundaryCoefficient T_Down{ 1.0, 0.0, 373.15 };
+    TemperatureBC::BoundaryCoefficient T_Up{ 1.0, 0.0, 450.0 };
     TemperatureBC::setBoxBCs2D(tbc, bfaces, T_Left, T_Right, T_Down, T_Up);
     tbc.printInformationofBoundarySetting(mgr);
     TemperatureBCAdapter TbcA{ tbc };
@@ -290,37 +290,60 @@ int main()
     //质量守恒（单相达西，代求变量为: P_w）：时间项+扩散项=源项
     //能量守恒（基于单相达西速度的对流扩散方程为: T）：时间项+对流项+扩散项=源项
 
-
-    ////求解器参数：
-    //const double Time = 10.0;  // 总模拟时间s
-    //const double Time_Steps = 1000;  // 时间步数
-    //const double dt = Time / Time_Steps;      // 自定
-    //const double tol_p_abs = 1e-6;     // 压力收敛绝对误差
-    //const double tol_T_abs = 1e-6;     //  温度收敛绝对误差
-    //const int    maxOuter = 100;        // 最大外迭代次数
-    //const double urf_p = 0.7;      // 欠松弛
-    //const double urf_T = 0.7;
-    //const double c_phi_const = 1e-9; // 可压缩性
-
     //1 设置重力大小及重力方向
 //2 在对密度进行迎风性判别时，是否需要考虑重力势能
     GravUpwind gu;
     gu.g = Vector(0.0, -9.80665, 0.0);
+    //gu.g = Vector(0.0,0.0, 0.0);
     gu.use_potential = true;
 
 
     // 求解器参数
     SolverControls sc;
-    sc.maxOuter = 100;
-    sc.tol_p_abs = 1e-6;
+    sc.maxOuter = 300;
+    sc.tol_p_abs = 10.0;     // 举例：绝对容差 10 Pa
     sc.tol_T_abs = 1e-6;
-    sc.urf_p = 0.7;
-    sc.urf_T = 0.7;
+    sc.tol_p_rel = 1e-6;     // 新增：压力相对容差
+    sc.tol_T_rel = 1e-6;     // 新增：温度相对容差
+	sc.urf_p = 0.4; //欠松弛因子
+	sc.urf_T = 0.25; //欠松弛因子
     sc.c_phi_const = 1e-9;
     sc.jac_p = { 500, 0.8, 1e-8 };
     sc.jac_T = { 500, 0.8, 1e-8 };
+    
+    sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB; // 压力：也可选 CG
+    sc.lin_p.maxIters = 5000;
+    sc.lin_p.tol = sc.tol_p_abs;
+    sc.lin_p.iluFill = 10;
+    sc.lin_p.iluDrop = 1e-4;
+    sc.lin_p.equil = true;   // 建议保持 on
+    sc.lin_p.reusePreconditioner = 3;
 
-    int    nSteps = 1000;
+
+    //sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB; // 温度：非对称，建议 BiCGSTAB
+    //sc.lin_T.maxIters = 5000;
+    //sc.lin_T.tol = sc.tol_T_abs;
+    //sc.lin_T.iluFill = 10;
+    //sc.lin_T.iluDrop = 1e-4;
+
+    //sc.lin_p.type = LinearSolverOptions::Type::SparseLU;  // 压力用直接法
+    //sc.lin_p.equil = true;   // 默认就是 true，可不写
+    //// 直接法不关心 maxIters/tol/ILU 设置
+
+    //sc.lin_T.type = LinearSolverOptions::Type::SparseLU;  // 先试直接法
+    //sc.lin_T.equil = true;
+
+    sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
+    sc.lin_T.maxIters = 10000;
+    sc.lin_T.tol = sc.tol_T_abs;
+    sc.lin_T.iluFill = 20;
+    sc.lin_T.iluDrop = 1e-5;
+    sc.lin_T.equil = true;   // 建议保持 on
+    sc.lin_T.reusePreconditioner = 2;
+
+
+    sc.useJacobi = false;
+    int    nSteps = 2000;
     double dt = 10.0 / nSteps;
 
     // 只导出 TXT，每步一份；不导出 CSV / MM：
@@ -329,11 +352,13 @@ int main()
         bcAdapter, TbcA, gu, rock,
         nSteps, dt, sc,
         /*phase=*/"CO2",
-        /*writeEvery=*/0,
+        /*writeEvery=*/20,
         /*onWrite=*/nullptr,
         /*exportCSV=*/false,
         /*exportTXT=*/true,
-        /*exportMM=*/false
+        /*exportMM=*/true,
+        /*exportTecplotP=*/false,
+        /*exportTecplotT=*/true
     );
 
 

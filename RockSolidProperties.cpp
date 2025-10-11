@@ -18,11 +18,11 @@ SolidProperties_RockMatrix rock::computeSolidProperties(Cell::RegionType region,
     switch (region) 
     {
     case Cell::RegionType::Low:
-        s.porosity = 0.05;  s.permeability = 1e-14;  break;
+        s.porosity = 0.3;  s.permeability = 1e-12;  break;
     case Cell::RegionType::Medium:
-        s.porosity = 0.15;  s.permeability = 1e-12;  break;
+        s.porosity = 0.3;  s.permeability = 1e-12;  break;
     case Cell::RegionType::High:
-        s.porosity = 0.30;  s.permeability = 1e-10;  break;
+        s.porosity = 0.3;  s.permeability = 1e-12;  break;
     }
     return s;
 }

@@ -49,8 +49,10 @@ inline void Diffusion_TPFA_BoundaryFace_SinglePhase(MeshManager& mgr,
 
 	const double eps_d = 1e-14, eps_mu = 1e-30, eps_l = 1e-30;
 
-	for (const auto& F : faces)
+#pragma omp parallel for schedule(static)
+	for (int f = 0; f < static_cast<int>(faces.size()); ++f)
 	{
+		const Face& F = faces[f];
 		if (!F.isBoundary()) continue;
 		const int P = F.ownerCell;
 		const size_t iP = id2idx.at(P);
@@ -103,11 +105,12 @@ inline void Diffusion_TPFA_BoundaryFace_SinglePhase(MeshManager& mgr,
 			// 单边取 ρ_P（达西类）；纯扩散则 ρ_P=1，s_buoy 不会被使用
 			const double rhoP = rhoPol.rhoUp(mesh, reg, P, P, pP, pP, CPc, CPc, gu);
 			const double g_dot_e = gu.g * ehat; // g·ê
-			s_buoy = -beta_f * rhoP * g_dot_e * Eabs + -beta_f * rhoP* gu.g* F.vectorT; // s_buoy
+			s_buoy = -beta_f * rhoP * g_dot_e * Eabs + -beta_f * rhoP * gu.g * F.vectorT; // s_buoy
 		}
 
 		const double s_BC = a_face * betaB_f; // s_BC
 		(*a_f_Diff)[F.id - 1] = a_PB;
 		(*s_f_Diff)[F.id - 1] = s_cross + s_buoy + s_BC;
 	}
+
 }

@@ -48,7 +48,8 @@ inline bool runTransient_singlePhase
     bool exportCSV = false,
     bool exportTXT = true,
     bool exportMM = false,
-    bool exportTecplot = false
+    bool exportTecplotP = false,
+    bool exportTecplotT = false
 )
 {
     if (nSteps <= 0 || dt <= 0.0) {
@@ -60,6 +61,41 @@ inline bool runTransient_singlePhase
     std::string outFolderCSV = std::string("out_pT_") + phase;
     std::string outFolderTXT = std::string("out_txt_") + phase;
     std::string mmFolder = "mm";
+
+    // 初始时刻 t=0, step=0 的输出（可选）
+    if (exportTXT) {
+        PostChecks::export_pT_txt_after_step(mgr, reg, pField, "T",
+            /*step=*/0, /*t=*/0.0,
+            /*folder=*/outFolderTXT);
+    }
+    if (exportCSV) {
+        PostChecks::export_pT_csv_after_step(mgr, reg, pField, "T",
+            /*step=*/0, /*t=*/0.0,
+            /*folder=*/outFolderCSV);
+    }
+    if (exportTecplotP || exportTecplotT) {
+        TecplotExport::TecplotOptions opt;
+        opt.folder = std::string("out_tec_") + phase;
+        opt.filePrefix = phase;
+        if (exportTecplotP) {
+            TecplotExport::export_cellField_to_tecplot_after_step(
+                mgr, reg, freg, opt,
+                /*cellField*/ pField,
+                /*tmpFace*/   pField + std::string("_face_tmp"),
+                /*varName*/   "P",
+                /*step=*/0, /*t=*/0.0,
+                /*PBC*/ &Pbc, /*TBC*/ nullptr);
+        }
+        if (exportTecplotT) {
+            TecplotExport::export_cellField_to_tecplot_after_step(
+                mgr, reg, freg, opt,
+                /*cellField*/ "T",
+                /*tmpFace*/   "T_face_tmp",
+                /*varName*/   "T",
+                /*step=*/0, /*t=*/0.0,
+                /*PBC*/ nullptr, /*TBC*/ &Tbc);
+        }
+    }
 
     double t = 0.0;
     for (int step = 0; step < nSteps; ++step)
@@ -83,29 +119,55 @@ inline bool runTransient_singlePhase
         if (exportCSV) {
             PostChecks::export_pT_csv_after_step(mgr, reg, pField, "T", step1, t, outFolderCSV);
         }
-        if (exportTecplot) {
+        const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
+
+        if ((exportTecplotP || exportTecplotT) && doThisStep ) {
             TecplotExport::TecplotOptions opt;
             opt.folder = std::string("out_tec_") + phase;
             opt.filePrefix = phase;
-            if (!TecplotExport::export_pT_tecplot_after_step(
-                mgr, reg, freg, Pbc, Tbc, pField, "T", step1, t, opt)) {
-                std::cerr << "[runTransient] Tecplot export failed at step " << step1 << ".\n";
+
+            if (exportTecplotP) {
+                const bool okP = TecplotExport::export_cellField_to_tecplot_after_step(
+                    mgr, reg, freg, opt,
+                    /*cellField*/ pField,
+                    /*tmpFace*/  pField + std::string("_face_tmp"),
+                    /*varName*/  "P",
+                    step1, t,
+                    /*PBC*/ &Pbc, /*TBC*/ nullptr
+                );
+                if (!okP) std::cerr << "[runTransient] Tecplot(P) export failed at step " << step1 << "\n";
+            }
+
+            if (exportTecplotT) {
+                const bool okT = TecplotExport::export_cellField_to_tecplot_after_step(
+                    mgr, reg, freg, opt,
+                    /*cellField*/ "T",
+                    /*tmpFace*/  "T_face_tmp",
+                    /*varName*/  "T",
+                    step1, t,
+                    /*PBC*/ nullptr, /*TBC*/ &Tbc
+                );
+                if (!okT) std::cerr << "[runTransient] Tecplot(T) export failed at step " << step1 << "\n";
             }
         }
 
         // ——可选：导出 MatrixMarket（重新装配一次用于外部核查）——
-        if (exportMM) {
+        if (exportMM && (writeEvery <= 0) || (step1 % writeEvery == 0))
+        {
             SparseSystemCOO sysP, sysT;
 
-            if (phase == "CO2" || phase == "co2") {
+            if (phase == "CO2" || phase == "co2")
+            {
                 assemblePressure_CO2_singlePhase_COO(mgr, reg, freg, &sysP);
             }
-            else {
+            else
+            {
                 assemblePressure_water_singlePhase_COO(mgr, reg, freg, &sysP);
             }
             sysP.compressInPlace(0.0);
 
-            assembleTemperature_singlePhase_COO(
+            assembleTemperature_singlePhase_COO
+            (
                 mgr, reg, freg,
                 /*a_f_Diff_T*/ "a_f_Diff_T",
                 /*s_f_Diff_T*/ "s_f_Diff_T",

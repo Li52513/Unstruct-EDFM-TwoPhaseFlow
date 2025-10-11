@@ -78,9 +78,9 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         return;
     }
     Vector ej = ownerToNeighbor / d_norm;  // 单位方向向量
-    cout << "Face " << id << " 的单位方向向量 e_j: ("
-        << ej.m_x << ", " << ej.m_y << ", " << ej.m_z << ")  "
-        << endl;
+    //cout << "Face " << id << " 的单位方向向量 e_j: ("
+    //    << ej.m_x << ", " << ej.m_y << ", " << ej.m_z << ")  "
+    //    << endl;
 
     // 2) 构造面积矢量 A_j = normal * length
     Vector Aj = normal * length;
@@ -95,9 +95,9 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     const double eps = 1e-14;   // 可按你的坐标尺度调整
     if (Aj_dot_ej < eps) Aj_dot_ej = eps;
 
-   cout << "Face " << id << " 的面积矢量 A_j: (" 
-         << Aj.m_x << ", " << Aj.m_y << ", " << Aj.m_z << ") 长度: " 
-         << length << endl;
+   //cout << "Face " << id << " 的面积矢量 A_j: (" 
+   //      << Aj.m_x << ", " << Aj.m_y << ", " << Aj.m_z << ") 长度: " 
+   //      << length << endl;
 
 
     // 3) 依据不同算法分解 A_j = E_j + T_j
@@ -106,14 +106,14 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     case NormalVectorCorrectionMethod::MinimumCorrection:
         // E_j = (A_j·e_j) e_j
         vectorE = ej * Aj_dot_ej;
-        cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
+        //cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
 
         break;
 
     case NormalVectorCorrectionMethod::OrthogonalCorrection:
         // E_j = |A_j| e_j, 其中 |A_j| = length (normal 已单位化)
         vectorE = ej * length;
-        cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
+       // cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
         break;
 
     case NormalVectorCorrectionMethod::OverRelaxed:
@@ -122,19 +122,19 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         double Aj_norm = length;
         double factor = (Aj_norm * Aj_norm) / Aj_dot_ej;
         vectorE = ej * factor;
-        cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
+        //cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
         break;
     }
     }
 
     // 4) 非正交分量
     vectorT = Aj - vectorE;
-    cout << "Face :" << id << "的T矢量:(" << vectorT.m_x << ", " << vectorT.m_y << ", " << vectorT.m_z << ")" << endl;
+   // cout << "Face :" << id << "的T矢量:(" << vectorT.m_x << ", " << vectorT.m_y << ", " << vectorT.m_z << ")" << endl;
 
     //5） 正交插值权重gamma 投影到 e_j（0..1 之间）
     double D = ownerToNeighbor * ej;     // 应等于 d_norm
-    cout << "Face " << id << "D: " << D << endl;
-    cout << "Face " << id << "d_norm: " << d_norm << endl;
+    //cout << "Face " << id << "D: " << D << endl;
+    //cout << "Face " << id << "d_norm: " << d_norm << endl;
     double s = (midpoint - Cp) * ej;     // owner 到 面心 在 e_j 上的投影
     double gamma = (std::abs(D) > 1e-14) ? (s / D) : 0.5; // 容错
     if (gamma < 0.0) gamma = 0.0;

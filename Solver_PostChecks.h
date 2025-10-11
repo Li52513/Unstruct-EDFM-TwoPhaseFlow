@@ -127,12 +127,12 @@ namespace PostChecks {
     }
 
     inline void printAssemblyReport(const AssemblyReport& R, const char* tag = "sys") {
-        std::cout << "[Asm:" << tag << "] rows=" << R.rows
+        /*std::cout << "[Asm:" << tag << "] rows=" << R.rows
             << " nnz=" << R.nnz
             << " diag[min,max]=[" << R.minDiag << "," << R.maxDiag << "]"
             << " strongDiag=" << R.strongDiag << "/" << R.rows
             << " badOff(>0)=" << R.badOff
-            << "  b[min,max,sum]=[" << R.bMin << "," << R.bMax << "," << R.bSum << "]\n";
+            << "  b[min,max,sum]=[" << R.bMin << "," << R.bMax << "," << R.bSum << "]\n";*/
     }
 
     // ——压缩一致性自检（单元测试用，可选）——

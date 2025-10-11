@@ -117,15 +117,15 @@ inline void debugPrintInnerFaces_TPFA(MeshManager& mgr,
 		const double a_store = (*a_f_Diff)[iF];
 		const double s_store = (*s_f_Diff)[iF];
 
-		std::cout << "[IFace " << F.id << "] "
-			<< "P=" << P << " N=" << N
-			<< "  a_store=" << a_store << " a_calc=" << a_calc
-			<< "  |Δa|=" << std::abs(a_store - a_calc) << "\n"
-			<< "           s_store=" << s_store
-			<< "  s_cross=" << s_cross
-			<< "  s_buoy=" << s_buoy
-			<< "  s_calc=" << s_calc
-			<< "  |Δs|=" << std::abs(s_store - s_calc) << "\n";
+		//std::cout << "[IFace " << F.id << "] "
+		//	<< "P=" << P << " N=" << N
+		//	<< "  a_store=" << a_store << " a_calc=" << a_calc
+		//	<< "  |Δa|=" << std::abs(a_store - a_calc) << "\n"
+		//	<< "           s_store=" << s_store
+		//	<< "  s_cross=" << s_cross
+		//	<< "  s_buoy=" << s_buoy
+		//	<< "  s_calc=" << s_calc
+		//	<< "  |Δs|=" << std::abs(s_store - s_calc) << "\n";
 
 		if (max_to_print > 0 && ++printed >= max_to_print) break;
 
@@ -216,15 +216,15 @@ inline void debugPrintBoundaryFaces_TPFA(MeshManager& mgr,
 		const double a_store = (*a_f_Diff)[iF];
 		const double s_store = (*s_f_Diff)[iF];
 
-		std::cout << "[BFace " << F.id << "] P=" << P
-			<< "  a_store=" << a_store << " a_calc=" << a_calc
-			<< "  |Δa|=" << std::abs(a_store - a_calc) << "\n"
-			<< "           s_store=" << s_store
-			<< "  s_cross=" << s_cross
-			<< "  s_buoy=" << s_buoy
-			<< "  s_BC=" << s_BC
-			<< "  s_calc=" << s_calc
-			<< "  |Δs|=" << std::abs(s_store - s_calc) << "\n";
+		//std::cout << "[BFace " << F.id << "] P=" << P
+		//	<< "  a_store=" << a_store << " a_calc=" << a_calc
+		//	<< "  |Δa|=" << std::abs(a_store - a_calc) << "\n"
+		//	<< "           s_store=" << s_store
+		//	<< "  s_cross=" << s_cross
+		//	<< "  s_buoy=" << s_buoy
+		//	<< "  s_BC=" << s_BC
+		//	<< "  s_calc=" << s_calc
+		//	<< "  |Δs|=" << std::abs(s_store - s_calc) << "\n";
 
 		if (max_to_print > 0 && ++printed >= max_to_print) break;
 	}

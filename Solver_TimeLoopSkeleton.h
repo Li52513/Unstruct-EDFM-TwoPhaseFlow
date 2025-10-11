@@ -3,6 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <iostream>
 #include "MeshManager.h"
 #include "FieldRegistry.h"
@@ -17,6 +18,7 @@
 #include "Solver_AssemblerCOO.h"   // 你的装配与 SparseSystemCOO / buildUnknownMap
 #include "Solver_TimeLoopUtils.h" // 你可能需要的迭代器/求解器等工具
 #include "Solver_PostChecks.h"  
+#include "LinearSolver_Eigen.h"
 
 
 //================================小工具：向量-场 gather/scatter,规避ghost单元================================//
@@ -132,15 +134,22 @@ struct SolverControls
 	int maxOuter = 50;	// 最大外迭代次数
 	double tol_p_abs = 1e-6; // 压力方程绝对残差收敛
 	double tol_T_abs = 1e-6; // 温度方程绝对残差收敛
+	double tol_p_rel = 1e-6;   // 新增：压力相对容差
+	double tol_T_rel = 1e-6;   // 新增：温度相对容差
 	double urf_p = 0.7;	// 压力欠松弛因子 应用于压力场更新
 	double urf_T = 0.7; // 温度欠松弛因子 应用于温度度场更新
 	double c_phi_const = 1e-12; // 孔隙度可压缩性
 	JacobiOpts jac_p; //压力线性解
 	JacobiOpts jac_T; //温度线性解
+	LinearSolverOptions lin_p; // 压力求解设置
+	LinearSolverOptions lin_T; // 温度求解设置
+	bool useJacobi = false;    // 默认用 Krylov，必要时退回 Jacobi
+
+
 	// 可选：是否每次迭代打印装配报告（默认 false）
-	bool reportPerIter = true;
+	bool reportPerIter = false;
 	// 可选：是否导出 MatrixMarket（仅在 reportPerIter 为 true 时，且只导出最后一次迭代）
-	bool dumpMMOnLastIter = true;
+	bool dumpMMOnLastIter = false;
 
 };
 
@@ -179,15 +188,15 @@ inline bool doOneOuter_CO2
 	if (!startOuterIteration(reg, /*p*/"p_g", /*T*/"T",/*p_prev*/"p_g_prev", /*T_prev*/"T_prev")) return false;
 
 	// 2) 物性（全隐：在工作场 p_g/T 处评估）
-	ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
-	ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
-	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
+		ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
+		ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
+		ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
 
-	// 3) 压力：面账本 + 时间项 + 组装 + 解
+// 3) 压力：面账本 + 时间项 + 组装 + 解
 	SparseSystemCOO sysP;
 	{
 		// 扩散项
-		DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, Pbc, "a_f_Diff_p_g", "s_f_Diff_p_g", "p_g", /*enable_buoy=*/true, /*gradSmoothIters=*/0);
+		DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, Pbc, "a_f_Diff_p_g", "s_f_Diff_p_g", "p_g", /*enable_buoy=*/true, /*gradSmoothIters=*/1);
 
 		//时间项
 		computeRhoAndDrhoDpAt(mgr, reg,/*p_eval*/"p_g", /*T_eval*/"T",/*phase*/"CO2",/*rhoOut*/"rho_time", /*drhoOut*/"drho_dp_time");
@@ -195,7 +204,12 @@ inline bool doOneOuter_CO2
 
 		//装配
 		assemblePressure_CO2_singlePhase_COO(mgr, reg, freg, &sysP);
-		sysP.compressInPlace(0.0);
+		const bool needCompressP = (ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
+		    (ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
+		    (lastSysP != nullptr);
+		if (needCompressP) {
+			sysP.compressInPlace(0.0);
+		}
 
 		if (ctrl.reportPerIter) 
 		{
@@ -205,7 +219,16 @@ inline bool doOneOuter_CO2
 		int N = 0; auto lid = buildUnknownMap(mesh, N);
 		auto p_vec = gatherFieldToVec(reg, mesh, "p_g", lid, N);
 		double resP = 0; int itP = 0;
-		jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
+		bool okP = false;
+		if (!ctrl.useJacobi) {
+			auto opt = ctrl.lin_p;
+			if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+			okP = solveCOO_Eigen(sysP, p_vec, opt, &itP, &resP);
+			if (!okP) std::cerr << "[LinearSolver] pressure solve failed, fallback Jacobi.\n";
+		}
+		if (ctrl.useJacobi || !okP) {
+			jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
+		}
 		scatterVecToField(reg, mesh, "p_g", lid, p_vec);
 	}
 
@@ -220,8 +243,12 @@ inline bool doOneOuter_CO2
 		TimeTerm_Euler_SinglePhase_Temperature(mgr, reg, dt, /*rock comp*/1e-12,/*phi*/"phi",/*rho_r*/"rho_r", /*cp_r*/"cp_r",/*rho_f*/"rho_g", /*cp_f*/"cp_g",/*T_now*/"T",/*T_old*/"T_old", /*aC*/"aC_time_T", /*bC*/"bC_time_T");
 
 		assembleTemperature_singlePhase_COO(mgr, reg, freg,"a_f_Diff_T", "s_f_Diff_T","aPP_conv", "aPN_conv", "bP_conv","aC_time_T", "bC_time_T",&sysT);
-		
-		sysT.compressInPlace(0.0);
+		const bool needCompressT = (ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
+		    (ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
+		    (lastSysT != nullptr);
+		if (needCompressT) {
+			sysT.compressInPlace(0.0);
+		}
 
 		if (ctrl.reportPerIter)
 		{
@@ -232,7 +259,16 @@ inline bool doOneOuter_CO2
 		int N = 0; auto lid = buildUnknownMap(mesh, N);
 		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N);
 		double resT = 0; int itT = 0;
-		jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
+		bool okT = false;
+		if (!ctrl.useJacobi) {
+			auto opt = ctrl.lin_T;
+			if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+			okT = solveCOO_Eigen(sysT, T_vec, opt, &itT, &resT);
+			if (!okT) std::cerr << "[LinearSolver] temperature solve failed, fallback Jacobi.\n";
+		}
+		if (ctrl.useJacobi || !okT) {
+			jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
+		}
 		scatterVecToField(reg, mesh, "T", lid, T_vec);
 	}
 
@@ -277,9 +313,11 @@ inline bool doOneOuter_WATER(
 		/*p_prev*/"p_w_prev", /*T_prev*/"T_prev"))
 		return false;
 
-	ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
-	ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "water");
-	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "water", 1e-12);
+		ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+		ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "water");
+		ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "water", 1e-12);
+
+
 
 	SparseSystemCOO sysP;
 	{
@@ -297,7 +335,12 @@ inline bool doOneOuter_WATER(
 			/*aC*/"aC_time_p", /*bC*/"bC_time_p");
 
 		assemblePressure_water_singlePhase_COO(mgr, reg, freg, &sysP);
-		sysP.compressInPlace(0.0);
+		const bool needCompressP = (ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
+		    (ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
+		    (lastSysP != nullptr);
+		if (needCompressP) {
+			sysP.compressInPlace(0.0);
+		}
 
 		if (ctrl.reportPerIter) {
 			auto R = PostChecks::reportAssembly(sysP, false);
@@ -338,7 +381,12 @@ inline bool doOneOuter_WATER(
 			"aPP_conv", "aPN_conv", "bP_conv",
 			"aC_time_T", "bC_time_T",
 			&sysT);
-		sysT.compressInPlace(0.0);
+		const bool needCompressT = (ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
+		    (ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
+		    (lastSysT != nullptr);
+		if (needCompressT) {
+			sysT.compressInPlace(0.0);
+		}
 
 		if (ctrl.reportPerIter) {
 			auto R = PostChecks::reportAssembly(sysT, false);
@@ -415,10 +463,46 @@ inline bool outerIter_OneStep_singlePhase(
 
 		std::cout << "[Outer " << it << "]  |Δp|_inf=" << dp << "  |ΔT|_inf=" << dT << "\n";
 
-		if (dp < ctrl.tol_p_abs && dT < ctrl.tol_T_abs) {
-			std::cout << "Converged at outer iter " << it << "\n";
+		static double prev_dp = 1e300;
+		static double prev_dT = 1e300;
 
-			// 如果需要，把最后一次迭代的系统导出（只导出最后一轮）
+		if (it > 0) {
+			double rp = dp / std::max(prev_dp, 1e-30);
+			double rT = dT / std::max(prev_dT, 1e-30);
+
+			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+		}
+
+		prev_dp = dp;
+		prev_dT = dT;
+
+		auto maxAbsField = [&](const std::string& fld) -> double {
+			double m = 0.0;
+			auto f = reg.get<volScalarField>(fld);
+			if (!f) return 1.0;
+			const auto& cells = mgr.mesh().getCells();
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+			for (const auto& c : cells) {
+				if (c.id < 0) continue;
+				size_t i = id2idx.at(c.id);
+				m = std::max(m, std::abs((*f)[i]));
+			}
+			return std::max(1.0, m);
+			};
+
+		const std::string pName = (phase == "CO2" || phase == "co2") ? "p_g" : "p_w";
+		double pScale = maxAbsField(pName);
+		double TScale = maxAbsField("T");
+
+		bool convP = dp < std::max(ctrl.tol_p_abs, ctrl.tol_p_rel * pScale);
+		bool convT = dT < std::max(ctrl.tol_T_abs, ctrl.tol_T_rel * TScale);
+		if (convP && convT) {
+			std::cout << "Converged at outer iter " << it << "\n";
 			if (ctrl.dumpMMOnLastIter) {
 #if __cplusplus >= 201703L
 				try { std::filesystem::create_directories("mm"); }
@@ -432,189 +516,10 @@ inline bool outerIter_OneStep_singlePhase(
 			}
 			break;
 		}
+
 		if (it == ctrl.maxOuter - 1) {
 			std::cout << "Reached maxOuter without meeting tolerances.\n";
 		}
 	}
 	return true;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// 返回：是否收敛
-//inline bool outerIter_OneStep_singlePhase
-//(
-//	MeshManager& mgr,
-//	FieldRegistry& reg,
-//	FaceFieldRegistry& freg,
-//	PhysicalPropertiesManager& ppm,
-//	const PressureBCAdapter& bcAdapter,
-//	const TemperatureBCAdapter& Tbc,
-//	const GravUpwind& gu,
-//	const RockDefaults& rock,
-//	double dt,
-//	const SolverControls& ctrl,
-//	const std::string& phase = "water"
-//)
-//{
-//	Mesh& mesh = mgr.mesh();
-//	
-//	if (phase == "CO2")
-//	{
-//		// 1) 时间步开始：把当前时层的值复制给 *_old；利用*_old初始化 *_prev = *_old
-//		{
-//			auto p = reg.get<volScalarField>("p_g");
-//			auto T = reg.get<volScalarField>("T");
-//			auto p0 = reg.getOrCreate<volScalarField>("p_g_old", p ? p->data.size() : 0, 0.0); //上一时间步步压力
-//			auto T0 = reg.getOrCreate<volScalarField>("T_old", T ? T->data.size() : 0, 0.0);   //上一时间步步温度
-//			auto pk = reg.getOrCreate<volScalarField>("p_g_prev", p ? p->data.size() : 0, 0.0);
-//			auto Tk = reg.getOrCreate<volScalarField>("T_prev", T ? T->data.size() : 0, 0.0);
-//			if (!p || !T) { std::cerr << "[advanceOneStep] missing p_g/T.\n"; return false; }
-//			*p0 = *p; *T0 = *T; // 记录上一时间步
-//			*pk = *p0; *Tk = *T0; // 初始化迭代初值  
-//		}
-//
-//		// 2）外迭代
-//		int N = 0;
-//		auto lid_of_cell = buildUnknownMapChecked(mesh, N); //自由度映射
-//		std::vector<double>p_prev = gatherFieldToVec(reg, mesh, "p_g_prev", lid_of_cell, N);
-//		std::vector<double>T_prev = gatherFieldToVec(reg, mesh, "T_prev", lid_of_cell, N);
-//
-//
-//
-//		for (int iter = 0; iter < ctrl.maxOuter; ++iter)
-//		{
-//			const auto p_prev_before = p_prev;  // 迭代前的向量快照
-//			const auto T_prev_before = T_prev;  // 迭代前的向量快照
-//
-//			//2.1 创建迭代层和上一时层的时间中点  （看情况选取）
-//			//bulidTimeLinearizationPoint(mgr, reg, "p_g_old", "T_old", "p_g_prev", "T_prev", "p_time_lin", "T_time_lin");
-//
-//			//2.2 物性更新（用当前迭代层）
-//			ppm.UpdateMatrixRockAt(mgr, reg, "p_g_prev", "T_prev");
-//			ppm.UpdateMatrixFluidAt(mgr, reg, "p_g_prev", "T_prev", "CO2");
-//			ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g_prev", "T_prev", "CO2", 1e-12);
-//
-//			//2.3 连续性方程+单相Darcy定律 方程:面账本 + 时间项 + 装配 + 线性解 + 欠松弛
-//			{
-//				//扩散项
-//				DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, bcAdapter, "a_f_Diff_p_g", "s_f_Diff_p_g", "p_g_prev", /*enable_buoy=*/true, /*gradSmoothIters=*/0);
-//
-//				//时间项
-//				TimeTermStats stP;
-//				computeRhoAndDrhoDpAt(
-//					mgr, reg,
-//					/*p_eval*/ "p_g_prev",
-//					/*T_eval*/ "T_prev",
-//					/*phase */ "CO2",
-//					/*rhoOut*/ "rho_time",
-//					/*drhoOut*/"drho_dp_time"
-//				);
-//				TimeTerm_Euler_SinglePhase_Flow(mgr, reg, dt, ctrl.c_phi_const, "phi", "p_g_old", "rho_time", "drho_dp_time", "aC_time_p", "bC_time_p");
-//
-//				// 装配
-//				SparseSystemCOO sysP;
-//				assemblePressure_CO2_singlePhase_COO(mgr, reg, freg, &sysP);
-//				sysP.compressInPlace(0.0);
-//
-//				// 初值 = 当前迭代层
-//				std::vector<double> p_sol = p_prev;
-//
-//				// 线性解
-//				double resP = 0; int itP = 0;
-//				jacobiSolve(sysP, p_sol, ctrl.jac_p, &resP, &itP);
-//
-//				std::cout << "[sizes] N(map)=" << N
-//					<< "  sysP.n=" << sysP.n
-//					<< "  p_prev=" << p_prev.size()
-//					<< "  p_sol=" << p_sol.size() << "\n";
-//
-//				// 欠松弛并写回迭代层
-//				underRelax(p_prev, p_sol, ctrl.urf_p);  //当前p_prev为k+1层返回值
-//				scatterVecToField(reg, mesh, "p_g_prev", lid_of_cell, p_prev);
-//			}
-//
-//			//2.4 能量守恒方程 ：扩散项+对流（基于上一步 pressure 质量通量）+ 时间项 + 装配 + 解 + 欠松弛
-//			{
-//				//扩散项
-//				DiffusionIterm_TPFA_Temperature_singlePhase( mgr, reg, freg, gu, "lambda_eff", Tbc, "a_f_Diff_T", "s_f_Diff_T", "T_prev");
-//				//对流项
-//				Convective_FirstOrder_SinglePhase_Temperature(mgr, reg, freg, Tbc, "cp_g", "p_g_prev", "T_prev", "a_f_Diff_p_g", "s_f_Diff_p_g", "aPP_conv", "aPN_conv", "bP_conv");
-//				//时间项
-//				TimeTerm_Euler_SinglePhase_Temperature(mgr, reg, dt, 1e-12,"phi", "rho_r", "cp_r","rho_g", "cp_g","T_prev","T_old","aC_time_T", "bC_time_T");
-//				// 装配
-//				SparseSystemCOO sysT;
-//				assembleTemperature_singlePhase_COO(mgr, reg, freg, "a_f_Diff_T", "s_f_Diff_T","aPP_conv", "aPN_conv", "bP_conv","aC_time_T", "bC_time_T", &sysT);
-//				sysT.compressInPlace(0.0);
-//				// 初值 = 当前迭代层
-//				std::vector<double> T_sol = T_prev;
-//				// 线性解
-//				double resT = 0; int itT = 0;
-//				jacobiSolve(sysT, T_sol, ctrl.jac_T, &resT, &itT);
-//				// 欠松弛并写回迭代层
-//				underRelax(T_prev, T_sol, ctrl.urf_T);
-//				scatterVecToField(reg, mesh, "T_prev", lid_of_cell, T_prev);
-//			}
-//
-//			// 2.5 收敛检查（∞-范数）
-//			{
-//				// 以“本次解与上次迭代层”的差值来衡量。这里直接用欠松弛前后的差（上一节已更新）
-//				// 再做一次 gather 当前场与上次迭代前备份对比
-//
-//				auto p_prev_now = gatherFieldToVec(reg, mesh, "p_g_prev", lid_of_cell, N);
-//				auto T_prev_now = gatherFieldToVec(reg, mesh, "T_prev", lid_of_cell, N);
-//				double dp_inf = 0.0, dT_inf = 0.0;
-//				for (int i = 0; i < N; ++i) dp_inf = std::max(dp_inf, std::abs(p_prev_now[i] - p_prev_before[i]));
-//				for (int i = 0; i < N; ++i) dT_inf = std::max(dT_inf, std::abs(T_prev_now[i] - T_prev_before[i]));
-//
-//				// 更新备份
-//				p_prev = std::move(p_prev_now);
-//				T_prev = std::move(T_prev_now);
-//				std::cout << "[Outer " << iter << "]  |Δp|_inf=" << dp_inf << "  |ΔT|_inf=" << dT_inf << "\n";
-//				if (dp_inf < ctrl.tol_p_abs && dT_inf < ctrl.tol_T_abs)
-//				{
-//					std::cout << "Converged at outer iter " << iter << "\n";
-//					break;
-//				}
-//				if (iter == ctrl.maxOuter - 1) {
-//					std::cout << "Reached maxOuter without meeting tolerances.\n";
-//				}
-//
-//			}
-//
-//		}
-//
-//		// 2.6 收敛/或到上限：把迭代层提交为当前层 (n+1)
-//		{
-//			auto p = reg.get<volScalarField>("p_g");  auto pk = reg.get<volScalarField>("p_g_prev");
-//			auto T = reg.get<volScalarField>("T");    auto Tk = reg.get<volScalarField>("T_prev");
-//			if (p && pk) *p = *pk;
-//			if (T && Tk) *T = *Tk;
-//		}
-//		return true;
-//
-//	};
-//
-//
-//}

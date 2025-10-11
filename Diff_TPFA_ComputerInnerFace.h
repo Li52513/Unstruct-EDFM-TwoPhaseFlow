@@ -3,6 +3,7 @@
 #include <memory> // std::shared_ptr
 #include <tuple> // std::tie
 #include <utility> // std::forward
+#include <algorithm> 
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
@@ -46,9 +47,10 @@ inline void Diffusion_TPFA_InnerFace_SinglePhase
 	const std::vector<Vector> grad = computeCellGradients_LSQ_with_GG(mesh, reg, x_name.c_str(), gradSmoothIters);
 
 	const double eps_d = 1e-14, eps_mu = 1e-30, eps_l = 1e-30;
-
-	for (const auto& F : faces)
+#pragma omp parallel for schedule(static)
+	for (int f = 0; f < static_cast<int>(faces.size()); ++f)
 	{
+		const Face& F = faces[f];
 		if (F.isBoundary()) { (*a_f_Diff)[F.id - 1] = 0; (*s_f_Diff)[F.id - 1] = 0.0; continue; }
 
 		const int P = F.ownerCell;
@@ -92,7 +94,7 @@ inline void Diffusion_TPFA_InnerFace_SinglePhase
 		const Vector& CP = mesh.getCells()[id2idx.at(P)].center;
 		const Vector& CN = mesh.getCells()[id2idx.at(N)].center;
 
-		const double rho_inter = rhoPol.rhoBar(mesh, reg, P, N,gamma);
+		const double rho_inter = rhoPol.rhoBar(mesh, reg, P, N, gamma);
 		const double rho_up = rhoPol.rhoUp(mesh, reg, P, N, p_p, p_n, CP, CN, gu);  //涉及到的物性参数为密度rho
 
 		// β_f = λ_e * |E| / d_perp
@@ -117,6 +119,11 @@ inline void Diffusion_TPFA_InnerFace_SinglePhase
 			auto s_buoy_t = -beta_f * rho_inter * gu.g * F.vectorT;
 			s_buoy = s_buoy_e + s_buoy_t;
 		}
-		(*s_f_Diff)[F.id - 1] = s_cross + s_buoy;
+		const double s_face_raw = s_cross + s_buoy;
+		const double s_face_lim =
+			std::max(-0.5 * a_face, std::min(0.5 * a_face, s_face_raw));
+		(*s_f_Diff)[F.id - 1] = s_face_lim;
+
 	}
+
 }

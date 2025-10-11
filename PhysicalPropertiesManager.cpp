@@ -234,8 +234,9 @@ void PhysicalPropertiesManager::UpdateMatrixRockAt(MeshManager& mgr, FieldRegist
 	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
 	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
 
-	for (const auto& cell : cells) 
-	{
+#pragma omp parallel for schedule(static)
+	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+		const auto& cell = cells[ic];
 		if (cell.id < 0) continue;
 		const size_t i = mesh.getCellId2Index().at(cell.id);
 		double P = (*pF)[i], T = (*TF)[i];
@@ -283,8 +284,9 @@ void PhysicalPropertiesManager::UpdateMatrixFluidAt(MeshManager& mgr, FieldRegis
 	const bool doW = (phase == "water" || phase == "both");
 	const bool doG = (phase == "CO2" || phase == "both");
 
-	for (const auto& c : cells)
-	{
+#pragma omp parallel for schedule(static)
+	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+		const auto& c = cells[ic];
 		if (c.id < 0) { ++ghost; continue; }
 		const size_t i = mesh.getCellId2Index().at(c.id);
 		double p = (*pF)[i], T = (*TF)[i]; Initializer::clampPT(p, T);
@@ -294,7 +296,6 @@ void PhysicalPropertiesManager::UpdateMatrixFluidAt(MeshManager& mgr, FieldRegis
 			catch (...) { ++oor; }
 			(*rho_wF)[i] = rho; (*mu_wF)[i] = mu; (*cp_wF)[i] = cp; (*k_wF)[i] = k;
 		}
-
 		if (doG) {
 			double rho = 1.98, mu = 1.48e-5, cp = 846, k = 0.0146;
 			try { const auto G = gt.getProperties(p, T); rho = G.rho; mu = G.mu; cp = G.cp; k = G.k; }
@@ -360,8 +361,9 @@ void PhysicalPropertiesManager::ComputeMatrixEffectiveThermalsAt( MeshManager& m
 	const bool doW = (ph == "water" || ph == "both");
 	const bool doG = (ph == "co2" || ph == "both");
 
-	for (const auto& c : cells)
-	{
+#pragma omp parallel for schedule(static)
+	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+		const auto& c = cells[ic];
 		if (c.id < 0) continue;
 		const size_t i = id2.at(c.id);
 
