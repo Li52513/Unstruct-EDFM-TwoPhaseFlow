@@ -242,6 +242,25 @@ inline bool endTimeStep(FieldRegistry& reg,
 }
 
 
+// 10) 失败回滚：将当前(p,T)与prev恢复为old，用于自适应时间步重试
+inline void revertCurrentAndPrevToOld(
+    FieldRegistry& reg,
+    const std::string& p_name = "p_w",
+    const std::string& T_name = "T",
+    const std::string& p_old_name = "p_w_old",
+    const std::string& T_old_name = "T_old",
+    const std::string& p_prev_name = "p_w_prev",
+    const std::string& T_prev_name = "T_prev")
+{
+    // 当前 <- old
+    copyField(reg, p_old_name, p_name);
+    copyField(reg, T_old_name, T_name);
+    // prev <- old（下一轮外迭以old为起点更稳妥）
+    copyField(reg, p_old_name, p_prev_name);
+    copyField(reg, T_old_name, T_prev_name);
+}
+
+
 
 //*********补充工具函数**********//
 // 10) 构建时间线性化点场（用于牛顿迭代的雅可比矩阵组装）
