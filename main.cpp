@@ -27,7 +27,7 @@ int main()
     /***************************全局参数定义区*******************************/
     /*----------------------------------------------------------------------*/
     double lengthX = 1, lengthY = 1, lengthZ = 0;  
-    int sectionNumX =5, sectionNumY =5, sectionNumZ =0;
+    int sectionNumX =50, sectionNumY =50, sectionNumZ =0;
 	bool usePrism = true;       ///  3D情况usePrism=true 进行“扫掠 ”；
 	bool useQuadBase = false;    /// 在 2D 情况：false 为非结构化三角, true  为非结构化四边形； 在 3D 扫掠模式：仅用来选择底面网格类型
     /*----------------------------------------------------------------------*/
@@ -311,13 +311,13 @@ int main()
     sc.jac_p = { 500, 0.8, 1e-8 };
     sc.jac_T = { 500, 0.8, 1e-8 };
     
-    sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB; // 压力：也可选 CG
-    sc.lin_p.maxIters = 5000;
-    sc.lin_p.tol = sc.tol_p_abs;
-    sc.lin_p.iluFill = 10;
-    sc.lin_p.iluDrop = 1e-4;
-    sc.lin_p.equil = true;   // 建议保持 on
-    sc.lin_p.reusePreconditioner = 3;
+    //sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB; // 压力：也可选 CG
+    //sc.lin_p.maxIters = 5000;
+    //sc.lin_p.tol = sc.tol_p_abs;
+    //sc.lin_p.iluFill = 10;
+    //sc.lin_p.iluDrop = 1e-4;
+    //sc.lin_p.equil = true;   // 建议保持 on
+    //sc.lin_p.reusePreconditioner = 3;
 
 
     //sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB; // 温度：非对称，建议 BiCGSTAB
@@ -326,24 +326,24 @@ int main()
     //sc.lin_T.iluFill = 10;
     //sc.lin_T.iluDrop = 1e-4;
 
-    //sc.lin_p.type = LinearSolverOptions::Type::SparseLU;  // 压力用直接法
-    //sc.lin_p.equil = true;   // 默认就是 true，可不写
-    //// 直接法不关心 maxIters/tol/ILU 设置
+    sc.lin_p.type = LinearSolverOptions::Type::SparseLU;  // 压力用直接法
+    sc.lin_p.equil = true;   // 默认就是 true，可不写
+    // 直接法不关心 maxIters/tol/ILU 设置
 
-    //sc.lin_T.type = LinearSolverOptions::Type::SparseLU;  // 先试直接法
-    //sc.lin_T.equil = true;
+    sc.lin_T.type = LinearSolverOptions::Type::SparseLU;  // 先试直接法
+    sc.lin_T.equil = true;
 
-    sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
-    sc.lin_T.maxIters = 10000;
-    sc.lin_T.tol = sc.tol_T_abs;
-    sc.lin_T.iluFill = 20;
-    sc.lin_T.iluDrop = 1e-5;
-    sc.lin_T.equil = true;   // 建议保持 on
-    sc.lin_T.reusePreconditioner = 2;
+    //sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
+    //sc.lin_T.maxIters = 10000;
+    //sc.lin_T.tol = sc.tol_T_abs;
+    //sc.lin_T.iluFill = 20;
+    //sc.lin_T.iluDrop = 1e-5;
+    //sc.lin_T.equil = true;   // 建议保持 on
+    //sc.lin_T.reusePreconditioner = 2;
 
 
     sc.useJacobi = false;
-    int    nSteps = 2000;
+    int    nSteps = 20000;
     double dt = 10.0 / nSteps;
 
     // 只导出 TXT，每步一份；不导出 CSV / MM：
@@ -360,7 +360,7 @@ int main()
         /*exportTecplotP=*/false,
         /*exportTecplotT=*/true
     );
-
+    
 
     return 0;
 

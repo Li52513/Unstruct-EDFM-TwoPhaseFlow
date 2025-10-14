@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <iostream>
 #include <algorithm>
-#include "Mesh.h"
+#include "MeshManager.h"
 #include "FieldRegistry.h"
 
 
@@ -210,7 +210,7 @@ inline double rmsDiff
 	return std::sqrt(sum2 / static_cast<double>(a->data.size()));
 }
 
-// 8) 收敛判据：相对误差的 L2-范数(均方根)
+// 8) 收敛判据：最大相对变化（∞-范数）
 inline double maxRelChange(const FieldRegistry& reg,
     const std::string& x_name,
     const std::string& x_prev_name,
@@ -338,8 +338,8 @@ inline bool computeRhoAndDrhoDpAt
     auto rho = reg.getOrCreate<volScalarField>(rho_out, cells.size(), 0.0);
     auto dr = reg.getOrCreate<volScalarField>(drhodp_out, cells.size(), 0.0);
 
-    auto wt = WaterPropertyTable::instance();
-    auto gt = CO2PropertyTable::instance();
+    auto& wt = WaterPropertyTable::instance();
+    auto& gt = CO2PropertyTable::instance();
     const bool isCO2 = (phase == "co2" || phase == "CO2");
 
     for (const auto& c : cells) {

@@ -36,36 +36,39 @@ inline void DiffusionIterm_singlePhase_DarcyFlow_water_TPFA_Innerface
 {
 	DarcyWaterMobility_singlePhase mob_w(k_default);
 	UpwindDensityByPotential_water rhoPol_w(true);
-	Diffusion_TPFA_InnerFace_SinglePhase(mgr, reg, freg, gu, mob_w, rhoPol_w, a_name, s_name, x_name, enable_buoy, gradSmoothIters);
+	Diffusion_TPFA_InnerFace_SinglePhase(mgr, reg, freg, gu, mob_w, rhoPol_w,
+		a_name, s_name, x_name, /*buoy*/true, /*gradSmooth*/0,
+		/*rho_in_matrix*/ false);
 	debugPrintInnerFaces_TPFA(mgr, reg, freg, gu, mob_w, rhoPol_w,
-		/*a_name*/"a_f_Diff_p_w", /*s_name*/"s_f_Diff_p_w", /*x_name*/"p_w",
+		a_name.c_str(), s_name.c_str(), x_name.c_str(),
 		/*enable_buoy*/true, /*gradSmoothIters*/0,
 		/*max_to_print*/100);
 	
 }
 
 ////Step2: 水单相达西流边界面扩散项离散
-inline void DiffusionIterm_singlePhase_DarcyFlow_water_TPFA_BoundaryFace
-(
-	MeshManager& mgr,
-	const FieldRegistry& reg,
-	FaceFieldRegistry& freg,
-	const GravUpwind& gu,
-	double k_default, // 各向同性渗透率
-	const PressureBCAdapter& bc, // BC 提供器
+inline void DiffusionIterm_singlePhase_DarcyFlow_water_TPFA_BoundaryFace(
+	MeshManager& mgr, const FieldRegistry& reg, FaceFieldRegistry& freg,
+	const GravUpwind& gu, double k_default, const PressureBCAdapter& bc,
 	const std::string& a_name = "a_f_Diff_p_w",
 	const std::string& s_name = "s_f_Diff_p_w",
 	const std::string& x_name = "p_w",
-	bool enable_buoy = true,
-	int gradSmoothIters = 0)
-{
+	bool enable_buoy = true, int gradSmoothIters = 0,
+	bool rho_in_matrix = false      // <<< 新增：默认不把ρ进矩阵
+) {
 	DarcyWaterMobility_singlePhase mob_w(k_default);
 	UpwindDensityByPotential_water rhoPol_w(true);
-	Diffusion_TPFA_BoundaryFace_SinglePhase(mgr, reg, freg, gu, mob_w, rhoPol_w, bc, a_name, s_name, x_name, enable_buoy, gradSmoothIters);
-	debugPrintBoundaryFaces_TPFA(mgr, reg, freg, gu, mob_w, rhoPol_w, bc,
-		"a_f_Diff_p_w", "s_f_Diff_p_w", "p_w",
-		/*enable_buoy*/true, /*gradSmoothIters*/0,
-		/*max_to_print*/100);
+	Diffusion_TPFA_BoundaryFace_SinglePhase(
+		mgr, reg, freg, gu, mob_w, rhoPol_w, bc,
+		/*a*/a_name, /*s*/s_name, /*x*/x_name,
+		/*buoy*/enable_buoy, /*gradSmooth*/gradSmoothIters,
+		/*rho_in_matrix*/ rho_in_matrix
+	);
+	debugPrintBoundaryFaces_TPFA(
+		mgr, reg, freg, gu, mob_w, rhoPol_w, bc,
+		a_name.c_str(), s_name.c_str(), x_name.c_str(),
+		enable_buoy, gradSmoothIters, /*max_to_print*/100
+	);
 }
 
 inline void DiffusionIterm_TPFA_water_singlePhase_DarcyFlow
@@ -106,35 +109,39 @@ inline void DiffusionIterm_singlePhase_DarcyFlow_CO2_TPFA_Innerface
 {
 	DarcyCO2Mobility_singlePhase mob_g (k_default);
 	UpwindDensityByPotential_CO2 rhoPol_g (true);
-	Diffusion_TPFA_InnerFace_SinglePhase(mgr, reg, freg, gu, mob_g, rhoPol_g, a_name, s_name, x_name, enable_buoy, gradSmoothIters);
+	Diffusion_TPFA_InnerFace_SinglePhase(
+		mgr, reg, freg, gu, mob_g, rhoPol_g,
+		a_name, s_name, x_name,
+		enable_buoy, gradSmoothIters,
+		/*rho_in_matrix*/ false);
 	debugPrintInnerFaces_TPFA(mgr, reg, freg, gu, mob_g, rhoPol_g,
-		/*a_name*/"a_f_Diff_p_g", /*s_name*/"s_f_Diff_p_g", /*x_name*/"p_g",
-		/*enable_buoy*/true, /*gradSmoothIters*/0,
-		/*max_to_print*/100);
+		a_name.c_str(), s_name.c_str(), x_name.c_str(),
+		enable_buoy, gradSmoothIters, 100);
 
 }
 ////Step2: CO2单相达西流边界面扩散项离散
-inline void DiffusionIterm_singlePhase_DarcyFlow_CO2_TPFA_BoundaryFace
-(
-	MeshManager& mgr,
-	const FieldRegistry& reg,
-	FaceFieldRegistry& freg,
-	const GravUpwind& gu,
-	double k_default, // 各向同性渗透率
-	const PressureBCAdapter& bc, // BC 提供器
+inline void DiffusionIterm_singlePhase_DarcyFlow_CO2_TPFA_BoundaryFace(
+	MeshManager& mgr, const FieldRegistry& reg, FaceFieldRegistry& freg,
+	const GravUpwind& gu, double k_default, const PressureBCAdapter& bc,
 	const std::string& a_name = "a_f_Diff_p_g",
 	const std::string& s_name = "s_f_Diff_p_g",
 	const std::string& x_name = "p_g",
-	bool enable_buoy = true,
-	int gradSmoothIters = 0)
-{
-	DarcyCO2Mobility_singlePhase mob_g (k_default);
-	UpwindDensityByPotential_CO2 rhoPol_g (true);
-	Diffusion_TPFA_BoundaryFace_SinglePhase(mgr, reg, freg, gu, mob_g, rhoPol_g, bc, a_name, s_name, x_name, enable_buoy, gradSmoothIters);
-	debugPrintBoundaryFaces_TPFA(mgr, reg, freg, gu, mob_g, rhoPol_g, bc,
-		"a_f_Diff_p_g", "s_f_Diff_p_g", "p_g",
-		/*enable_buoy*/true, /*gradSmoothIters*/0,
-		/*max_to_print*/100);
+	bool enable_buoy = true, int gradSmoothIters = 0,
+	bool rho_in_matrix = false
+) {
+	DarcyCO2Mobility_singlePhase mob_g(k_default);
+	UpwindDensityByPotential_CO2 rhoPol_g(true);
+	Diffusion_TPFA_BoundaryFace_SinglePhase(
+		mgr, reg, freg, gu, mob_g, rhoPol_g, bc,
+		a_name, s_name, x_name,
+		enable_buoy, gradSmoothIters,
+		rho_in_matrix
+	);
+	debugPrintBoundaryFaces_TPFA(
+		mgr, reg, freg, gu, mob_g, rhoPol_g, bc,
+		a_name.c_str(), s_name.c_str(), x_name.c_str(),
+		enable_buoy, gradSmoothIters, 100
+	);
 }
 
 inline void DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow

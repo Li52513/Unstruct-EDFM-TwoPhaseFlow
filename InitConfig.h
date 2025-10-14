@@ -42,7 +42,7 @@ struct InitFields
 {
 	//基础场：uniform+线性梯度（可都为0）
 	double p0 = 6e6; //基岩内部初始水相压力，单位 Pa
-	double dpdx = 1000.0; //基岩压力梯度，单位 Pa/m
+	double dpdx = 0.0; //基岩压力梯度，单位 Pa/m
 	double dpdy = 0.0; //基岩压力梯度，单位 Pa/m
 	double dpdz = 0.0; //基岩压力梯度，单位 Pa/m
 

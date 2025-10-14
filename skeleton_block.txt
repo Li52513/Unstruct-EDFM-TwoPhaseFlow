@@ -1,0 +1,206 @@
+	MeshManager& mgr,
+
+	FieldRegistry& reg,
+
+	FaceFieldRegistry& freg,
+
+	PhysicalPropertiesManager& ppm,
+
+	const PressureBCAdapter& Pbc,
+
+	const TemperatureBCAdapter& Tbc,
+
+	const GravUpwind& gu,
+
+	const RockDefaults& rock,
+
+	double dt,
+
+	const SolverControls& ctrl,
+
+	const std::string& phase = "CO2"
+
+) {
+
+	// 时间步开始（冻结 *_old，初始化 *_prev）
+
+	if (phase == "CO2" || phase == "co2") {
+
+		if (!startTimeStep(mgr.mesh(), reg, "p_g", "T", "p_g_old", "T_old", "p_g_prev", "T_prev")) return false;
+
+	}
+
+	else if (phase == "water" || phase == "WATER") {
+
+		if (!startTimeStep(mgr.mesh(), reg, "p_w", "T", "p_w_old", "T_old", "p_w_prev", "T_prev")) return false;
+
+	}
+
+	else {
+
+		std::cerr << "[outer] unknown phase: " << phase << "\n";
+
+		return false;
+
+	}
+
+
+
+    const int timeOrder = (ctrl.timeIntegrator == TimeIntegratorMethod::BDF2) ? 2 : 1;
+    double dt_prev = 0.0;
+
+	// 外迭代
+
+	for (int it = 0; it < ctrl.maxOuter; ++it) 
+
+	{
+
+		double dp = 0, dT = 0;
+
+		SparseSystemCOO lastP, lastT;
+
+
+
+		bool ok = (phase == "CO2" || phase == "co2")
+
+			? doOneOuter_CO2(mgr, reg, freg, ppm, Pbc, Tbc, gu, rock, dt, ctrl, timeOrder, dt_prev, dp, dT,
+
+				ctrl.dumpMMOnLastIter ? &lastP : nullptr,
+
+				ctrl.dumpMMOnLastIter ? &lastT : nullptr)
+
+			: doOneOuter_WATER(mgr, reg, freg, ppm, Pbc, Tbc, gu, rock, dt, ctrl, timeOrder, dt_prev, dp, dT,
+
+				ctrl.dumpMMOnLastIter ? &lastP : nullptr,
+
+				ctrl.dumpMMOnLastIter ? &lastT : nullptr);
+
+		if (!ok) return false;
+
+
+
+		std::cout << "[Outer " << it << "]  |Δp|_inf=" << dp << "  |ΔT|_inf=" << dT << "\n";
+
+
+
+		static double prev_dp = 1e300;
+
+		static double prev_dT = 1e300;
+
+
+
+		if (it > 0) {
+
+			double rp = dp / std::max(prev_dp, 1e-30);
+
+			double rT = dT / std::max(prev_dT, 1e-30);
+
+
+
+			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+
+
+
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+
+			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+
+			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+
+		}
+
+
+
+		prev_dp = dp;
+
+		prev_dT = dT;
+
+
+
+		auto maxAbsField = [&](const std::string& fld) -> double {
+
+			double m = 0.0;
+
+			auto f = reg.get<volScalarField>(fld);
+
+			if (!f) return 1.0;
+
+			const auto& cells = mgr.mesh().getCells();
+
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+
+			for (const auto& c : cells) {
+
+				if (c.id < 0) continue;
+
+				size_t i = id2idx.at(c.id);
+
+				m = std::max(m, std::abs((*f)[i]));
+
+			}
+
+			return std::max(1.0, m);
+
+			};
+
+
+
+		const std::string pName = (phase == "CO2" || phase == "co2") ? "p_g" : "p_w";
+
+
+		double pScale = maxAbsField(pName);
+
+		double TScale = maxAbsField("T");
+
+
+
+		bool convP = dp < std::max(ctrl.tol_p_abs, ctrl.tol_p_rel * pScale);
+
+		bool convT = dT < std::max(ctrl.tol_T_abs, ctrl.tol_T_rel * TScale);
+
+		if (convP && convT) {
+
+			std::cout << "Converged at outer iter " << it << "\n";
+
+			if (ctrl.dumpMMOnLastIter) {
+
+#if __cplusplus >= 201703L
+
+				try { std::filesystem::create_directories("mm"); }
+
+				catch (...) {}
+
+#endif
+
+				const char* tag = (phase == "CO2" || phase == "co2") ? "CO2" : "WAT";
+
+				PostChecks::dumpCOO_to_matrix_market(lastP, std::string("mm/A_P_") + tag + ".mtx",
+
+					std::string("mm/b_P_") + tag + ".txt", false);
+
+				PostChecks::dumpCOO_to_matrix_market(lastT, std::string("mm/A_T_") + tag + ".mtx",
+
+					std::string("mm/b_T_") + tag + ".txt", false);
+
+			}
+
+			break;
+
+		}
+
+
+
+		if (it == ctrl.maxOuter - 1) {
+
+			std::cout << "Reached maxOuter without meeting tolerances.\n";
+
+		}
+
+	}
+
+	return true;
+
+}
+

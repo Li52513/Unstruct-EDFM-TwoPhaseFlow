@@ -163,8 +163,7 @@ struct SolverControls
  * @param lastSysT 可选输出：本次迭代“温度方程”压缩后的系统
  * @return true/false
  */
-inline bool doOneOuter_CO2
-(
+inline bool doOneOuter_CO2(
 	MeshManager& mgr,
 	FieldRegistry& reg,
 	FaceFieldRegistry& freg,
@@ -181,50 +180,74 @@ inline bool doOneOuter_CO2
 	// optional out
 	SparseSystemCOO* lastSysP = nullptr,
 	SparseSystemCOO* lastSysT = nullptr
-)
-{
+) {
 	Mesh& mesh = mgr.mesh();
-	// 1) 把上一迭代层拷到“工作场”（p_g,T）
-	if (!startOuterIteration(reg, /*p*/"p_g", /*T*/"T",/*p_prev*/"p_g_prev", /*T_prev*/"T_prev")) return false;
 
-	// 2) 物性（全隐：在工作场 p_g/T 处评估）
-		ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
-		ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
-		ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
+	// 1) k层初值 -> 工作场
+	if (!startOuterIteration(reg, "p_g", "T", "p_g_prev", "T_prev")) return false;
 
-// 3) 压力：面账本 + 时间项 + 组装 + 解
+	// 2) 构建时间线性化点（n 与当前工作场的中点）
+	bulidTimeLinearizationPoint(
+		mgr, reg,
+		/*p_old*/ "p_g_old", /*T_old*/ "T_old",
+		/*p_iter*/ "p_g",    /*T_iter*/ "T",
+		/*p_lin_out*/ "p_time_lin",
+		/*T_lin_out*/ "T_time_lin"
+	);
+
+	// 3) 物性在当前工作场处评估（全隐框架）
+	ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
+	ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
+	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
+
+	// 4) 压力：面项+时间项+组装+解
 	SparseSystemCOO sysP;
 	{
-		// 扩散项
-		DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, Pbc, "a_f_Diff_p_g", "s_f_Diff_p_g", "p_g", /*enable_buoy=*/true, /*gradSmoothIters=*/1);
+		DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow(
+			mgr, reg, freg, gu, rock.k_iso, Pbc,
+			"a_f_Diff_p_g", "s_f_Diff_p_g",
+			"p_g", /*enable_buoy*/ true, /*gradSmoothIters*/ 1);
 
-		//时间项
-		computeRhoAndDrhoDpAt(mgr, reg,/*p_eval*/"p_g", /*T_eval*/"T",/*phase*/"CO2",/*rhoOut*/"rho_time", /*drhoOut*/"drho_dp_time");
-		TimeTerm_Euler_SinglePhase_Flow(mgr, reg, dt, ctrl.c_phi_const, "phi", "p_g_old", "rho_time", "drho_dp_time", "aC_time_p", "bC_time_p");
+		// 时间项在时间线性化点评估 rho, drho/dp
+		computeRhoAndDrhoDpAt(
+			mgr, reg,
+			/*p_lin_name*/ "p_time_lin",
+			/*T_lin_name*/ "T_time_lin",
+			/*phase*/ "CO2",
+			/*rho_out*/ "rho_time",
+			/*drhodp_out*/ "drho_dp_time"
+		);
 
-		//装配
+		TimeTerm_Euler_SinglePhase_Flow(
+			mgr, reg, dt, ctrl.c_phi_const,
+			/*phi*/ "phi",
+			/*p_old*/ "p_g_old",
+			/*rho_time*/ "rho_time",
+			/*drho_dp_time*/ "drho_dp_time",
+			/*aC*/ "aC_time_p",
+			/*bC*/ "bC_time_p"
+		);
+
 		assemblePressure_CO2_singlePhase_COO(mgr, reg, freg, &sysP);
-		const bool needCompressP = (ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
-		    (ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
-		    (lastSysP != nullptr);
-		if (needCompressP) {
-			sysP.compressInPlace(0.0);
+		const bool needCompressP =
+			(ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
+			(ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
+			(lastSysP != nullptr);
+		if (needCompressP) sysP.compressInPlace(0.0);
+
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysP, false);
+			PostChecks::printAssemblyReport(R, "P(CO2)");
 		}
 
-		if (ctrl.reportPerIter) 
-		{
-			auto R = PostChecks::reportAssembly(sysP, /*force_compress*/false);
-			PostChecks::printAssemblyReport(R, "P");
-		}
 		int N = 0; auto lid = buildUnknownMap(mesh, N);
 		auto p_vec = gatherFieldToVec(reg, mesh, "p_g", lid, N);
-		double resP = 0; int itP = 0;
-		bool okP = false;
+		double resP = 0; int itP = 0; bool okP = false;
+
 		if (!ctrl.useJacobi) {
-			auto opt = ctrl.lin_p;
-			if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+			auto opt = ctrl.lin_p; if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
 			okP = solveCOO_Eigen(sysP, p_vec, opt, &itP, &resP);
-			if (!okP) std::cerr << "[LinearSolver] pressure solve failed, fallback Jacobi.\n";
+			if (!okP) std::cerr << "[LinearSolver] pressure failed, fallback Jacobi.\n";
 		}
 		if (ctrl.useJacobi || !okP) {
 			jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
@@ -232,61 +255,236 @@ inline bool doOneOuter_CO2
 		scatterVecToField(reg, mesh, "p_g", lid, p_vec);
 	}
 
-	// 4) 温度：扩散+对流（基于 CO2 质量通量）+ 时间项 + 解
-
+	// 5) 温度：扩散+对流+时间项(+线性化点/θ混合)+解
 	SparseSystemCOO sysT;
 	{
-		DiffusionIterm_TPFA_Temperature_singlePhase( mgr, reg, freg, gu,/*lambda_eff*/"lambda_eff", Tbc,/*a_f*/"a_f_Diff_T", /*s_f*/"s_f_Diff_T",/*T_field*/"T");
+		DiffusionIterm_TPFA_Temperature_singlePhase(
+			mgr, reg, freg, gu,
+			/*lambda_eff*/ "lambda_eff",
+			Tbc,
+			/*a_f*/ "a_f_Diff_T",
+			/*s_f*/ "s_f_Diff_T",
+			/*T_field*/ "T"
+		);
 
-		Convective_FirstOrder_SinglePhase_Temperature( mgr, reg, freg, Tbc,/*cp*/"cp_g",/*p*/ "p_g",/*T*/ "T",/*a_f^p*/"a_f_Diff_p_g", /*s_f^p*/"s_f_Diff_p_g",/*aPP*/"aPP_conv", /*aPN*/"aPN_conv", /*bP*/"bP_conv");
+		Convective_FirstOrder_SinglePhase_Temperature(
+			mgr, reg, freg, Tbc,
+			/*cp*/ "cp_g",
+			/*p*/  "p_g",
+			/*T*/  "T",
+			/*a_f^p*/ "a_f_Diff_p_g",
+			/*s_f^p*/ "s_f_Diff_p_g",
+			/*aPP*/ "aPP_conv",
+			/*aPN*/ "aPN_conv",
+			/*bP*/  "bP_conv"
+		);
 
-		TimeTerm_Euler_SinglePhase_Temperature(mgr, reg, dt, /*rock comp*/1e-12,/*phi*/"phi",/*rho_r*/"rho_r", /*cp_r*/"cp_r",/*rho_f*/"rho_g", /*cp_f*/"cp_g",/*T_now*/"T",/*T_old*/"T_old", /*aC*/"aC_time_T", /*bC*/"bC_time_T");
+		// 关键：在时间线性化点评估/混合 Ceff，theta=0.5 更稳
+		TimeTerm_Euler_SinglePhase_Temperature(
+			mgr, reg, dt,
+			/*Ceff_floor*/ 1e-12,
+			/*phi*/  "phi",
+			/*rho_r*/"rho_r",
+			/*cp_r*/ "cp_r",
+			/*rho_f*/"rho_g",
+			/*cp_f*/ "cp_g",
+			/*T*/    "T",
+			/*T_old*/"T_old",
+			/*aC*/   "aC_time_T",
+			/*bC*/   "bC_time_T",
+			/*use_time_lin*/ true,
+			/*T_lin_name*/   "T_time_lin",
+			/*theta*/        0.5,
+			/*Ceff_out*/     "Ceff_T"      // 可选诊断
+		);
 
-		assembleTemperature_singlePhase_COO(mgr, reg, freg,"a_f_Diff_T", "s_f_Diff_T","aPP_conv", "aPN_conv", "bP_conv","aC_time_T", "bC_time_T",&sysT);
-		const bool needCompressT = (ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
-		    (ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
-		    (lastSysT != nullptr);
-		if (needCompressT) {
-			sysT.compressInPlace(0.0);
-		}
+		assembleTemperature_singlePhase_COO(
+			mgr, reg, freg,
+			"a_f_Diff_T", "s_f_Diff_T",
+			"aPP_conv", "aPN_conv", "bP_conv",
+			"aC_time_T", "bC_time_T",
+			&sysT
+		);
+		const bool needCompressT =
+			(ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
+			(ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
+			(lastSysT != nullptr);
+		if (needCompressT) sysT.compressInPlace(0.0);
 
-		if (ctrl.reportPerIter)
-		{
-			auto R = PostChecks::reportAssembly(sysT, /*force_compress*/false);
-			PostChecks::printAssemblyReport(R, "T");
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysT, false);
+			PostChecks::printAssemblyReport(R, "T(CO2)");
 		}
 
 		int N = 0; auto lid = buildUnknownMap(mesh, N);
 		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N);
-		double resT = 0; int itT = 0;
-		bool okT = false;
+		double resT = 0; int itT = 0; bool okT = false;
+
 		if (!ctrl.useJacobi) {
-			auto opt = ctrl.lin_T;
-			if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+			auto opt = ctrl.lin_T; if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
 			okT = solveCOO_Eigen(sysT, T_vec, opt, &itT, &resT);
-			if (!okT) std::cerr << "[LinearSolver] temperature solve failed, fallback Jacobi.\n";
+			if (!okT) std::cerr << "[LinearSolver] temperature failed, fallback Jacobi.\n";
 		}
 		if (ctrl.useJacobi || !okT) {
 			jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
 		}
 		scatterVecToField(reg, mesh, "T", lid, T_vec);
+
+		// （可选软限幅，若你仍想保留）
+		auto Tfield = reg.get<volScalarField>("T");
+		if (Tfield) {
+			for (double& val : Tfield->data) {
+				if (val < 373.15)      val = 373.15;
+				else if (val > 450.0)  val = 450.0;
+			}
+		}
 	}
 
-	// 5) 欠松弛 + 收敛衡量（相对上一迭代层 prev）
+	// 6) 欠松弛 + 收敛衡量
 	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
 	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
 
 	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
 	dT_inf = maxAbsDiff(reg, "T", "T_prev");
 
-	// 6) 写回 prev
-	updatePrevIterates(reg, /*p*/"p_g", /*T*/"T", /*p_prev*/"p_g_prev", /*T_prev*/"T_prev");
+	updatePrevIterates(reg, "p_g", "T", "p_g_prev", "T_prev");
 
-	// 可选：把最后一次迭代的系统拷出去供上层导出
 	if (lastSysP) *lastSysP = sysP;
 	if (lastSysT) *lastSysT = sysT;
 	return true;
 }
+
+
+//inline bool doOneOuter_CO2
+//(
+//	MeshManager& mgr,
+//	FieldRegistry& reg,
+//	FaceFieldRegistry& freg,
+//	PhysicalPropertiesManager& ppm,
+//	const PressureBCAdapter& Pbc,
+//	const TemperatureBCAdapter& Tbc,
+//	const GravUpwind& gu,
+//	const RockDefaults& rock,
+//	double dt,
+//	const SolverControls& ctrl,
+//	// out
+//	double& dp_inf,
+//	double& dT_inf,
+//	// optional out
+//	SparseSystemCOO* lastSysP = nullptr,
+//	SparseSystemCOO* lastSysT = nullptr
+//)
+//{
+//	Mesh& mesh = mgr.mesh();
+//	// 1) 把上一迭代层拷到“工作场”（p_g,T）
+//	if (!startOuterIteration(reg,  "p_g", "T",  "p_g_prev",  "T_prev")) return false;
+//
+//	// 2) 物性（全隐：在工作场 p_g/T 处评估）
+//	ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
+//	ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
+//	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
+//	// 3) 压力：面账本 + 时间项 + 组装 + 解
+//	SparseSystemCOO sysP;
+//	{
+//		// 扩散项
+//		DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow(mgr, reg, freg, gu, rock.k_iso, Pbc, "a_f_Diff_p_g", "s_f_Diff_p_g", "p_g",  true, 1);
+//
+//		//时间项
+//		computeRhoAndDrhoDpAt(mgr, reg,/*p_eval*/"p_g", /*T_eval*/"T",/*phase*/"CO2",/*rhoOut*/"rho_time", /*drhoOut*/"drho_dp_time");
+//		TimeTerm_Euler_SinglePhase_Flow(mgr, reg, dt, ctrl.c_phi_const, "phi", "p_g_old", "rho_time", "drho_dp_time", "aC_time_p", "bC_time_p");
+//
+//		//装配
+//		assemblePressure_CO2_singlePhase_COO(mgr, reg, freg, &sysP);
+//		const bool needCompressP = (ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
+//			(ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
+//			(lastSysP != nullptr);
+//		if (needCompressP) {
+//			sysP.compressInPlace(0.0);
+//		}
+//
+//		if (ctrl.reportPerIter)
+//		{
+//			auto R = PostChecks::reportAssembly(sysP, /*force_compress*/false);
+//			PostChecks::printAssemblyReport(R, "P");
+//		}
+//		int N = 0; auto lid = buildUnknownMap(mesh, N);
+//		auto p_vec = gatherFieldToVec(reg, mesh, "p_g", lid, N);
+//		double resP = 0; int itP = 0;
+//		bool okP = false;
+//		if (!ctrl.useJacobi) {
+//			auto opt = ctrl.lin_p;
+//			if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+//			okP = solveCOO_Eigen(sysP, p_vec, opt, &itP, &resP);
+//			if (!okP) std::cerr << "[LinearSolver] pressure solve failed, fallback Jacobi.\n";
+//		}
+//		if (ctrl.useJacobi || !okP) {
+//			jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
+//		}
+//		scatterVecToField(reg, mesh, "p_g", lid, p_vec);
+//	}
+//
+//	// 4) 温度：扩散+对流（基于 CO2 质量通量）+ 时间项 + 解
+//
+//	SparseSystemCOO sysT;
+//	{
+//		DiffusionIterm_TPFA_Temperature_singlePhase(mgr, reg, freg, gu,/*lambda_eff*/"lambda_eff", Tbc,/*a_f*/"a_f_Diff_T", /*s_f*/"s_f_Diff_T",/*T_field*/"T");
+//
+//		Convective_FirstOrder_SinglePhase_Temperature(mgr, reg, freg, Tbc,/*cp*/"cp_g",/*p*/ "p_g",/*T*/ "T",/*a_f^p*/"a_f_Diff_p_g", /*s_f^p*/"s_f_Diff_p_g",/*aPP*/"aPP_conv", /*aPN*/"aPN_conv", /*bP*/"bP_conv");
+//
+//		TimeTerm_Euler_SinglePhase_Temperature(mgr, reg, dt, /*rock comp*/1e-12,/*phi*/"phi",/*rho_r*/"rho_r", /*cp_r*/"cp_r",/*rho_f*/"rho_g", /*cp_f*/"cp_g",/*T_now*/"T",/*T_old*/"T_old", /*aC*/"aC_time_T", /*bC*/"bC_time_T");
+//
+//		assembleTemperature_singlePhase_COO(mgr, reg, freg, "a_f_Diff_T", "s_f_Diff_T", "aPP_conv", "aPN_conv", "bP_conv", "aC_time_T", "bC_time_T", &sysT);
+//		const bool needCompressT = (ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
+//			(ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
+//			(lastSysT != nullptr);
+//		if (needCompressT) {
+//			sysT.compressInPlace(0.0);
+//		}
+//
+//		if (ctrl.reportPerIter)
+//		{
+//			auto R = PostChecks::reportAssembly(sysT, /*force_compress*/false);
+//			PostChecks::printAssemblyReport(R, "T");
+//		}
+//
+//		int N = 0; auto lid = buildUnknownMap(mesh, N);
+//		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N);
+//		double resT = 0; int itT = 0;
+//		bool okT = false;
+//		if (!ctrl.useJacobi) {
+//			auto opt = ctrl.lin_T;
+//			if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+//			okT = solveCOO_Eigen(sysT, T_vec, opt, &itT, &resT);
+//			if (!okT) std::cerr << "[LinearSolver] temperature solve failed, fallback Jacobi.\n";
+//		}
+//		if (ctrl.useJacobi || !okT) {
+//			jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
+//		}
+//		scatterVecToField(reg, mesh, "T", lid, T_vec);
+//		auto Tfield = reg.get<volScalarField>("T");
+//		if (Tfield) {
+//			for (double& val : Tfield->data) {
+//				if (val < 373.15)      val = 373.15;
+//				else if (val > 450.0)  val = 450.0;
+//			}
+//		}
+//	}
+//
+//	// 5) 欠松弛 + 收敛衡量（相对上一迭代层 prev）
+//	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+//	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+//
+//	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+//	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+//
+//	// 6) 写回 prev
+//	updatePrevIterates(reg, /*p*/"p_g", /*T*/"T", /*p_prev*/"p_g_prev", /*T_prev*/"T_prev");
+//
+//	// 可选：把最后一次迭代的系统拷出去供上层导出
+//	if (lastSysP) *lastSysP = sysP;
+//	if (lastSysT) *lastSysT = sysT;
+//	return true;
+//}
 
 // ============ 一次外迭代：WATER ============
 inline bool doOneOuter_WATER(
@@ -309,95 +507,146 @@ inline bool doOneOuter_WATER(
 ) {
 	Mesh& mesh = mgr.mesh();
 
-	if (!startOuterIteration(reg, /*p*/"p_w", /*T*/"T",
-		/*p_prev*/"p_w_prev", /*T_prev*/"T_prev"))
+	if (!startOuterIteration(reg, "p_w", "T", "p_w_prev", "T_prev"))
 		return false;
 
-		ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
-		ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "water");
-		ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "water", 1e-12);
+	// 时间线性化点
+	bulidTimeLinearizationPoint(
+		mgr, reg,
+		/*p_old*/ "p_w_old", /*T_old*/ "T_old",
+		/*p_iter*/ "p_w",    /*T_iter*/ "T",
+		/*p_lin_out*/ "p_time_lin",
+		/*T_lin_out*/ "T_time_lin"
+	);
 
+	ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+	ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "water");
+	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "water", 1e-12);
 
-
+	// 压力
 	SparseSystemCOO sysP;
 	{
 		DiffusionIterm_TPFA_water_singlePhase_DarcyFlow(
 			mgr, reg, freg, gu, rock.k_iso, Pbc,
-			/*a_f*/"a_f_Diff_p_w", /*s_f*/"s_f_Diff_p_w",
-			/*p_field*/"p_w", /*enable_buoy*/true, /*gradSmoothIters*/0);
+			"a_f_Diff_p_w", "s_f_Diff_p_w",
+			"p_w", /*enable_buoy*/ true, /*gradSmoothIters*/ 0);
 
-		computeRhoAndDrhoDpAt(mgr, reg, "p_w", "T", "water", "rho_time", "drho_dp_time");
+		// 在时间线性化点评估 rho/drho_dp
+		computeRhoAndDrhoDpAt(
+			mgr, reg,
+			"p_time_lin", "T_time_lin",
+			"water", "rho_time", "drho_dp_time"
+		);
 
 		TimeTerm_Euler_SinglePhase_Flow(
 			mgr, reg, dt, ctrl.c_phi_const,
-			/*phi*/"phi", /*p_old*/"p_w_old",
-			/*rho_time*/"rho_time", /*drho_dp_time*/"drho_dp_time",
-			/*aC*/"aC_time_p", /*bC*/"bC_time_p");
+			"phi", "p_w_old",
+			"rho_time", "drho_dp_time",
+			"aC_time_p", "bC_time_p"
+		);
 
 		assemblePressure_water_singlePhase_COO(mgr, reg, freg, &sysP);
-		const bool needCompressP = (ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
-		    (ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
-		    (lastSysP != nullptr);
-		if (needCompressP) {
-			sysP.compressInPlace(0.0);
-		}
+		const bool needCompressP =
+			(ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
+			(ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
+			(lastSysP != nullptr);
+		if (needCompressP) sysP.compressInPlace(0.0);
 
 		if (ctrl.reportPerIter) {
 			auto R = PostChecks::reportAssembly(sysP, false);
-			PostChecks::printAssemblyReport(R, "P(w)");
+			PostChecks::printAssemblyReport(R, "P(WAT)");
 		}
 
 		int N = 0; auto lid = buildUnknownMap(mesh, N);
 		auto p_vec = gatherFieldToVec(reg, mesh, "p_w", lid, N);
-		double resP = 0; int itP = 0;
-		jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
+		double resP = 0; int itP = 0; bool okP = false;
+
+		if (!ctrl.useJacobi) {
+			auto opt = ctrl.lin_p; if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+			okP = solveCOO_Eigen(sysP, p_vec, opt, &itP, &resP);
+			if (!okP) std::cerr << "[LinearSolver] pressure failed, fallback Jacobi.\n";
+		}
+		if (ctrl.useJacobi || !okP) {
+			jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
+		}
 		scatterVecToField(reg, mesh, "p_w", lid, p_vec);
 	}
 
+	// 温度
 	SparseSystemCOO sysT;
 	{
 		DiffusionIterm_TPFA_Temperature_singlePhase(
 			mgr, reg, freg, gu,
 			"lambda_eff", Tbc,
 			"a_f_Diff_T", "s_f_Diff_T",
-			"T");
+			"T"
+		);
 
 		Convective_FirstOrder_SinglePhase_Temperature(
 			mgr, reg, freg, Tbc,
 			"cp_w", "p_w", "T",
 			"a_f_Diff_p_w", "s_f_Diff_p_w",
-			"aPP_conv", "aPN_conv", "bP_conv");
+			"aPP_conv", "aPN_conv", "bP_conv"
+		);
 
 		TimeTerm_Euler_SinglePhase_Temperature(
-			mgr, reg, dt, 1e-12,
-			"phi", "rho_r", "cp_r",
-			"rho_w", "cp_w",
-			"T", "T_old",
-			"aC_time_T", "bC_time_T");
+			mgr, reg, dt,
+			/*Ceff_floor*/ 1e-12,
+			/*phi*/  "phi",
+			/*rho_r*/"rho_r",
+			/*cp_r*/ "cp_r",
+			/*rho_f*/"rho_w",
+			/*cp_f*/ "cp_w",
+			/*T*/    "T",
+			/*T_old*/"T_old",
+			/*aC*/   "aC_time_T",
+			/*bC*/   "bC_time_T",
+			/*use_time_lin*/ true,
+			/*T_lin_name*/   "T_time_lin",
+			/*theta*/        0.5,
+			/*Ceff_out*/     "Ceff_T"
+		);
 
 		assembleTemperature_singlePhase_COO(
 			mgr, reg, freg,
 			"a_f_Diff_T", "s_f_Diff_T",
 			"aPP_conv", "aPN_conv", "bP_conv",
 			"aC_time_T", "bC_time_T",
-			&sysT);
-		const bool needCompressT = (ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
-		    (ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
-		    (lastSysT != nullptr);
-		if (needCompressT) {
-			sysT.compressInPlace(0.0);
-		}
+			&sysT
+		);
+		const bool needCompressT =
+			(ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
+			(ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
+			(lastSysT != nullptr);
+		if (needCompressT) sysT.compressInPlace(0.0);
 
 		if (ctrl.reportPerIter) {
 			auto R = PostChecks::reportAssembly(sysT, false);
-			PostChecks::printAssemblyReport(R, "T(w)");
+			PostChecks::printAssemblyReport(R, "T(WAT)");
 		}
 
 		int N = 0; auto lid = buildUnknownMap(mesh, N);
 		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N);
-		double resT = 0; int itT = 0;
-		jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
+		double resT = 0; int itT = 0; bool okT = false;
+
+		if (!ctrl.useJacobi) {
+			auto opt = ctrl.lin_T; if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+			okT = solveCOO_Eigen(sysT, T_vec, opt, &itT, &resT);
+			if (!okT) std::cerr << "[LinearSolver] temperature failed, fallback Jacobi.\n";
+		}
+		if (ctrl.useJacobi || !okT) {
+			jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
+		}
 		scatterVecToField(reg, mesh, "T", lid, T_vec);
+
+		// （可选软限幅）
+		auto Tfield = reg.get<volScalarField>("T");
+		if (Tfield) {
+			for (double& val : Tfield->data) {
+				if (val < 373.15)      val = 373.15;
+				else if (val > 450.0)  val = 450.0;
+			}
+		}
 	}
 
 	underRelaxInPlace(reg, "p_w", "p_w_prev", ctrl.urf_p);
@@ -412,6 +661,147 @@ inline bool doOneOuter_WATER(
 	if (lastSysT) *lastSysT = sysT;
 	return true;
 }
+
+
+//inline bool doOneOuter_WATER(
+//	MeshManager& mgr,
+//	FieldRegistry& reg,
+//	FaceFieldRegistry& freg,
+//	PhysicalPropertiesManager& ppm,
+//	const PressureBCAdapter& Pbc,
+//	const TemperatureBCAdapter& Tbc,
+//	const GravUpwind& gu,
+//	const RockDefaults& rock,
+//	double dt,
+//	const SolverControls& ctrl,
+//	double& dp_inf,
+//	double& dT_inf,
+//	SparseSystemCOO* lastSysP = nullptr,
+//	SparseSystemCOO* lastSysT = nullptr)
+//{
+//	Mesh& mesh = mgr.mesh();
+//
+//	if (!startOuterIteration(reg, "p_w", "T", "p_w_prev", "T_prev"))
+//		return false;
+//
+//	ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+//	ppm.UpdateMatrixFluidAt(mgr, reg, "p_w", "T", "water");
+//	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "water", 1e-12);
+//
+//	// P(w)
+//	SparseSystemCOO sysP;
+//	{
+//		DiffusionIterm_TPFA_water_singlePhase_DarcyFlow(
+//			mgr, reg, freg, gu, rock.k_iso, Pbc,
+//			"a_f_Diff_p_w", "s_f_Diff_p_w",
+//			"p_w", true, 0);
+//
+//		computeRhoAndDrhoDpAt(mgr, reg, "p_w", "T", "water", "rho_time", "drho_dp_time");
+//		TimeTerm_Euler_SinglePhase_Flow(
+//			mgr, reg, dt, ctrl.c_phi_const,
+//			"phi", "p_w_old", "rho_time", "drho_dp_time",
+//			"aC_time_p", "bC_time_p");
+//
+//		assemblePressure_water_singlePhase_COO(mgr, reg, freg, &sysP);
+//		const bool needCompressP = (ctrl.lin_p.type == LinearSolverOptions::Type::SparseLU) ||
+//			(ctrl.lin_p.type == LinearSolverOptions::Type::LDLT) ||
+//			(lastSysP != nullptr);
+//		if (needCompressP) sysP.compressInPlace(0.0);
+//
+//		if (ctrl.reportPerIter) {
+//			auto R = PostChecks::reportAssembly(sysP, false);
+//			PostChecks::printAssemblyReport(R, "P(w)");
+//		}
+//
+//		int N = 0; auto lid = buildUnknownMap(mesh, N);
+//		auto p_vec = gatherFieldToVec(reg, mesh, "p_w", lid, N);
+//		double resP = 0; int itP = 0; bool okP = false;
+//
+//		if (!ctrl.useJacobi) {
+//			auto opt = ctrl.lin_p;
+//			if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+//			okP = solveCOO_Eigen(sysP, p_vec, opt, &itP, &resP);
+//			if (!okP) std::cerr << "[LinearSolver] pressure(water) solve failed, fallback Jacobi.\n";
+//		}
+//		if (ctrl.useJacobi || !okP) {
+//			jacobiSolve(sysP, p_vec, ctrl.jac_p, &resP, &itP);
+//		}
+//		scatterVecToField(reg, mesh, "p_w", lid, p_vec);
+//	}
+//
+//	// T(w)
+//	SparseSystemCOO sysT;
+//	{
+//		DiffusionIterm_TPFA_Temperature_singlePhase(
+//			mgr, reg, freg, gu, "lambda_eff", Tbc,
+//			"a_f_Diff_T", "s_f_Diff_T", "T");
+//
+//		Convective_FirstOrder_SinglePhase_Temperature(
+//			mgr, reg, freg, Tbc,
+//			"cp_w", "p_w", "T",
+//			"a_f_Diff_p_w", "s_f_Diff_p_w",
+//			"aPP_conv", "aPN_conv", "bP_conv");
+//
+//		TimeTerm_Euler_SinglePhase_Temperature(
+//			mgr, reg, dt, 1e-12,
+//			"phi", "rho_r", "cp_r",
+//			"rho_w", "cp_w",
+//			"T", "T_old",
+//			"aC_time_T", "bC_time_T");
+//
+//		assembleTemperature_singlePhase_COO(
+//			mgr, reg, freg,
+//			"a_f_Diff_T", "s_f_Diff_T",
+//			"aPP_conv", "aPN_conv", "bP_conv",
+//			"aC_time_T", "bC_time_T",
+//			&sysT);
+//		const bool needCompressT = (ctrl.lin_T.type == LinearSolverOptions::Type::SparseLU) ||
+//			(ctrl.lin_T.type == LinearSolverOptions::Type::LDLT) ||
+//			(lastSysT != nullptr);
+//		if (needCompressT) sysT.compressInPlace(0.0);
+//
+//		if (ctrl.reportPerIter) {
+//			auto R = PostChecks::reportAssembly(sysT, false);
+//			PostChecks::printAssemblyReport(R, "T(w)");
+//		}
+//
+//		int N = 0; auto lid = buildUnknownMap(mesh, N);
+//		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N);
+//		double resT = 0; int itT = 0; bool okT = false;
+//
+//		if (!ctrl.useJacobi) {
+//			auto opt = ctrl.lin_T;
+//			if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+//			okT = solveCOO_Eigen(sysT, T_vec, opt, &itT, &resT);
+//			if (!okT) std::cerr << "[LinearSolver] temperature(water) solve failed, fallback Jacobi.\n";
+//		}
+//		if (ctrl.useJacobi || !okT) {
+//			jacobiSolve(sysT, T_vec, ctrl.jac_T, &resT, &itT);
+//		}
+//		scatterVecToField(reg, mesh, "T", lid, T_vec);
+//
+//		// 可选：数值稳定限幅（如需严格遵守 BC，请移除此块）
+//		auto Tfield = reg.get<volScalarField>("T");
+//		if (Tfield) {
+//			for (double& val : Tfield->data) {
+//				if (val < 373.15)      val = 373.15;
+//				else if (val > 450.0)  val = 450.0;
+//			}
+//		}
+//	}
+//
+//	underRelaxInPlace(reg, "p_w", "p_w_prev", ctrl.urf_p);
+//	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+//
+//	dp_inf = maxAbsDiff(reg, "p_w", "p_w_prev");
+//	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+//
+//	updatePrevIterates(reg, "p_w", "T", "p_w_prev", "T_prev");
+//
+//	if (lastSysP) *lastSysP = sysP;
+//	if (lastSysT) *lastSysT = sysT;
+//	return true;
+//}
 
 
 // ============ 外迭代驱动（单步） ============
