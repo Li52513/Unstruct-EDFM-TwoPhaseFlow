@@ -3,6 +3,7 @@
 #include <algorithm>
 #include "MeshManager.h"
 #include "FieldRegistry.h"
+#include "PhysicalProperties_CO2.h"
 
 
 // ——确保瞬态计算所需的 *_old 和 *_prev 场存在且尺寸正确 —— //
@@ -40,9 +41,8 @@ inline bool ensureTransientFields
     }
 
     // 小工具：获取或创建并确保尺寸；返回是否“新建或刚刚resize”
-    auto ensureSized = [&]( const std::string& name,
-        std::shared_ptr<volScalarField>& out) -> bool
-        {
+    auto ensureSized = [&]( const std::string& name, std::shared_ptr<volScalarField>& out) -> bool
+    {
             out = reg.get<volScalarField>(name);
            
             bool created_or_resized = false;
@@ -60,7 +60,7 @@ inline bool ensureTransientFields
             }
             
             return created_or_resized;
-        };
+    };
 
     std::shared_ptr<volScalarField> p_old, T_old, p_prev, T_prev;
     const bool need_init_p_old = ensureSized(p_old_name, p_old);
@@ -80,6 +80,53 @@ inline bool ensureTransientFields
         }
     }
 
+    return true;
+}
+
+inline bool ensureTransientFields_test_singlePhase_CO2_T_diffusion(Mesh& mesh, FieldRegistry& reg, const std::string& T_name = "T", const std::string& T_old_name = "T_old", const std::string& T_prev_name = "T_prev")
+{
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
+    const size_t n = cells.size();
+    auto T = reg.get<volScalarField>(T_name);
+    auto ensureSized = [&](const std::string& name, std::shared_ptr<volScalarField>& out) -> bool
+        {
+            out = reg.get<volScalarField>(name);
+
+            bool created_or_resized = false;
+
+            if (!out)
+            {
+                out = reg.getOrCreate<volScalarField>(name, n, 0.0);
+                created_or_resized = true;
+            }
+
+            else if (out->data.size() != n)
+            {
+                out->data.resize(n, 0.0);
+                created_or_resized = true;
+            }
+
+            return created_or_resized;
+        };
+
+    std::shared_ptr<volScalarField> T_old, T_prev;
+  
+    const bool need_init_T_old = ensureSized(T_old_name, T_old);
+    
+    const bool need_init_T_prev = ensureSized(T_prev_name, T_prev);
+
+    // 若新建或尺寸变化，用当前 p/T 初始化 *_old 与 *_prev
+    if ( need_init_T_old  || need_init_T_prev) {
+        for (const auto& c : cells) {
+            if (c.id < 0) continue;          // 跳过 ghost
+            const size_t i = id2idx.at(c.id);
+            
+            if (need_init_T_old)  (*T_old)[i] = (*T)[i];
+            
+            if (need_init_T_prev) (*T_prev)[i] = (*T)[i];
+        }
+    }
     return true;
 }
 
@@ -124,6 +171,24 @@ inline bool startTimeStep
     return true;
 }
 
+// 2-1)  时间步开始：把当前(p,T)存到 *_old，并用 *_old 初始化 *_prev
+inline bool startTimeStep_test_singlePhase_CO2_T_diffusion
+(
+	Mesh& mesh, FieldRegistry& reg,
+	const std::string& T_name = "T",
+	const std::string& T_old_name = "T_old",
+	const std::string& T_prev_name = "T_prev"
+)
+{
+	if (!ensureTransientFields_test_singlePhase_CO2_T_diffusion(mesh, reg, T_name, T_old_name, T_prev_name)) return false;
+	// T^n
+	if (!copyField(reg, T_name, T_old_name)) return false; //将T 复制到_old
+	// prev ← old (给 k=0 的外迭代作为初值)
+	if (!copyField(reg, T_old_name, T_prev_name)) return false; //将T_old 复制到 T_prev
+	return true;
+}
+
+
 
 // 3) 外迭代开始：把 prev (k层) 拷到当前工作场 (p,T)
 inline bool startOuterIteration
@@ -138,6 +203,32 @@ inline bool startOuterIteration
     bool ok = true;
     ok = ok && copyField(reg, p_prev_name, p_name);
     ok = ok && copyField(reg, T_prev_name, T_name);
+    return ok;
+}
+
+// 3—1） 外迭代开始：把 prev (k层) 拷到当前工作场-变量T
+inline bool startOuterIteration_T
+(
+	FieldRegistry& reg,
+	const std::string& T_name = "T",
+	const std::string& T_prev_name = "T_prev"
+)
+{
+    bool ok = true;
+    ok = ok && copyField(reg, T_prev_name, T_name);
+    return ok;
+}
+
+// 3—2） 外迭代开始：把 prev (k层) 拷到当前工作场-变量p
+inline bool startOuterIteration_p
+(
+    FieldRegistry& reg,
+    const std::string& p_name = "p_w",
+    const std::string& p_prev_name = "p_w_prev"
+)
+{
+    bool ok = true;
+    ok = ok && copyField(reg, p_prev_name, p_name);
     return ok;
 }
 
@@ -176,6 +267,18 @@ inline bool updatePrevIterates
     ok = ok && copyField(reg, T_name, T_prev_name);
     return ok;
 }
+
+// 5-1)  变量显式配对：完全自定义目标名
+inline bool updatePrevIterates(FieldRegistry& reg,
+    const std::initializer_list<std::pair<std::string, std::string>>& pairs)
+{
+    bool ok = true;
+    for (const auto& pr : pairs) {
+        ok = ok && copyField(reg, pr.first, pr.second);
+    }
+    return ok;
+}
+
 
 // 6) 收敛判据：∞-范数(最大绝对差)
 inline double maxAbsDiff
@@ -305,7 +408,7 @@ inline bool bulidTimeLinearizationPoint
 			pl = 0.5 * (pn + pik);
 			Tl = 0.5 * (Tn + Tik);
 		}
-        Initializer::clampPT(pl, Tl);
+        //Initializer::clampPT(pl, Tl);
         (*p_lin)[i] = pl;
         (*T_lin)[i] = Tl;
     
@@ -314,13 +417,12 @@ inline bool bulidTimeLinearizationPoint
     return true;
 }
 
-// 11)在 (p_lin, T_lin) 处评估 ρ 与 ∂ρ/∂p（数值微分）
-inline bool computeRhoAndDrhoDpAt
-(
+// 在 (p_eval, T_eval) 处评估 ρ 与 ∂ρ/∂p
+inline bool computeRhoAndDrhoDpAt(
     MeshManager& mgr, FieldRegistry& reg,
-    const std::string& p_lin_name = "p_time_lin",
-    const std::string& T_lin_name = "T_time_lin",
-    const std::string& phase = "water",          // "water" | "co2"
+    const std::string& p_eval_name = "p_time_lin",
+    const std::string& T_eval_name = "T_time_lin",
+    const std::string& phase = "water",          // "water" | "CO2"
     const std::string& rho_out = "rho_time",
     const std::string& drhodp_out = "drho_dp_time",
     double dp_rel = 1e-4, double dp_abs_min = 10.0
@@ -331,40 +433,88 @@ inline bool computeRhoAndDrhoDpAt
     const auto& id2idx = mesh.getCellId2Index();
     if (cells.empty()) return false;
 
-    auto pL = reg.get<volScalarField>(p_lin_name);
-    auto TL = reg.get<volScalarField>(T_lin_name);
-    if (!pL || !TL) { std::cerr << "[TimeLin] missing p_lin/T_lin\n"; return false; }
+    auto pE = reg.get<volScalarField>(p_eval_name);
+    auto TE = reg.get<volScalarField>(T_eval_name);
+    if (!pE || !TE) {
+        std::cerr << "[computeRhoAndDrhoDpAt] missing eval fields '"
+            << p_eval_name << "' or '" << T_eval_name << "'\n";
+        return false;
+    }
 
-    auto rho = reg.getOrCreate<volScalarField>(rho_out, cells.size(), 0.0);
-    auto dr = reg.getOrCreate<volScalarField>(drhodp_out, cells.size(), 0.0);
+    auto rhoF = reg.getOrCreate<volScalarField>(rho_out, cells.size(), 0.0);
+    auto dF = reg.getOrCreate<volScalarField>(drhodp_out, cells.size(), 0.0);
 
-    auto& wt = WaterPropertyTable::instance();
-    auto& gt = CO2PropertyTable::instance();
     const bool isCO2 = (phase == "co2" || phase == "CO2");
+
+    if (isCO2) {
+        // —— CO2：ρ 仅依赖 T，用拟合式；drho/dp = 0 —— //
+        for (const auto& c : cells) {
+            if (c.id < 0) continue;
+            const size_t i = id2idx.at(c.id);
+            const double T = (*TE)[i];
+            // 拟合函数内部已做区间钳位
+            const double rho_val = CO2::rho_CO2_kg_m3(T);
+            (*rhoF)[i] = rho_val;
+            (*dF)[i] = 0.0;      // 与 p 无关
+        }
+        return true;
+    }
+
+    // —— water：保留原表格 + 对称差分数值微分（若你已有表格接口） —— //
+    auto& wt = WaterPropertyTable::instance();
 
     for (const auto& c : cells) {
         if (c.id < 0) continue;
         const size_t i = id2idx.at(c.id);
-        double p = (*pL)[i], T = (*TL)[i];
-        Initializer::clampPT(p, T);
+
+        double p = (*pE)[i], T = (*TE)[i];
+       // Initializer::clampPT(p, T);
 
         double rho_lin = 1000.0;
-        try { rho_lin = isCO2 ? gt.getProperties(p, T).rho : wt.getProperties(p, T).rho; }
-        catch (...) { /* OOR 兜底 */ }
+        try { rho_lin = wt.getProperties(p, T).rho; }
+        catch (...) { /* 出界兜底：保持 rho_lin 默认 */ }
 
+        // 对称差分：drho/dp ≈ [ρ(p+dp,T) - ρ(p-dp,T)] / (2dp)
         const double dpa = std::max(dp_abs_min, std::abs(p) * dp_rel);
         double rp = rho_lin, rm = rho_lin;
         try {
             double pp = p + dpa, pm = p - dpa;
-            Initializer::clampPT(pp, T); Initializer::clampPT(pm, T);
-            rp = isCO2 ? gt.getProperties(pp, T).rho : wt.getProperties(pp, T).rho;
-            rm = isCO2 ? gt.getProperties(pm, T).rho : wt.getProperties(pm, T).rho;
+            //Initializer::clampPT(pp, T);
+            //Initializer::clampPT(pm, T);
+            rp = wt.getProperties(pp, T).rho;
+            rm = wt.getProperties(pm, T).rho;
         }
-        catch (...) { /* OOR 兜底 */ }
+        catch (...) { /* 出界兜底：rp/rm 用 rho_lin */ }
 
-        (*rho)[i] = rho_lin;
-        (*dr)[i] = (rp - rm) / std::max(2.0 * dpa, 1e-12);
+        (*rhoF)[i] = rho_lin;
+        (*dF)[i] = (rp - rm) / std::max(2.0 * dpa, 1e-12);
     }
     return true;
+}
+
+// 构造 p_eval, T_eval = (1-θ)*old + θ*iter
+inline void buildEvalFields(
+    FieldRegistry& reg,
+    const std::string& p_old, const std::string& p_iter,
+    const std::string& T_old, const std::string& T_iter,
+    const std::string& p_eval_name, const std::string& T_eval_name,
+    double theta_p = 1.0, double theta_T = 1.0
+) {
+    auto pOld = reg.get<volScalarField>(p_old);
+    auto pIt = reg.get<volScalarField>(p_iter);
+    auto TOld = reg.get<volScalarField>(T_old);
+    auto TIt = reg.get<volScalarField>(T_iter);
+    if (!pOld || !pIt || !TOld || !TIt) { throw std::runtime_error("[buildEvalFields] missing fields"); }
+
+    theta_p = std::min(1.0, std::max(0.0, theta_p));
+    theta_T = std::min(1.0, std::max(0.0, theta_T));
+
+    auto pEval = reg.getOrCreate<volScalarField>(p_eval_name, pIt->data.size(), 0.0);
+    auto TEval = reg.getOrCreate<volScalarField>(T_eval_name, TIt->data.size(), 0.0);
+
+    for (size_t i = 0; i < pIt->data.size(); ++i) {
+        (*pEval)[i] = (1.0 - theta_p) * (*pOld)[i] + theta_p * (*pIt)[i];
+        (*TEval)[i] = (1.0 - theta_T) * (*TOld)[i] + theta_T * (*TIt)[i];
+    }
 }
 

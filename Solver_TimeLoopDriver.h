@@ -4,10 +4,12 @@
 #include <string>
 #include <sstream>   // ★ 新增
 #include <iomanip>   // ★ 新增
+#include <filesystem>   
 #include "Solver_TimeLoopSkeleton.h"  // outerIter_OneStep_singlePhase(...)
 #include "Solver_PostChecks.h"        // PostChecks::export_* / dumpCOO_to_matrix_market
 #include "TecplotExporter.h"          // TecplotExport::export_pT_tecplot_after_step
 #include "Solver_AssemblerCOO.h"      // assemblePressure_* / assembleTemperature_*
+#include "PostProcess_.h"
 
 // 可选导出回调：用户自定义额外输出
 using WriteCallback = std::function<void(int step, double time)>;
@@ -60,18 +62,22 @@ inline bool runTransient_singlePhase(
         PostChecks::export_pT_csv_after_step(mgr, reg, pField, "T",
             /*step=*/0, /*t=*/0.0, outFolderCSV);
     }
-    if (exportTecplotP || exportTecplotT) {
+    if (exportTecplotP || exportTecplotT)
+    {
         TecplotExport::TecplotOptions opt;
         opt.folder = std::string("out_tec_") + phase;
         opt.filePrefix = phase;
-        if (exportTecplotP) {
-            TecplotExport::export_cellField_to_tecplot_after_step(
+        if (exportTecplotP) 
+        {
+            TecplotExport::export_cellField_to_tecplot_after_step
+            (
                 mgr, reg, freg, opt,
                 /*cellField*/ pField,
                 /*tmpFace*/   std::string(pField) + "_face_tmp",   // ★ 修正拼接
                 /*varName*/   "P",
                 /*step=*/0, /*t=*/0.0,
-                /*PBC*/ &Pbc, /*TBC*/ nullptr);
+                /*PBC*/ &Pbc, /*TBC*/ nullptr
+            );
         }
         if (exportTecplotT) {
             TecplotExport::export_cellField_to_tecplot_after_step(
@@ -109,61 +115,61 @@ inline bool runTransient_singlePhase(
 
 
         const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
-        if ((exportTecplotP || exportTecplotT) && doThisStep) {
-            TecplotExport::TecplotOptions opt;
-            opt.folder = std::string("out_tec_") + phase;  // 目录可自定义
-            opt.filePrefix = phase;
-            opt.precision = 16;
-
-            if (exportTecplotP) {
-                const bool okP = TecplotExport::export_cellField_to_tecplot_after_step_cell2face2node(
-                    mgr, reg, freg, opt,
-                    /*cellField*/ pField,
-                    /*tmpFace */ std::string(pField) + "_face_tmp",
-                    /*varName */ "P",
-                    step1, t,
-                    /*PBC*/ &Pbc, /*TBC*/ nullptr);
-                if (!okP) std::cerr << "[runTransient] Tecplot(P) export failed at step " << step1 << "\n";
-            }
-            if (exportTecplotT) {
-                const bool okT = TecplotExport::export_cellField_to_tecplot_after_step_cell2face2node(
-                    mgr, reg, freg, opt,
-                    /*cellField*/ "T",
-                    /*tmpFace */ "T_face_tmp",
-                    /*varName */ "T",
-                    step1, t,
-                    /*PBC*/ nullptr, /*TBC*/ &Tbc);
-                if (!okT) std::cerr << "[runTransient] Tecplot(T) export failed at step " << step1 << "\n";
-            }
-        }
         //if ((exportTecplotP || exportTecplotT) && doThisStep) {
         //    TecplotExport::TecplotOptions opt;
-        //    opt.folder = std::string("out_tec_") + phase;
+        //    opt.folder = std::string("out_tec_") + phase;  // 目录可自定义
         //    opt.filePrefix = phase;
+        //    opt.precision = 16;
 
         //    if (exportTecplotP) {
-        //        const bool okP = TecplotExport::export_cellField_to_tecplot_after_step(
+        //        const bool okP = TecplotExport::export_cellField_to_tecplot_after_step_cell2face2node(
         //            mgr, reg, freg, opt,
         //            /*cellField*/ pField,
-        //            /*tmpFace*/   std::string(pField) + "_face_tmp", // ★ 修正拼接
-        //            /*varName*/   "P",
+        //            /*tmpFace */ std::string(pField) + "_face_tmp",
+        //            /*varName */ "P",
         //            step1, t,
-        //            /*PBC*/ &Pbc, /*TBC*/ nullptr
-        //        );
+        //            /*PBC*/ &Pbc, /*TBC*/ nullptr);
         //        if (!okP) std::cerr << "[runTransient] Tecplot(P) export failed at step " << step1 << "\n";
         //    }
         //    if (exportTecplotT) {
-        //        const bool okT = TecplotExport::export_cellField_to_tecplot_after_step(
+        //        const bool okT = TecplotExport::export_cellField_to_tecplot_after_step_cell2face2node(
         //            mgr, reg, freg, opt,
         //            /*cellField*/ "T",
-        //            /*tmpFace*/   "T_face_tmp",
-        //            /*varName*/   "T",
+        //            /*tmpFace */ "T_face_tmp",
+        //            /*varName */ "T",
         //            step1, t,
-        //            /*PBC*/ nullptr, /*TBC*/ &Tbc
-        //        );
+        //            /*PBC*/ nullptr, /*TBC*/ &Tbc);
         //        if (!okT) std::cerr << "[runTransient] Tecplot(T) export failed at step " << step1 << "\n";
         //    }
         //}
+        if ((exportTecplotP || exportTecplotT) && doThisStep) {
+            TecplotExport::TecplotOptions opt;
+            opt.folder = std::string("out_tec_") + phase;
+            opt.filePrefix = phase;
+
+            if (exportTecplotP) {
+                const bool okP = TecplotExport::export_cellField_to_tecplot_after_step(
+                    mgr, reg, freg, opt,
+                    /*cellField*/ pField,
+                    /*tmpFace*/   std::string(pField) + "_face_tmp", // ★ 修正拼接
+                    /*varName*/   "P",
+                    step1, t,
+                    /*PBC*/ &Pbc, /*TBC*/ nullptr
+                );
+                if (!okP) std::cerr << "[runTransient] Tecplot(P) export failed at step " << step1 << "\n";
+            }
+            if (exportTecplotT) {
+                const bool okT = TecplotExport::export_cellField_to_tecplot_after_step(
+                    mgr, reg, freg, opt,
+                    /*cellField*/ "T",
+                    /*tmpFace*/   "T_face_tmp",
+                    /*varName*/   "T",
+                    step1, t,
+                    /*PBC*/ nullptr, /*TBC*/ &Tbc
+                );
+                if (!okT) std::cerr << "[runTransient] Tecplot(T) export failed at step " << step1 << "\n";
+            }
+        }
 
 
 
@@ -226,3 +232,76 @@ inline bool runTransient_singlePhase(
     }
     return true;
 }
+
+
+inline bool runTransient_test_singlePhase_CO2_T_diffusion
+(
+    MeshManager& mgr,
+    FieldRegistry& reg,
+    FaceFieldRegistry& freg,
+    PhysicalPropertiesManager& ppm,
+    const TemperatureBCAdapter& Tbc,
+    const GravUpwind& gu,
+    int nSteps,
+    double dt,
+    const SolverControls& ctrl,
+    int writeEvery = 1,                         // 每步/每隔几步输出
+    const std::string& outPrefix = "T_CO2_diff" // 输出前缀
+)
+{
+
+    double t = 0.0;
+    for (int step = 0; step < nSteps; ++step)
+    {
+        const int step1 = step + 1;
+        t += dt;
+        
+        if (!startTimeStep_test_singlePhase_CO2_T_diffusion(mgr.mesh(), reg, "T", "T_old", "T_prev")) return false;
+
+		// ——单步推进（含：startTimeStep/外迭代/提交 n+1）——
+        bool ok = outerIter_test_singlePhase_CO2_T_diffusion(mgr, reg, freg, ppm, Tbc, gu, dt, ctrl);
+		
+        if (!ok) {
+			std::cerr << "[runTransient] step " << step1 << " failed.\n";
+			return false;
+		}
+
+        const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
+		// ——每步导出：TXT——
+        if (doThisStep)
+        {
+            const std::vector<Vector> gradT  = computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, "T", /*gradSmoothIters=*/0);
+
+
+            // 2) 设定输出前缀到 ./T_test_tec/T，并确保目录存在
+            const std::string outPrefix = "./T_test_tec/T";
+#if __cplusplus >= 201703L
+            try {
+                std::filesystem::create_directories(std::filesystem::path(outPrefix).parent_path());
+            }
+            catch (...) {
+                std::cerr << "[Transient(T-diff)] cannot create directory for: " << outPrefix << "\n";
+            }
+#endif
+            // 3) 5位编号：T_step_00001.plt
+            std::ostringstream fn;
+            fn << outPrefix << "_step_" << std::setw(7) << std::setfill('0') << step1 << ".plt";
+
+            const bool okPlt = outputTecplot_cellToFaceToNode_BC(
+                mgr, reg, freg,
+                /*Tbc*/ &Tbc, /*Pbc*/ nullptr,
+                /*cell*/ "T",
+                /*face*/ "T_face_tmp",
+                /*gradBuf*/ &gradT,       // ★ 零拷贝传梯度缓冲
+                /*out*/  fn.str()
+            );
+            if (!okPlt) {
+                std::cerr << "[Transient(T-diff)] Tecplot export failed at step " << step1 << ".\n";
+                return false;
+            }
+        }
+    }
+	return true;
+}
+
+

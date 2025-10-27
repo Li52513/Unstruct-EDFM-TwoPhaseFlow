@@ -125,87 +125,249 @@ struct Mat3
 
 };
 
+inline Vector greenGaussGrad_linearConsistent(
+    Mesh& mesh, const FieldRegistry& reg, const char* name,
+    const Cell& CP, bool is3D,
+    const std::vector<int>& nbCellsCached) // 传入已收集的邻居，便于在边界做临时LSQ
+{
+    const auto& cells = mesh.getCells();
+    const auto& faces = mesh.getFaces();
+    const auto& id2idx = mesh.getCellId2Index();
+    auto phi = reg.get<volScalarField>(name);
+    if (!phi) return Vector(0, 0, 0);
+
+    // 1) 若需要，用一次局部LSQ估计 gLSQ 供边界面线性外推 φ_f
+    auto lsq_local = [&](Vector& g)->bool {
+        if (!is3D) {
+            double Gxx = 0, Gxy = 0, Gyy = 0, bx = 0, by = 0;
+            auto itP = id2idx.find(CP.id); if (itP == id2idx.end()) return false;
+            const size_t iP = itP->second; const double phiP = (*phi)[iP];
+            for (int N : nbCellsCached) {
+                auto itN = id2idx.find(N); if (itN == id2idx.end()) continue;
+                const size_t iN = itN->second;
+                const Vector r3 = cells[iN].center - CP.center;
+                const double rx = r3.m_x, ry = r3.m_y;
+                const double r2 = std::max(rx * rx + ry * ry, 1e-20);
+                const double w = 1.0 / r2;
+                const double dphi = (*phi)[iN] - phiP;
+                Gxx += w * rx * rx; Gxy += w * rx * ry; Gyy += w * ry * ry;
+                bx += w * rx * dphi; by += w * ry * dphi;
+            }
+            const double tiny = 1e-20;
+            Gxx += tiny; Gyy += tiny;
+            const double det = Gxx * Gyy - Gxy * Gxy;
+            if (std::abs(det) < 1e-30) return false;
+            const double inv = 1.0 / det;
+            g.m_x = (Gyy * bx - Gxy * by) * inv;
+            g.m_y = (-Gxy * bx + Gxx * by) * inv;
+            g.m_z = 0.0;
+            return true;
+        }
+        else {
+            // 3D 简化：复用一次 3×3 法方程
+            Mat3 G; Vector b(0, 0, 0);
+            auto itP = id2idx.find(CP.id); if (itP == id2idx.end()) return false;
+            const size_t iP = itP->second; const double phiP = (*phi)[iP];
+            for (int N : nbCellsCached) {
+                auto itN = id2idx.find(N); if (itN == id2idx.end()) continue;
+                const size_t iN = itN->second;
+                const Vector r = cells[iN].center - CP.center;
+                const double rmag2 = std::max(r.m_x * r.m_x + r.m_y * r.m_y + r.m_z * r.m_z, 1e-24);
+                const double w = 1.0 / rmag2;
+                const double dphi = (*phi)[iN] - phiP;
+                G.addOuter(r, w); b = b + r * (w * dphi);
+            }
+            // 微正则
+            G.a[0][0] += 1e-18; G.a[1][1] += 1e-18; G.a[2][2] += 1e-18;
+            return G.solve(b, g);
+        }
+        };
+
+    Vector gLSQ(0, 0, 0);
+    bool haveLSQ = lsq_local(gLSQ);
+
+    // 2) Green–Gauss：φ_f 线性一致重构，grad ≈ (1/V) Σ φ_f * S_f
+    auto itP = id2idx.find(CP.id); if (itP == id2idx.end()) return Vector(0, 0, 0);
+    const size_t iP = itP->second; const double phiP = (*phi)[iP];
+    const double V = CP.volume; // 2D: area; 3D: volume
+    if (V <= 0) return Vector(0, 0, 0);
+
+    Vector fluxSum(0, 0, 0);
+    for (int fid_ext : CP.CellFaceIDs) {
+        const int idx = fid_ext - 1;
+        if (idx < 0 || idx >= (int)faces.size()) continue;
+        const Face& F = faces[idx];
+
+        // 面矢量 S_f = n * A（2D 用 length 替代）
+        const double Af = is3D ? /*F.area*/ F.length : /*F.length*/ F.length;   // <-- 若字段名不同请替换
+        const Vector Sf = F.normal * Af;                                      // <-- F.normal 为单位法向；若非单位需改为 F.areaVector
+
+        // 面心 φ_f
+        double phi_f = phiP;
+        if (F.ownerCell == CP.id && F.neighborCell >= 0) {
+            // 内部面：简单平均（对线性场在对称几何/均匀网格线性一致；非均匀几何仍然OK作为GG的面值）
+            const size_t iN = id2idx.at(F.neighborCell);
+            const double phiN = (*phi)[iN];
+            phi_f = 0.5 * (phiP + phiN);
+        }
+        else if (F.neighborCell == CP.id && F.ownerCell >= 0) {
+            const size_t iN = id2idx.at(F.ownerCell);
+            const double phiN = (*phi)[iN];
+            phi_f = 0.5 * (phiP + phiN);
+        }
+        else {
+            // 边界面：用局部LSQ梯度做一次线性外推，保证线性一致
+            if (haveLSQ) {
+                const Vector dx = F.midpoint - CP.center;                       // <-- 若无 F.center，请替换为可用的面几何中心
+                phi_f = phiP + gLSQ*dx;
+            }
+            else {
+                // 兜底：仍用 φP，至少保证稳定（线性一致性会变差，但通常不至于炸）
+                phi_f = phiP;
+            }
+        }
+
+        fluxSum = fluxSum + Sf * phi_f;
+    }
+    return fluxSum * (1.0 / V);
+}
+
 inline std::vector<Vector>
 computeCellGradients_LSQ_with_GG(Mesh& mesh, const FieldRegistry& reg, const char* name, int smoothIters = 0)
 {
-	const auto& cells = mesh.getCells();
-	const auto& faces = mesh.getFaces();
-	const auto& id2idx = mesh.getCellId2Index();
-	auto phi = reg.get<volScalarField>(name);
-	std::vector<Vector> grad(cells.size(), Vector(0, 0, 0));
-	if (!phi) return grad;
+    const auto& cells = mesh.getCells();
+    const auto& faces = mesh.getFaces();
+    const auto& id2idx = mesh.getCellId2Index();
+    auto phi = reg.get<volScalarField>(name);
+    std::vector<Vector> grad(cells.size(), Vector(0, 0, 0));
+    if (!phi) return grad;
 
-	const double eps_r = 1e-12;
+    // 判维
+    bool is3D = false;
+    for (const auto& c : cells) { if (std::abs(c.center.m_z) > 1e-14) { is3D = true; break; } }
+    const int minNb = is3D ? 3 : 2;
+    const int targetNb = is3D ? 6 : 4;   // 经验值：2D 至少 4 个样本，3D 至少 6 个样本更稳
 
-	// 判断维度，决定邻居最少数（2D≥2，3D≥3）
-	bool is3D = false;
-	for (auto& F : faces) { if (F.FaceNodeCoords.size() > 2) { is3D = true; break; } }
-	const int minNb = is3D ? 3 : 2;
+    // ---- 主循环：每个单元做 LSQ；失败则 GG 兜底 ----
+    for (const auto& CP : cells)
+    {
+        auto itP = id2idx.find(CP.id);
+        if (itP == id2idx.end()) continue;
+        const size_t iP = itP->second;
+        const double phiP = (*phi)[iP];
 
-	// 第一次：LSQ，失败则 GG
-	for (const auto& CP : cells)
-	{
-		auto itP = id2idx.find(CP.id);
-		if (itP == id2idx.end()) continue;
-		const size_t iP = itP->second;
-		const double phiP = (*phi)[iP];
+        // 1) 一环邻居
+        std::vector<int> nbCells;
+        nbCells.reserve(16);
+        auto contains = [&](const std::vector<int>& v, int cid)->bool {
+            for (int x : v) if (x == cid) return true;
+            return false;
+            };
+        for (int fid_ext : CP.CellFaceIDs) {
+            const int idx = fid_ext - 1;
+            if (idx < 0 || idx >= (int)faces.size()) continue;
+            const Face& F = faces[idx];
+            const int N = (F.ownerCell == CP.id ? F.neighborCell : F.ownerCell);
+            if (N >= 0 && !contains(nbCells, N)) nbCells.push_back(N);
+        }
 
-		Mat3 G; Vector b(0, 0, 0);
-		int nbCount = 0;
+        // 2) 无条件扩展到 targetNb：二环邻居
+        if ((int)nbCells.size() < targetNb) {
+            std::vector<int> firstRing = nbCells;
+            for (int Nid : firstRing) {
+                auto itN = id2idx.find(Nid);
+                if (itN == id2idx.end()) continue;
+                const auto& CN = cells[itN->second];
+                for (int fid2 : CN.CellFaceIDs) {
+                    const int idx2 = fid2 - 1;
+                    if (idx2 < 0 || idx2 >= (int)faces.size()) continue;
+                    const Face& F2 = faces[idx2];
+                    const int NN = (F2.ownerCell == Nid ? F2.neighborCell : F2.ownerCell);
+                    if (NN < 0 || NN == CP.id) continue;
+                    if (!contains(nbCells, NN)) nbCells.push_back(NN);
+                    if ((int)nbCells.size() >= targetNb) break;
+                }
+                if ((int)nbCells.size() >= targetNb) break;
+            }
+        }
 
-		for (int fid_ext : CP.CellFaceIDs) {
-			const int idx = fid_ext - 1;                          // 1基→0基
-			if (idx < 0 || idx >= (int)faces.size()) continue;
-			const Face& F = faces[idx];
+        // 3) LSQ 求解
+        bool ok = false;
+        if ((int)nbCells.size() >= minNb)
+        {
+            if (!is3D) {
+                // ---- 2D 显式 2×2 LSQ ----
+                double Gxx = 0, Gxy = 0, Gyy = 0, bx = 0, by = 0;
+                for (int N : nbCells) {
+                    auto itN = id2idx.find(N);
+                    if (itN == id2idx.end()) continue;
+                    const size_t iN = itN->second;
+                    const Vector r3 = cells[iN].center - CP.center;
+                    const double rx = r3.m_x, ry = r3.m_y;
+                    const double r2 = std::max(rx * rx + ry * ry, 1e-20);
+                    const double w = 1.0 / r2;               // r^-2 权
+                    const double dphi = (*phi)[iN] - phiP;
+                    Gxx += w * rx * rx; Gxy += w * rx * ry; Gyy += w * ry * ry;
+                    bx += w * rx * dphi; by += w * ry * dphi;
+                }
+                const double tiny = 1e-20;
+                Gxx += tiny; Gyy += tiny;
+                const double det = Gxx * Gyy - Gxy * Gxy;
+                if (std::abs(det) > 1e-30) {
+                    const double inv = 1.0 / det;
+                    grad[iP].m_x = (Gyy * bx - Gxy * by) * inv;
+                    grad[iP].m_y = (-Gxy * bx + Gxx * by) * inv;
+                    grad[iP].m_z = 0.0;
+                    ok = true;
+                }
+            }
+            else {
+                // ---- 3D 仍用 3×3 法方程 ----
+                Mat3 G; Vector b(0, 0, 0);
+                for (int N : nbCells) {
+                    auto itN = id2idx.find(N);
+                    if (itN == id2idx.end()) continue;
+                    const size_t iN = itN->second;
+                    const Vector r = cells[iN].center - CP.center;
+                    const double rmag2 = std::max(r.m_x * r.m_x + r.m_y * r.m_y + r.m_z * r.m_z, 1e-24);
+                    const double w = 1.0 / rmag2;
+                    const double dphi = (*phi)[iN] - phiP;
+                    G.addOuter(r, w);
+                    b = b + r * (w * dphi);
+                }
+                G.a[0][0] += 1e-18; G.a[1][1] += 1e-18; G.a[2][2] += 1e-18;  // 轻微对角正则
+                ok = G.solve(b, grad[iP]);
+            }
+        }
 
-			const int N = (F.ownerCell == CP.id ? F.neighborCell : F.ownerCell);
-			if (N < 0) continue;                                  // 只用内部邻居做 LSQ
-			const size_t iN = id2idx.at(N);
-			const Vector r = cells[iN].center - CP.center;
-			const double rmag = std::max(r.Mag(), eps_r);
-			const double w = 1.0 / (rmag * rmag);
-			const double dphi = (*phi)[iN] - phiP;
+        // 4) 兜底：线性一致 Green–Gauss
+        if (!ok) {
+            grad[iP] = greenGaussGrad_linearConsistent(mesh, reg, name, CP, is3D, nbCells);
+        }
+    }
 
-			G.addOuter(r, w);
-			b = b + r * (w * dphi);
-			++nbCount;
-		}
+    // ---- 可选平滑（单元测试时建议 smoothIters=0）----
+    for (int it = 0; it < smoothIters; ++it)
+    {
+        std::vector<Vector> newg = grad;
+        for (const auto& CP : cells) {
+            auto itP = id2idx.find(CP.id);
+            if (itP == id2idx.end()) continue;
+            const size_t iP = itP->second;
+            Vector acc = grad[iP]; int cnt = 1;
+            for (int fid_ext : CP.CellFaceIDs) {
+                const int idx = fid_ext - 1;
+                if (idx < 0 || idx >= (int)faces.size()) continue;
+                const Face& F = faces[idx];
+                const int N = (F.ownerCell == CP.id ? F.neighborCell : F.ownerCell);
+                if (N < 0) continue;
+                const size_t iN = id2idx.at(N);
+                acc = acc + grad[iN]; ++cnt;
+            }
+            newg[iP] = acc * (1.0 / double(cnt));
+        }
+        grad.swap(newg);
+    }
 
-		bool ok = false;
-		if (nbCount >= minNb)
-		{              // 2D≥2, 3D≥3
-			// 轻微对角正则，避免近奇异
-			G.a[0][0] += 1e-18; G.a[1][1] += 1e-18; G.a[2][2] += 1e-18;
-			ok = G.solve(b, grad[iP]);
-			//cout << "对单元" << CP.id << "采用了LSQ算法计算梯度" << endl;
-		}
-		if (!ok) {
-			grad[iP] = greenGaussGrad(mesh, reg, name, CP);  // GG 兜底
-			//cout << "对单元" << CP.id << "采用了GG算法计算梯度" << endl;;
-		}
-	}
-
-	// 可选：邻域平滑（提升鲁棒性）
-	for (int it = 0; it < smoothIters; ++it)
-	{
-		std::vector<Vector> newg = grad;
-		for (const auto& CP : cells) {
-			auto itP = id2idx.find(CP.id);
-			if (itP == id2idx.end()) continue;
-			const size_t iP = itP->second;
-			Vector acc = grad[iP]; int cnt = 1;
-			for (int fid_ext : CP.CellFaceIDs) {
-				const int idx = fid_ext - 1;
-				if (idx < 0 || idx >= (int)faces.size()) continue;
-				const Face& F = faces[idx];
-				const int N = (F.ownerCell == CP.id ? F.neighborCell : F.ownerCell);
-				if (N < 0) continue;
-				const size_t iN = id2idx.at(N);
-				acc = acc + grad[iN]; ++cnt;
-			}
-			newg[iP] = acc * (1.0 / double(cnt));
-		}
-		grad.swap(newg);
-	}
-	return grad;
+    return grad;
 }

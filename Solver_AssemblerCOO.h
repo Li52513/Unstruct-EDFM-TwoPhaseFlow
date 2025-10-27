@@ -2,6 +2,11 @@
 #pragma once
 #include <vector>
 #include <cassert>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <cctype>
+#include <algorithm>
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
@@ -90,7 +95,8 @@ inline std::vector<int> buildUnknownMap(Mesh& mesh, int& nUnknowns)
 	const auto& id2idx = mesh.getCellId2Index();
 	std::vector<int> lid_of_cell(cells.size(), -1); // -1 表示该 cellId 不在方程中（如 ghost）
 	nUnknowns = 0;
-	for (const auto& c : cells) {
+	for (const auto& c : cells) 
+    {
 		if (c.id < 0) continue; // 忽略 ghost（你目前没有 ghost，但保留更健壮）
 		const size_t i = id2idx.at(c.id);
 		//cout << "Cell ID: " << c.id << "  index: " << i << endl;
@@ -99,6 +105,116 @@ inline std::vector<int> buildUnknownMap(Mesh& mesh, int& nUnknowns)
 	}
 	return lid_of_cell;
 }
+
+// ===== 算子集合（位掩码） =====
+enum OpMask : unsigned 
+{
+    OP_NONE = 0,
+    OP_DIFFUSION = 1u << 0,  // laplacian
+    OP_CONVECTION = 1u << 1,  // advection
+    OP_TIME = 1u << 2   // ddt
+};
+inline bool has(unsigned mask, OpMask op) { return (mask & op) != 0; }
+
+// ===== 通用账本字段名（任何“方程”都用这一套） =====
+// 只要把名字换成该方程对应的字段名即可：压力、温度、饱和度都能用
+
+struct OperatorFieldNames 
+{
+    std::string a_f_diff;  // "a_f_Diff_<tag>"
+    std::string s_f_diff;  // "s_f_Diff_<tag>"
+    std::string aPP_conv;     // "aPP_conv_<tag>"
+    std::string aPN_conv;     // "aPN_conv_<tag>"
+    std::string bP_conv;      // "bP_conv_<tag>"
+    std::string a_time;       // "aC_time_<tag>"
+    std::string b_time;       // "bC_time_<tag>"
+};
+
+// 通用：给任意 tag 直接拼字段名
+inline OperatorFieldNames makeNames(const std::string& tag) 
+{
+    OperatorFieldNames nm;
+	nm.a_f_diff = "a_f_Diff_" + tag;
+	nm.s_f_diff = "s_f_Diff_" + tag;
+	nm.aPP_conv = "aPP_conv_" + tag;
+	nm.aPN_conv = "aPN_conv_" + tag;
+	nm.bP_conv = "bP_conv_" + tag;
+	nm.a_time = "aC_time_" + tag;
+	nm.b_time = "bC_time_" + tag;
+	return nm;
+}
+
+// —— 单相压力 —— 
+inline OperatorFieldNames makeNames_pCO2() { return makeNames("p_g"); } // CO2 气相压力
+inline OperatorFieldNames makeNames_pH2O() { return makeNames("p_w"); } // 水相压力
+
+// —— 两相主变量（经典油水两相：p_w + Sw；pc(Sw) 在账本生成阶段处理）——
+inline OperatorFieldNames makeNames_Sw() { return makeNames("Sw"); } // 水相饱和度
+
+// —— 温度/能量 —— 
+// 1) 单相能量（把 conv 系数按单相质量流量与 cp 生成）：
+inline OperatorFieldNames makeNames_T() { return makeNames("T"); } // 基岩温度/单相能量
+
+// —— 若你区分裂缝场（可选）——
+inline OperatorFieldNames makeNames_pfCO2() { return makeNames("pf_g"); } // 裂缝 CO2 压力
+inline OperatorFieldNames makeNames_pfH2O() { return makeNames("pf_w"); } // 裂缝 水压
+inline OperatorFieldNames makeNames_Tf() { return makeNames("Tf"); } // 裂缝 温度/能量
+inline OperatorFieldNames makeNames_Swf() { return makeNames("Swf"); } // 裂缝 饱和度
+
+// ===== 把字符串表达式解析成位掩码 =====
+// 支持："ddt + diffusion + convection"、"laplacian|ddt"、"advection+ddt" 等（大小写/空格/逗号分隔都OK）
+unsigned parse_ops(const std::string& expr, std::string* errMsg = nullptr);
+
+// ===== 只读装配上下文 =====
+struct AssembleCtx 
+{
+    Mesh& mesh;
+    const std::vector<Face>& faces;
+    const std::vector<Cell>& cells;
+    const std::unordered_map<int, int>& id2idx;
+    const std::vector<int> lid_of_cell;
+
+    // 可空字段指针：按需填充
+    const faceScalarField* aF = nullptr; // 扩散系数(面)
+    const faceScalarField* sF = nullptr; // 扩散源(面)
+    const faceScalarField* aPP = nullptr; // 对流 owner 侧系数(面)
+    const faceScalarField* aPN = nullptr; // 对流 neighbor 侧系数(面)
+    const faceScalarField* bPc = nullptr; // 边界入流源(面)
+    const volScalarField* aC = nullptr; // 时间对角(体)
+    const volScalarField* bC = nullptr; // 时间源(体)
+};
+
+// ===== 三个原子装配子函数（通用，任何“方程”可复用） =====
+void assemble_diffusion_faces(const AssembleCtx& Ctx, SparseSystemCOO& out);
+void assemble_convection_faces(const AssembleCtx& Ctx, SparseSystemCOO& out);
+void assemble_time_cells(const AssembleCtx& Ctx, SparseSystemCOO& out);
+
+// ===== 顶层调度（位掩码版） =====
+bool assemble_sparse_system_coo_item
+(
+    MeshManager& mgr,
+    const FieldRegistry& reg,
+    const FaceFieldRegistry& freg,
+    unsigned ops,                    // 例：OP_TIME | OP_DIFFUSION
+    const OperatorFieldNames& nm,
+    SparseSystemCOO* out = nullptr
+);
+
+//===== 语义友好：字符串 =====进一步封装
+inline bool assemble_COO
+(
+    MeshManager& mgr, const FieldRegistry& reg, const FaceFieldRegistry& freg,
+    const std::string& op_expr, const OperatorFieldNames& nm, SparseSystemCOO* out
+)
+{
+    std::string err;
+    unsigned mask = parse_ops(op_expr, &err);
+    if (mask == OP_NONE && !err.empty()) { std::cerr << "[assemble] parse_ops error: " << err << "\n"; return false; }
+    return  assemble_sparse_system_coo_item(mgr, reg, freg, mask, nm, out);
+}
+
+
+
 
 // ======================================================================
 //  压力方程（CO2，单相）：装配  A p = b
@@ -111,6 +227,19 @@ inline std::vector<int> buildUnknownMap(Mesh& mesh, int& nUnknowns)
 //   边界面：行P: A_PP+=a_f, b_P+=s_f
 //   时间项：cell i: A_ii+=aC[i], b_i+=bC[i]
 // ======================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 inline bool assemblePressure_singlePhase_COO
 (
@@ -192,6 +321,8 @@ inline bool assemblePressure_singlePhase_COO
 
 }
 
+//
+
 
 // 水相/CO2 两个薄封装（字段名统一在这儿）
 inline bool assemblePressure_water_singlePhase_COO
@@ -208,10 +339,7 @@ inline bool assemblePressure_water_singlePhase_COO
     );
 }
 
-inline bool assemblePressure_CO2_singlePhase_COO
-(
-    MeshManager& mgr, const FieldRegistry& reg, const FaceFieldRegistry& freg, SparseSystemCOO* out
-)
+inline bool assemblePressure_CO2_singlePhase_COO( MeshManager& mgr, const FieldRegistry& reg, const FaceFieldRegistry& freg, SparseSystemCOO* out)
 {
     return assemblePressure_singlePhase_COO
     (
@@ -221,6 +349,9 @@ inline bool assemblePressure_CO2_singlePhase_COO
         out
     );
 }
+
+
+
 
 // ======================================================================
 //  温度方程（单相，基于达西速度）：装配  A T = b
@@ -241,7 +372,7 @@ inline bool assembleTemperature_singlePhase_COO
     // 扩散面账本
     const std::string& a_face_diff = "a_f_Diff_T",
     const std::string& s_face_diff = "s_f_Diff_T",
-    // 对面账本
+    // 对流项面账本
     const std::string& aPP_conv = "aPP_conv",
     const std::string& aPN_conv = "aPN_conv",
     const std::string& bP_conv = "bP_conv",

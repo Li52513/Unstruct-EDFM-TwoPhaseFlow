@@ -186,10 +186,10 @@ inline void DiffusionIterm_singlePhase_Temperature_TPFA_InnerFace
 {
 	IsotropicLambdaFromField mob(lambda_name);
 	NoDensity rhoPol;
-	Diffusion_TPFA_InnerFace_SinglePhase (mgr, reg, freg, gu, mob, rhoPol, a_name, s_name, x_name, false, gradSmoothIters);
+	Diffusion_TPFA_InnerFace_SinglePhase (mgr, reg, freg, gu, mob, rhoPol, a_name, s_name, x_name, true, gradSmoothIters);
 	debugPrintInnerFaces_TPFA(mgr, reg, freg, gu, mob, rhoPol,
 		/*a_name*/"a_f_Diff_T", /*s_name*/"s_f_Diff_T", /*x_name*/"T",
-		/*enable_buoy*/false, /*gradSmoothIters*/0,
+		/*enable_buoy*/true, /*gradSmoothIters*/0,
 		/*max_to_print*/100);
 
 }
@@ -210,10 +210,10 @@ inline void DiffusionIterm_singlePhase_Temperature_TPFA_BoundaryFace
 {
 	IsotropicLambdaFromField mob(lambda_name);
 	NoDensity rhoPol;
-	Diffusion_TPFA_BoundaryFace_SinglePhase(mgr, reg, freg, gu, mob, rhoPol, Tbc, a_name, s_name, x_name, false, gradSmoothIters);
+	Diffusion_TPFA_BoundaryFace_SinglePhase(mgr, reg, freg, gu, mob, rhoPol, Tbc, a_name, s_name, x_name, true, gradSmoothIters);
 	debugPrintBoundaryFaces_TPFA(mgr, reg, freg, gu, mob, rhoPol, Tbc,
 		"a_f_Diff_T", "s_f_Diff_T", "T",
-		/*enable_buoy*/false, /*gradSmoothIters*/0,
+		/*enable_buoy*/true, /*gradSmoothIters*/0,
 		/*max_to_print*/100);
 }
 
@@ -234,4 +234,6 @@ inline void DiffusionIterm_TPFA_Temperature_singlePhase
 	DiffusionIterm_singlePhase_Temperature_TPFA_InnerFace(mgr, reg, freg, gu, lambda_name, a_name, s_name, x_name, gradSmoothIters);
 	DiffusionIterm_singlePhase_Temperature_TPFA_BoundaryFace(mgr, reg, freg, gu, lambda_name, Tbc, a_name, s_name, x_name, gradSmoothIters);
 }
+
+
 /************************************************************************************************/

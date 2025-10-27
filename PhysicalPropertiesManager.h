@@ -94,6 +94,12 @@ public:
 
     //裂缝-双相有效热物性：依赖Sw/pg (后面补上);
 
+   // 单相-CO2-常物性-温度扩散试算补充函数
+    void RockProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
+	void CO2Properties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
+    void ComputeEffectiveThermalProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
+
+
 
 
 

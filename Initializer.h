@@ -54,6 +54,26 @@ struct Initializer
 
 	}
 
+	static void createPrimaryFields_test_singlePhase_CO2_T_diffusion(Mesh& mesh, FieldRegistry& reg)
+	{
+		const size_t n = mesh.getCells().size();
+		if (!reg.has("T")) reg.create <volScalarField>("T", n, 303.15);		//温度，K
+		if (!reg.has("p_g")) reg.create<volScalarField>("p_g", n, 1e5);   //气相压力，Pa		
+	}
+
+	static void fillBaseDistributions_test_singlePhase_CO2_T_diffusion(Mesh& mesh, FieldRegistry& reg, const InitFields& init)
+	{
+		auto p_g = reg.get<volScalarField>("p_g");  //气相压力，Pa
+		auto T = reg.get<volScalarField>("T");		//温度，K
+		for (const auto& c : mesh.getCells())
+		{
+			const size_t i = mesh.getCellId2Index().at(c.id); //获取网格单元的内部下标
+			(*p_g)[i] = init.p0 + init.dpdx * c.center.m_x + init.dpdy * c.center.m_y + init.dpdz * c.center.m_z;
+			(*T)[i] = init.T0 + init.dTdx * c.center.m_x + init.dTdy * c.center.m_y + init.dTdz * c.center.m_z;
+		}
+	}
+
+
 	static void fillBaseDistributions(Mesh& mesh, FieldRegistry& reg, const InitFields& init)
 	{
 		auto p_w = reg.get<volScalarField>("p_w"); //水相压力，Pa

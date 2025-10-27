@@ -197,14 +197,14 @@ id2row_fun = @(id) assert_return(id2row(id - nid_min + 1), ...
     sprintf('节点ID %d 在 nodes 表中不存在！', id));
 
 %% ----------------- 开关与样式 -----------------
-showNodeLabel   = true;
-showFaceLabel   = true;
-showCellLabel   = true;
-showSegLabel    = true;
+showNodeLabel   = false;
+showFaceLabel   = false;
+showCellLabel   = false;
+showSegLabel    = false;
 showFFPts       = true;
 
 psz_node  = 18; psz_cell = 36; psz_ffpt = 50;
-f_line_w  = 0.8; seg_line_w = 1.8;
+f_line_w  = 0.8; seg_line_w = 4;
 col_ffpt  = [0.0,0.6,0.0];
 dx_node   = .01; dy_node = .01;
 dx_cell   = .01; dy_cell = .01;
@@ -234,7 +234,7 @@ if showNodeLabel
 end
 
 % 3) Cell centres（全部真实单元）
-scatter(cells(:,2), cells(:,3), psz_cell, 'b', 'filled');
+% scatter(cells(:,2), cells(:,3), psz_cell, 'b', 'filled');
 if showCellLabel
     text(cells(:,2)+dx_cell, cells(:,3)+dy_cell, string(cells(:,1)), ...
          'FontSize',10, 'Color','b', 'FontWeight','bold');
@@ -296,7 +296,7 @@ else
 end
 
 % 6) 锁定视窗到域框
-xlim(xlim_box); ylim(ylim_box); axis equal; box on;
+% xlim(xlim_box); ylim(ylim_box); axis equal; box on;
 
 % 7) 统一图例（Faces / Nodes / Cell centres / 按 cellID 的段 / Frac–Frac pts）
 legendHandles = [hFaceLegend, hNodes, hCells, segLegendHandles(:)'];

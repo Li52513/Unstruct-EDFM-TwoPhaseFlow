@@ -75,6 +75,7 @@ inline void Convective_FirstOrder_SinglePhase_Temperature_InnerFace
         const double pN = cellScalar(reg, mesh, p_field.c_str(), N, 0.0);
         // —— 质量通量：完全复用 TPFA —— //
         const double mf = (*a_f)[idx] * (pP - pN) - (*s_f)[idx];
+        //const double mf = (*a_f)[idx] * (pP - pN);
         (*m_f)[idx] = mf;
 
         // —— 迎风选择 —— //

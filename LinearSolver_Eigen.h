@@ -214,12 +214,14 @@ struct LinearSolverOptions {
 };
 
 // 使用 Eigen 求解 SparseSystemCOO：x 为输入初值/输出解
-inline bool solveCOO_Eigen(
+inline bool solveCOO_Eigen
+(
     const SparseSystemCOO& sys,
     std::vector<double>& x,
     const LinearSolverOptions& opt,
     int* iters_out = nullptr,
-    double* error_out = nullptr)
+    double* error_out = nullptr
+)
 {
     using SpMat = Eigen::SparseMatrix<double, Eigen::RowMajor>;
     using Trip = Eigen::Triplet<double>;
@@ -299,7 +301,8 @@ inline bool solveCOO_Eigen(
     double errInf = 0.0;
     bool   ok = false;
 
-    switch (opt.type) {
+    switch (opt.type) 
+    {
     case LinearSolverOptions::Type::CG:
     {
         // 仅适合 SPD 系统（压力方程若是 TPFA 扩散可近似SPD，温度含对流通常非对称）

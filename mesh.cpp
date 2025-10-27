@@ -315,7 +315,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
         face.ownerCell = kv.second.cells[0];
         face.neighborCell = (kv.second.cells.size() == 2) ? kv.second.cells[1] : -1;
 
-        // （可选）法向一致化：让法向从 owner 指向 neighbor 外侧
+        // 法向一致化：让法向从 owner 指向 neighbor 外侧
         if (face.neighborCell != -1) {
             const Vector& co = cells_[cellId2index_.at(face.ownerCell)].center;
             const Vector& cn = cells_[cellId2index_.at(face.neighborCell)].center;

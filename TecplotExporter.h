@@ -29,7 +29,8 @@
 #endif
 #endif
 
-namespace TecplotExport {
+namespace TecplotExport 
+{
 
     // ---------------- Options ----------------
     struct TecplotOptions {
@@ -294,7 +295,8 @@ namespace TecplotExport {
     // ===================================================================
     // 兼容旧名：保持老调用不改（内部转到 cell2face2node）
     // ===================================================================
-    inline bool export_cellField_to_tecplot_after_step(
+    inline bool export_cellField_to_tecplot_after_step
+    (
         MeshManager& mgr,
         const FieldRegistry& reg,
         FaceFieldRegistry& freg,

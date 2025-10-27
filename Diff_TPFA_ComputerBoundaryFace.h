@@ -50,8 +50,8 @@ inline void Diffusion_TPFA_BoundaryFace_SinglePhase(
 
     const double eps_d = 1e-14, eps_l = 1e-30;
 
-#pragma omp parallel for schedule(static)
-    for (int f = 0; f < static_cast<int>(faces.size()); ++f)
+    //取消并行计算
+    for (size_t f = 0; f < faces.size(); ++f)
     {
         const Face& F = faces[f];
         if (!F.isBoundary()) continue;
@@ -126,6 +126,83 @@ inline void Diffusion_TPFA_BoundaryFace_SinglePhase(
         (*s_f_Diff)[F.id - 1] = s_aux_limited + s_BC;
         //(*s_f_Diff)[F.id - 1] = s_cross + s_buoy + s_BC;
     }
+
+//#pragma omp parallel for schedule(static)
+//    for (int f = 0; f < static_cast<int>(faces.size()); ++f)
+//    {
+//        const Face& F = faces[f];
+//        if (!F.isBoundary()) continue;
+//
+//        const int P = F.ownerCell;
+//        const size_t iP = id2idx.at(P);
+//
+//        const double dperp = std::max(F.ownerToNeighbor.Mag(), eps_d);
+//        const Vector ehat = (dperp > 1e-14 ? F.ownerToNeighbor / dperp : F.normal);
+//        const double Eabs = F.vectorE.Mag();
+//        const double Aabs = (F.vectorE + F.vectorT).Mag();
+//
+//        // λ_P（沿 ehat 的等效导通率）
+//        const double lamP = std::max(mob.mobilityAlong(mesh, reg, P, ehat), eps_l);
+//
+//        // 迎风密度（边界：单边，取 P）
+//        const double pP = cellScalar(reg, mesh, x_name.c_str(), P, 0.0);
+//        const Vector CPc = mesh.getCells()[iP].center;
+//        const double rho_up = rhoPol.rhoUp(mesh, reg, P, /*N*/P, pP, pP, CPc, CPc, gu);
+//
+//        // ——关键分离：矩阵用 beta_face，源项用 beta_src——
+//        const double beta_face = (rho_in_matrix ? rho_up * lamP : lamP);
+//        const double beta_src = (rho_up * lamP);
+//
+//        // a_f：只用 beta_face
+//        const double a_face = beta_face * (Eabs / dperp);
+//
+//        // Robin 统一（面积化）
+//        double a = 0.0, b = 0.0, c = 0.0;
+//        const bool has = bc.getABC(F.id, a, b, c);
+//
+//        double alpha_f = 0.0, betaB_f = 0.0;
+//        double a_PB = a_face; // 默认 Dirichlet(b=0) => alpha=0
+//
+//        if (has)
+//        {
+//            const double num = b * (Eabs / dperp);
+//            const double den = a * std::max(Aabs, 1e-30) + num;
+//
+//            alpha_f = (den > 1e-30) ? (num / den) : 0.0;
+//            if (std::abs(a) > 1e-30) {
+//                const double C = c * Aabs;
+//                betaB_f = C / den;
+//            }
+//            else {
+//                // 纯 Neumann：没有“等效壁值”，只通过 s_f 注入；这里 betaB_f=0
+//                betaB_f = 0.0;
+//            }
+//
+//            a_PB = a_face * (1.0 - alpha_f);
+//        }
+//
+//        // ——源项：交叉 + 浮力 + BC——
+//        // 交叉项用单元梯度（边界：只用P侧）
+//        const Vector& gP = grad[iP];
+//        const double s_cross = beta_src * (gP * F.vectorT);
+//
+//        double s_buoy = 0.0;
+//        if (enable_buoy)
+//        {
+//            // 用 beta_src × ρ 与 g 的投影；NoDensity 时 rho_up=1，自然退化
+//            const double g_dot_e = gu.g * ehat;
+//            s_buoy = -beta_src * g_dot_e * Eabs
+//                + -beta_src * (gu.g * F.vectorT);
+//        }
+//
+//        const double s_BC = a_face * betaB_f;
+//
+//        (*a_f_Diff)[F.id - 1] = a_PB;
+//        const double s_aux = s_cross + s_buoy;
+//        const double s_aux_limited = std::max(-0.5 * a_face, std::min(0.5 * a_face, s_aux));
+//        (*s_f_Diff)[F.id - 1] = s_aux_limited + s_BC;
+//        //(*s_f_Diff)[F.id - 1] = s_cross + s_buoy + s_BC;
+//    }
 }
 
 

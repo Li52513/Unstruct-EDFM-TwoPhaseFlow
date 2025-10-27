@@ -6,6 +6,7 @@
 #include "CO2PropertyTable.h"
 #include "RockSolidProperties.h"
 #include "FractureSolidProperties.h"
+#include "PhysicalProperties_CO2.h"
 #include <cassert> // for assert
 #include <algorithm>  // for swap
 #include "Initializer.h"
@@ -41,6 +42,158 @@ static bool pointInConvexPolygon(const Vector& p, const vector<Vector>& verts)
 	}
 	return true;
 }
+
+//***************************小工具：确保物性参数场存在*************************************//
+static inline void ensureMatrixFluidFields(FieldRegistry& reg, std::size_t n)
+{
+	reg.getOrCreate<volScalarField>("rho_w", n, 1000.0);	//水的密度，kg/m³
+	reg.getOrCreate<volScalarField>("mu_w", n, 1e-3);		//水的粘度，Pa·s	
+	reg.getOrCreate<volScalarField>("cp_w", n, 4182.0);		//水的比热容，J/(kg·K)
+	reg.getOrCreate<volScalarField>("k_w", n, 0.6);			//水的导热系数，W/(m·K)
+	reg.getOrCreate<volScalarField>("rho_g", n, 1.98);		//二氧化碳的密度，kg/m³
+	reg.getOrCreate<volScalarField>("mu_g", n, 1.48e-5);	//二氧化碳的粘度，Pa·s
+	reg.getOrCreate<volScalarField>("cp_g", n, 846.0);		//二氧化碳的比热容，J/(kg·K)
+	reg.getOrCreate<volScalarField>("k_g", n, 0.0146);		//二氧化碳的导热系数，W/(m·K)
+}
+
+static inline void ensureFractureFluidFields(FieldRegistry& reg_fr, std::size_t ne)
+{
+	reg_fr.getOrCreate<volScalarField>("fr_rho_w", ne, 1000.0);
+	reg_fr.getOrCreate<volScalarField>("fr_mu_w", ne, 1e-3);
+	reg_fr.getOrCreate<volScalarField>("fr_cp_w", ne, 4182.0);
+	reg_fr.getOrCreate<volScalarField>("fr_k_w", ne, 0.6);
+	reg_fr.getOrCreate<volScalarField>("fr_rho_g", ne, 1.98);
+	reg_fr.getOrCreate<volScalarField>("fr_mu_g", ne, 1.48e-5);
+	reg_fr.getOrCreate<volScalarField>("fr_cp_g", ne, 846.0);
+	reg_fr.getOrCreate<volScalarField>("fr_k_g", ne, 0.0146);
+}
+
+static inline void ensureRockFields(FieldRegistry& reg, size_t n)
+{
+	reg.getOrCreate<volScalarField>("phi", n, 0.15);
+	reg.getOrCreate<volScalarField>("kxx", n, 1e-14);
+	reg.getOrCreate<volScalarField>("kyy", n, 1e-14);
+	reg.getOrCreate<volScalarField>("kzz", n, 1e-14);
+	reg.getOrCreate<volScalarField>("rho_r", n, 2650.0);
+	reg.getOrCreate<volScalarField>("cp_r", n, 1000.0);
+	reg.getOrCreate<volScalarField>("lambda_r", n, 2.5); //
+}
+
+static inline void ensureFracRockFields(FieldRegistry& reg_fr, size_t ne) //确保裂缝物性参数场存在，若不存在则创建并赋默认值
+{
+	reg_fr.getOrCreate<volScalarField>("fr_phi", ne, 1); //裂隙孔隙度
+	reg_fr.getOrCreate<volScalarField>("fr_k_t", ne, 1e-12);    // 切向等效渗透率
+	reg_fr.getOrCreate<volScalarField>("fr_k_n", ne, 1e-16);    // 法向等效渗透率
+	reg_fr.getOrCreate<volScalarField>("fr_rho_r", ne, 2650.0); //裂缝密度，kg/m³
+	reg_fr.getOrCreate<volScalarField>("fr_cp_r", ne, 1000.0); //裂缝比热容，J/(kg·K)
+	reg_fr.getOrCreate<volScalarField>("fr_lambda_r", ne, 2.5); //裂缝导热系数，W/(m·K)
+	reg_fr.getOrCreate<volScalarField>("fr_aperture", ne, 1e-3); //裂缝开度
+}
+
+static inline void ensureRockPrimaryFields(FieldRegistry& reg, size_t n, const InitFields& init)
+{
+	reg.getOrCreate<volScalarField>("p_w", n, init.p0); //基岩初始水相压力，Pa
+	reg.getOrCreate<volScalarField>("T", n, init.T0);   //基岩初始温度，K
+	reg.getOrCreate<volScalarField>("S_w", n, init.sw0); //基岩初始水相饱和度，1
+}
+
+inline void ensureFracPrimaryFields(FieldRegistry& freg, size_t ne)
+{
+	freg.getOrCreate<volScalarField>("pf_w", ne, 1.0e6);
+	freg.getOrCreate<volScalarField>("Sf_w", ne, 0.90);
+	freg.getOrCreate<volScalarField>("Tf", ne, 303.15);
+}
+
+// test_constProperties_singlePhase_CO2_T_diffusion
+void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	ensureRockFields(reg, n);
+
+	auto phi_r = reg.get<volScalarField>("phi"); //孔隙度
+	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
+	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
+	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
+
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& cell = cells[ic];
+		if (cell.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(cell.id);
+		(*phi_r)[i] = 0.15;
+		(*rho_r)[i] = 2650.0;
+		(*cp_r)[i] = 1000.0;
+		(*lam_r)[i] = 3;
+	}
+}
+
+void PhysicalPropertiesManager::CO2Properties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	ensureMatrixFluidFields(reg, n);
+
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& c = cells[ic];
+		if (c.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(c.id);
+		(*rho_gF)[i] = 800.0;
+		(*cp_gF)[i] = 1200.0;
+		(*k_gF)[i] = 0.05;
+	}
+}
+
+
+
+void PhysicalPropertiesManager::ComputeEffectiveThermalProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	//ensureMatrixFluidFields(reg, n);
+	//ensureRockFields(reg, n);
+
+	// 岩石参数（必须存在）
+	auto phiF = reg.get<volScalarField>("phi");
+	auto rrF = reg.get<volScalarField>("rho_r");
+	auto cprF = reg.get<volScalarField>("cp_r");
+	auto lamrF = reg.get<volScalarField>("lambda_r");
+
+	//流体物性参数
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+	// 有效热参数场
+	auto Ceff = reg.getOrCreate<volScalarField>("C_eff", n, 0.0);
+	auto lame = reg.getOrCreate<volScalarField>("lambda_eff", n, 0.0);
+
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& c = cells[ic];
+		if (c.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(c.id);
+
+		(*Ceff)[i] = (1.0 - (*phiF)[i]) * (*rrF)[i] * (*cprF)[i] + (*phiF)[i] * (*rho_gF)[i] * (*cp_gF)[i];
+		(*lame)[i] = (1.0 - (*phiF)[i]) * (*lamrF)[i] + (*phiF)[i] * (*k_gF)[i];
+	}
+
+
+}
+
+
+
+
+
+
+
+
 
 void PhysicalPropertiesManager::classifyRockRegionsByGeometry(MeshManager& mgr, const vector<RegionGeometry>& regionGeoms, Cell::RegionType defaultRegion = Cell::RegionType::Medium)
 {
@@ -146,66 +299,7 @@ void PhysicalPropertiesManager::classifyFractureElements(MeshManager& mgr,double
 }
 
 
-//***************************小工具：确保物性参数场存在*************************************//
-static inline void ensureMatrixFluidFields(FieldRegistry& reg, std::size_t n)
-{
-	reg.getOrCreate<volScalarField>("rho_w", n, 1000.0);	//水的密度，kg/m³
-	reg.getOrCreate<volScalarField>("mu_w", n, 1e-3);		//水的粘度，Pa·s	
-	reg.getOrCreate<volScalarField>("cp_w", n, 4182.0);		//水的比热容，J/(kg·K)
-	reg.getOrCreate<volScalarField>("k_w", n, 0.6);			//水的导热系数，W/(m·K)
-	reg.getOrCreate<volScalarField>("rho_g", n, 1.98);		//二氧化碳的密度，kg/m³
-	reg.getOrCreate<volScalarField>("mu_g", n, 1.48e-5);	//二氧化碳的粘度，Pa·s
-	reg.getOrCreate<volScalarField>("cp_g", n, 846.0);		//二氧化碳的比热容，J/(kg·K)
-	reg.getOrCreate<volScalarField>("k_g", n, 0.0146);		//二氧化碳的导热系数，W/(m·K)
-}
 
-static inline void ensureFractureFluidFields(FieldRegistry& reg_fr, std::size_t ne)
-{
-	reg_fr.getOrCreate<volScalarField>("fr_rho_w", ne, 1000.0);
-	reg_fr.getOrCreate<volScalarField>("fr_mu_w", ne, 1e-3);
-	reg_fr.getOrCreate<volScalarField>("fr_cp_w", ne, 4182.0);
-	reg_fr.getOrCreate<volScalarField>("fr_k_w", ne, 0.6);
-	reg_fr.getOrCreate<volScalarField>("fr_rho_g", ne, 1.98);
-	reg_fr.getOrCreate<volScalarField>("fr_mu_g", ne, 1.48e-5);
-	reg_fr.getOrCreate<volScalarField>("fr_cp_g", ne, 846.0);
-	reg_fr.getOrCreate<volScalarField>("fr_k_g", ne, 0.0146);
-}
-
-static inline void ensureRockFields(FieldRegistry& reg, size_t n) 
-{
-	reg.getOrCreate<volScalarField>("phi", n, 0.15);
-	reg.getOrCreate<volScalarField>("kxx", n, 1e-14);
-	reg.getOrCreate<volScalarField>("kyy", n, 1e-14);
-	reg.getOrCreate<volScalarField>("kzz", n, 1e-14);
-	reg.getOrCreate<volScalarField>("rho_r", n, 2650.0);
-	reg.getOrCreate<volScalarField>("cp_r", n, 1000.0);
-	reg.getOrCreate<volScalarField>("lambda_r", n, 2.5); //
-}
-
-static inline void ensureFracRockFields(FieldRegistry& reg_fr, size_t ne) //确保裂缝物性参数场存在，若不存在则创建并赋默认值
-{
-	reg_fr.getOrCreate<volScalarField>("fr_phi", ne, 1); //裂隙孔隙度
-	reg_fr.getOrCreate<volScalarField>("fr_k_t", ne, 1e-12);    // 切向等效渗透率
-	reg_fr.getOrCreate<volScalarField>("fr_k_n", ne, 1e-16);    // 法向等效渗透率
-	reg_fr.getOrCreate<volScalarField>("fr_rho_r", ne, 2650.0); //裂缝密度，kg/m³
-	reg_fr.getOrCreate<volScalarField>("fr_cp_r", ne, 1000.0); //裂缝比热容，J/(kg·K)
-	reg_fr.getOrCreate<volScalarField>("fr_lambda_r", ne, 2.5); //裂缝导热系数，W/(m·K)
-	reg_fr.getOrCreate<volScalarField>("fr_aperture", ne, 1e-3); //裂缝开度
-}
-
-static inline void ensureRockPrimaryFields(FieldRegistry& reg, size_t n, const InitFields& init)
-{
-	reg.getOrCreate<volScalarField>("p_w", n, init.p0); //基岩初始水相压力，Pa
-	reg.getOrCreate<volScalarField>("T", n, init.T0);   //基岩初始温度，K
-	reg.getOrCreate<volScalarField>("S_w", n, init.sw0); //基岩初始水相饱和度，1
-}
-
-inline void ensureFracPrimaryFields(FieldRegistry& freg, size_t ne)
-{
-	freg.getOrCreate<volScalarField>("pf_w", ne, 1.0e6);
-	freg.getOrCreate<volScalarField>("Sf_w", ne, 0.90);
-	freg.getOrCreate<volScalarField>("Tf", ne, 303.15);
-}
 
 
 
@@ -233,14 +327,15 @@ void PhysicalPropertiesManager::UpdateMatrixRockAt(MeshManager& mgr, FieldRegist
 	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
 	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
 	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
-
-#pragma omp parallel for schedule(static)
-	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+	
+	//取消并行计算
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
 		const auto& cell = cells[ic];
 		if (cell.id < 0) continue;
 		const size_t i = mesh.getCellId2Index().at(cell.id);
 		double P = (*pF)[i], T = (*TF)[i];
-		Initializer::clampPT(P, T);
+		//Initializer::clampPT(P, T);
 		const auto sp = rock::computeSolidProperties(cell.region, P, T);
 		(*phi_r)[i] = sp.porosity;
 		(*kxx_r)[i] = sp.permeability;
@@ -249,8 +344,33 @@ void PhysicalPropertiesManager::UpdateMatrixRockAt(MeshManager& mgr, FieldRegist
 		(*rho_r)[i] = sp.rho_s;
 		(*cp_r)[i] = sp.cp_s;
 		(*lam_r)[i] = sp.k_s;
+
 	}
+
+
+//#pragma omp parallel for schedule(static)
+//	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+//		const auto& cell = cells[ic];
+//		if (cell.id < 0) continue;
+//		const size_t i = mesh.getCellId2Index().at(cell.id);
+//		double P = (*pF)[i], T = (*TF)[i];
+//		Initializer::clampPT(P, T);
+//		const auto sp = rock::computeSolidProperties(cell.region, P, T);
+//		(*phi_r)[i] = sp.porosity;
+//		(*kxx_r)[i] = sp.permeability;
+//		(*kyy_r)[i] = sp.permeability;
+//		(*kzz_r)[i] = sp.permeability;
+//		(*rho_r)[i] = sp.rho_s;
+//		(*cp_r)[i] = sp.cp_s;
+//		(*lam_r)[i] = sp.k_s;
+//	}
 }
+
+
+
+
+
+
 
 //流体相参数
 void PhysicalPropertiesManager::UpdateMatrixFluidAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field, const std::string& phase)
@@ -278,31 +398,74 @@ void PhysicalPropertiesManager::UpdateMatrixFluidAt(MeshManager& mgr, FieldRegis
 	auto k_gF = reg.get<volScalarField>("k_g");
 
 	auto wt = WaterPropertyTable::instance();
-	auto gt = CO2PropertyTable::instance();
+	//auto gt = CO2PropertyTable::instance();
 
 	std::size_t oor = 0, ghost = 0;
 	const bool doW = (phase == "water" || phase == "both");
 	const bool doG = (phase == "CO2" || phase == "both");
 
-#pragma omp parallel for schedule(static)
-	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+	//取消并行计算
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
 		const auto& c = cells[ic];
 		if (c.id < 0) { ++ghost; continue; }
 		const size_t i = mesh.getCellId2Index().at(c.id);
-		double p = (*pF)[i], T = (*TF)[i]; Initializer::clampPT(p, T);
+		double p = (*pF)[i], T = (*TF)[i]; //Initializer::clampPT(p, T);
 		if (doW) {
 			double rho = 1000, mu = 1e-3, cp = 4200, k = 0.6;
 			try { const auto W = wt.getProperties(p, T); rho = W.rho; mu = W.mu; cp = W.cp; k = W.k; }
 			catch (...) { ++oor; }
 			(*rho_wF)[i] = rho; (*mu_wF)[i] = mu; (*cp_wF)[i] = cp; (*k_wF)[i] = k;
 		}
-		if (doG) {
-			double rho = 1.98, mu = 1.48e-5, cp = 846, k = 0.0146;
+		if (doG)
+		{
+			/*double rho = 1.98, mu = 1.48e-5, cp = 846, k = 0.0146;
 			try { const auto G = gt.getProperties(p, T); rho = G.rho; mu = G.mu; cp = G.cp; k = G.k; }
 			catch (...) { ++oor; }
-			(*rho_gF)[i] = rho; (*mu_gF)[i] = mu; (*cp_gF)[i] = cp; (*k_gF)[i] = k;
+			(*rho_gF)[i] = rho; (*mu_gF)[i] = mu; (*cp_gF)[i] = cp; (*k_gF)[i] = k;*/
+			const double rho = CO2::rho_CO2_kg_m3(T);// ρ(T) = 539.7 / T
+			const double mu = CO2::mu_CO2_Pa_s(T);   // 220–1000 K 多项式
+			const double cp = CO2::cp_mass_J_kgK(T);   // 293–3000 K 分段多项式（质量比热）
+			const double k = CO2::k_W_mK(T);    // 220–3273 K 分段多项式
+
+			(*rho_gF)[i] = rho;
+			(*mu_gF)[i] = mu;
+			(*cp_gF)[i] = cp;
+			(*k_gF)[i] = k;
+
 		}
 	}
+
+//#pragma omp parallel for schedule(static)
+//	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+//		const auto& c = cells[ic];
+//		if (c.id < 0) { ++ghost; continue; }
+//		const size_t i = mesh.getCellId2Index().at(c.id);
+//		double p = (*pF)[i], T = (*TF)[i]; Initializer::clampPT(p, T);
+//		if (doW) {
+//			double rho = 1000, mu = 1e-3, cp = 4200, k = 0.6;
+//			try { const auto W = wt.getProperties(p, T); rho = W.rho; mu = W.mu; cp = W.cp; k = W.k; }
+//			catch (...) { ++oor; }
+//			(*rho_wF)[i] = rho; (*mu_wF)[i] = mu; (*cp_wF)[i] = cp; (*k_wF)[i] = k;
+//		}
+//		if (doG) 
+//		{
+//			/*double rho = 1.98, mu = 1.48e-5, cp = 846, k = 0.0146;
+//			try { const auto G = gt.getProperties(p, T); rho = G.rho; mu = G.mu; cp = G.cp; k = G.k; }
+//			catch (...) { ++oor; }
+//			(*rho_gF)[i] = rho; (*mu_gF)[i] = mu; (*cp_gF)[i] = cp; (*k_gF)[i] = k;*/
+//			const double rho = CO2::rho_CO2_kg_m3(T);// ρ(T) = 539.7 / T
+//			const double mu = CO2::mu_CO2_Pa_s(T);   // 220–1000 K 多项式
+//			const double cp = CO2::cp_mass_J_kgK(T);   // 293–3000 K 分段多项式（质量比热）
+//			const double k = CO2::k_W_mK(T);    // 220–3273 K 分段多项式
+//
+//			(*rho_gF)[i] = rho;
+//			(*mu_gF)[i] = mu;
+//			(*cp_gF)[i] = cp;
+//			(*k_gF)[i] = k;
+//
+//		}
+//	}
 
 	if (ghost) std::cout << "[PPM][Fluid] skipped ghost=" << ghost << "\n";
 	if (oor)   std::cout << "[PPM][Fluid] table OOR hits=" << oor << "\n";
@@ -361,8 +524,9 @@ void PhysicalPropertiesManager::ComputeMatrixEffectiveThermalsAt( MeshManager& m
 	const bool doW = (ph == "water" || ph == "both");
 	const bool doG = (ph == "co2" || ph == "both");
 
-#pragma omp parallel for schedule(static)
-	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) {
+	//取消并行计算
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
 		const auto& c = cells[ic];
 		if (c.id < 0) continue;
 		const size_t i = id2.at(c.id);
@@ -375,7 +539,7 @@ void PhysicalPropertiesManager::ComputeMatrixEffectiveThermalsAt( MeshManager& m
 
 		// p/T（仅用于查表兜底）
 		double p = (*pF)[i], T = (*TF)[i];
-		Initializer::clampPT(p, T);
+		//Initializer::clampPT(p, T);
 
 		// 水相
 		double rw = 0.0, cw = 0.0, kw = 0.0;
@@ -392,8 +556,9 @@ void PhysicalPropertiesManager::ComputeMatrixEffectiveThermalsAt( MeshManager& m
 		if (doG) {
 			if (rgF && cgF && kgF) { rg = std::max(0.0, (*rgF)[i]); cg = std::max(0.0, (*cgF)[i]); kg = std::max(0.0, (*kgF)[i]); }
 			else {
-				try { const auto G = gt.getProperties(p, T); rg = G.rho; cg = G.cp; kg = G.k; }
-				catch (...) { rg = 600; cg = 850; kg = 0.08; }
+				rg = CO2::rho_CO2_kg_m3(T);
+				cg = CO2::cp_mass_J_kgK(T);
+				kg = CO2::k_W_mK(T);
 			}
 		}
 
@@ -425,7 +590,76 @@ void PhysicalPropertiesManager::ComputeMatrixEffectiveThermalsAt( MeshManager& m
 		else if (doW)        kfluid = kw;
 		else if (doG)        kfluid = kg;
 		(*lame)[i] = (1.0 - phi) * lamr + phi * std::max(0.0, kfluid);
+
 	}
+
+//#pragma omp parallel for schedule(static)
+//	for (int ic = 0; ic < static_cast<int>(cells.size()); ++ic) 
+//	{
+//		const auto& c = cells[ic];
+//		if (c.id < 0) continue;
+//		const size_t i = id2.at(c.id);
+//
+//		// 岩石
+//		const double phi = std::min(1.0, std::max(0.0, (*phiF)[i]));	//孔隙度
+//		const double rr = std::max(0.0, (*rrF)[i]);						//基岩密度	
+//		const double cpr = std::max(0.0, (*cprF)[i]);					//基岩比热容
+//		const double lamr = std::max(0.0, (*lamrF)[i]);					//基岩导热系数
+//
+//		// p/T（仅用于查表兜底）
+//		double p = (*pF)[i], T = (*TF)[i];
+//		Initializer::clampPT(p, T);
+//
+//		// 水相
+//		double rw = 0.0, cw = 0.0, kw = 0.0;
+//		if (doW) {
+//			if (rwF && cwF && kwF) { rw = std::max(0.0, (*rwF)[i]); cw = std::max(0.0, (*cwF)[i]); kw = std::max(0.0, (*kwF)[i]); }
+//			else { // 场缺失→查表
+//				try { const auto W = wt.getProperties(p, T); rw = W.rho; cw = W.cp; kw = W.k; }
+//				catch (...) { rw = 1000; cw = 4200; kw = 0.6; }
+//			}
+//		}
+//
+//		// 气相（CO2）
+//		double rg = 0.0, cg = 0.0, kg = 0.0;
+//		if (doG) {
+//			if (rgF && cgF && kgF) { rg = std::max(0.0, (*rgF)[i]); cg = std::max(0.0, (*cgF)[i]); kg = std::max(0.0, (*kgF)[i]); }
+//			else {
+//				rg = CO2::rho_CO2_kg_m3(T);
+//				cg = CO2::cp_mass_J_kgK(T);
+//				kg = CO2::k_W_mK(T);
+//			}
+//		}
+//
+//		// 饱和度：两相用；若没有 S_w 则默认退化为单相水（Sw=1）
+//		double Sw = 1.0;
+//		if (ph == "both") {
+//			if (SwF) Sw = std::min(1.0, std::max(0.0, (*SwF)[i]));
+//			else     Sw = 1.0; // 无 S_w → 退化单相水
+//		}
+//		else if (ph == "water") {
+//			Sw = 1.0;
+//		}
+//		else if (ph == "co2") {
+//			Sw = 0.0;
+//		}
+//		const double Sg = 1.0 - Sw;
+//
+//		// 有效体积热容 C_eff
+//		double Cfluid = 0.0;
+//		if (doW && doG)      Cfluid = phi * (Sw * rw * cw + Sg * rg * cg);
+//		else if (doW)        Cfluid = phi * (rw * cw);
+//		else if (doG)        Cfluid = phi * (rg * cg);
+//		const double C = (1.0 - phi) * rr * cpr + Cfluid;
+//		(*Ceff)[i] = std::max(Ceff_floor, C);
+//
+//		// 有效导热系数 λ_eff（体积分数线性混合；需要更复杂模型可再替换）
+//		double kfluid = 0.0;
+//		if (doW && doG)      kfluid = Sw * kw + Sg * kg;
+//		else if (doW)        kfluid = kw;
+//		else if (doG)        kfluid = kg;
+//		(*lame)[i] = (1.0 - phi) * lamr + phi * std::max(0.0, kfluid);
+//	}
 }
 
 // ====== 裂缝：固相（这里先复用你原有接口逻辑，如果后续需要按 p/T 变化再扩展）======
@@ -507,7 +741,7 @@ void PhysicalPropertiesManager::UpdateFractureFluidAt( MeshManager& mgr, FieldRe
 	auto fr_k_g = reg_fr.get<volScalarField>("fr_k_g");
 
 	auto wt = WaterPropertyTable::instance();
-	auto gt = CO2PropertyTable::instance();
+	//auto gt = CO2PropertyTable::instance();
 
 	const bool doW = (phase == "water" || phase == "both");
 	const bool doG = (phase == "CO2" || phase == "both");
@@ -515,18 +749,23 @@ void PhysicalPropertiesManager::UpdateFractureFluidAt( MeshManager& mgr, FieldRe
 	size_t gid = 0;
 	for (auto& F : mgr.fracture_network().fractures) {
 		for (auto& E : F.elements) {
-			double p = (*pF)[gid], T = (*TF)[gid]; Initializer::clampPT(p, T);
+			double p = (*pF)[gid], T = (*TF)[gid]; //Initializer::clampPT(p, T);
 			if (doW) {
 				double rho = 1000, mu = 1e-3, cp = 4200, k = 0.6;
 				try { const auto W = wt.getProperties(p, T); rho = W.rho; mu = W.mu; cp = W.cp; k = W.k; }
 				catch (...) {}
 				(*fr_rho_w)[gid] = rho; (*fr_mu_w)[gid] = mu; (*fr_cp_w)[gid] = cp; (*fr_k_w)[gid] = k;
 			}
-			if (doG) {
-				double rho = 600, mu = 1e-4, cp = 850, k = 0.08;
-				try { const auto G = gt.getProperties(p, T); rho = G.rho; mu = G.mu; cp = G.cp; k = G.k; }
-				catch (...) {}
-				(*fr_rho_g)[gid] = rho; (*fr_mu_g)[gid] = mu; (*fr_cp_g)[gid] = cp; (*fr_k_g)[gid] = k;
+			if (doG)
+			{
+				const double rho = CO2::rho_CO2_kg_m3(T);// ρ(T) = 539.7 / T
+				const double mu = CO2::mu_CO2_Pa_s(T);   // 220–1000 K 多项式
+				const double cp = CO2::cp_mass_J_kgK(T);   // 293–3000 K 分段多项式（质量比热）
+				const double k = CO2::k_W_mK(T);    // 220–3273 K 分段多项式
+				(*fr_rho_g)[gid] = rho;
+				(*fr_mu_g)[gid] = mu;
+				(*fr_cp_g)[gid] = cp;
+				(*fr_k_g)[gid] = k;
 			}
 			++gid;
 		}
@@ -836,3 +1075,5 @@ void PhysicalPropertiesManager:: MatrixFluidPropertiesTest(const double& T, cons
 		std::cout << "[Error] CO2PropertyTable: OOR for P=" << P << " Pa, T=" << T << " K\n";
 	}
 }
+
+
