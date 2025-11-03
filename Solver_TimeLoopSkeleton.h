@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #pragma once
 #include <vector>
 #include <cmath>
@@ -15,13 +15,17 @@
 #include "TimeIterm_Euler_SinglePhase_TemperatureEQ.h"  // TimeTerm_Euler_SinglePhase_Temperature(...)
 #include "BCAdapter.h"
 #include "TemperatureBCAdapter.h"
-#include "Solver_AssemblerCOO.h"   // ÄãµÄ×°ÅäÓë SparseSystemCOO / buildUnknownMap
-#include "Solver_TimeLoopUtils.h" // Äã¿ÉÄÜĞèÒªµÄµü´úÆ÷/Çó½âÆ÷µÈ¹¤¾ß
+#include "Solver_AssemblerCOO.h"   // ä½ çš„è£…é…ä¸ SparseSystemCOO / buildUnknownMap
+#include "Solver_TimeLoopUtils.h" // ä½ å¯èƒ½éœ€è¦çš„è¿­ä»£å™¨/æ±‚è§£å™¨ç­‰å·¥å…·
 #include "Solver_PostChecks.h"  
 #include "LinearSolver_Eigen.h"
+#include"DiffusionCentral.h"
+#include"ConvectionUpwind_Flux.h"
+#include"ConvectionUpwind.h"
+#include"Timeterm_BDF.h"
 
 
-//================================Ğ¡¹¤¾ß£ºÏòÁ¿-³¡ gather/scatter,¹æ±Üghostµ¥Ôª================================//
+//================================å°å·¥å…·ï¼šå‘é‡-åœº gather/scatter,è§„é¿ghostå•å…ƒ================================//
 inline std::vector<int> buildUnknownMapChecked(Mesh& mesh, int& N)
 {
 	auto m = buildUnknownMap(mesh, N);
@@ -40,7 +44,7 @@ inline std::vector<double> gatherFieldToVec(const FieldRegistry& reg, Mesh& mesh
 		if (c.id < 0)continue;
 		size_t i = id2idx.at(c.id);
 		int r = lid_of_cell[i];
-		if (r >= 0 && r < N) x[r] = (*f)[i]; // Ö»¸³Öµ×ÔÓÉ¶È
+		if (r >= 0 && r < N) x[r] = (*f)[i]; // åªèµ‹å€¼è‡ªç”±åº¦
 	}
 	return x;
 }
@@ -60,17 +64,17 @@ inline void scatterVecToField(FieldRegistry& reg, Mesh& mesh,const std::string& 
 	}
 }
 
-//==================== Jacobi µü´ú£¨Õ¼Î»£© ====================//
-// ±¸×¢£º±ãÓÚ×îĞ¡¿ÉÅÜ£»ºóĞøÄã¿É»»³É CG/AMG µÈ¸üÇ¿Çó½âÆ÷¡£
+//==================== Jacobi è¿­ä»£ï¼ˆå ä½ï¼‰ ====================//
+// å¤‡æ³¨ï¼šä¾¿äºæœ€å°å¯è·‘ï¼›åç»­ä½ å¯æ¢æˆ CG/AMG ç­‰æ›´å¼ºæ±‚è§£å™¨ã€‚
 struct JacobiOpts { int maxIt = 200; double omega = 0.8; double atol = 1e-8; };
 
-inline void extractDiagonal(const SparseSystemCOO& sys, std::vector<double>& D) //ÌáÈ¡¶Ô½ÇÏß
+inline void extractDiagonal(const SparseSystemCOO& sys, std::vector<double>& D) //æå–å¯¹è§’çº¿
 {
 	D.assign(sys.n, 0.0);
 	for (const auto& t : sys.A) if (t.r == t.c) D[t.r] += t.v;
 }
 
-inline void spmv(const SparseSystemCOO& sys, const std::vector<double>& x, std::vector<double>& y) //r = Ï¡Êè¾ØÕó-ÏòÁ¿³Ë»ı
+inline void spmv(const SparseSystemCOO& sys, const std::vector<double>& x, std::vector<double>& y) //r = ç¨€ç–çŸ©é˜µ-å‘é‡ä¹˜ç§¯
 {
 	y.assign(sys.n, 0.0);
 	for (const auto& t : sys.A) y[t.r] += t.v * x[t.c];
@@ -83,23 +87,23 @@ inline double infNorm(const std::vector<double>& v)
 
 inline void jacobiSolve
 (
-	const SparseSystemCOO& sys,		// in: ÏµÍ³¾ØÕó
-	std::vector<double>& x,			// in: ³õÖµ; out: ½â
-	const JacobiOpts& opt,			// in: µü´ú¿ØÖÆ²ÎÊı
-	double* out_resid = nullptr,    // out: ×îÖÕ²Ğ²î
-	int* out_iters = nullptr        // out: Êµ¼Êµü´ú´ÎÊı
+	const SparseSystemCOO& sys,		// in: ç³»ç»ŸçŸ©é˜µ
+	std::vector<double>& x,			// in: åˆå€¼; out: è§£
+	const JacobiOpts& opt,			// in: è¿­ä»£æ§åˆ¶å‚æ•°
+	double* out_resid = nullptr,    // out: æœ€ç»ˆæ®‹å·®
+	int* out_iters = nullptr        // out: å®é™…è¿­ä»£æ¬¡æ•°
 )
 {
 	std::vector<double> D, r(sys.n), Dx(sys.n), Ax(sys.n);
 	extractDiagonal(sys, D);
 	if (x.size() != (size_t)sys.n) x.assign(sys.n, 0.0);
 
-	double lastRes = 1e300;  //×îºóÒ»´Î¸üĞÂµÄÎŞÇî·¶Êı
+	double lastRes = 1e300;  //æœ€åä¸€æ¬¡æ›´æ–°çš„æ— ç©·èŒƒæ•°
 	int k = 0;
 	for (; k < opt.maxIt; ++k) {
 		spmv(sys, x, Ax);
 		for (int i = 0; i < sys.n; ++i) r[i] = sys.b[i] - Ax[i];
-		// ¸üĞÂ
+		// æ›´æ–°
 		double updInf = 0.0;
 		for (int i = 0; i < sys.n; ++i) {
 			double di = (std::abs(D[i]) > 0 ? r[i] / D[i] : 0.0);
@@ -110,7 +114,7 @@ inline void jacobiSolve
 		lastRes = updInf;
 		if (updInf < opt.atol)
 		{
-			cout << "ÄÚµü´ú´ÎÊı" << k << endl;
+			cout << "å†…è¿­ä»£æ¬¡æ•°" << k << endl;
 			break;
 		}
 	}
@@ -119,7 +123,7 @@ inline void jacobiSolve
 }
 
 
-//==================== Ç·ËÉ³ÚÓ¦ÓÃ ====================//
+//==================== æ¬ æ¾å¼›åº”ç”¨ ====================//
 inline void underRelax(std::vector<double>& dest, const std::vector<double>& src, double urf)
 {
 	const size_t n = dest.size();
@@ -128,35 +132,35 @@ inline void underRelax(std::vector<double>& dest, const std::vector<double>& src
 
 
 
-///===============================Íâµü´ú¹Ç¼Ü-¿ØÖÆ²ÎÊı==========================================//
+///===============================å¤–è¿­ä»£éª¨æ¶-æ§åˆ¶å‚æ•°==========================================//
 struct SolverControls 
 {
-	int maxOuter = 50;	// ×î´óÍâµü´ú´ÎÊı
-	double tol_p_abs = 1e-6; // Ñ¹Á¦·½³Ì¾ø¶Ô²Ğ²îÊÕÁ²
-	double tol_T_abs = 1e-6; // ÎÂ¶È·½³Ì¾ø¶Ô²Ğ²îÊÕÁ²
-	double tol_p_rel = 1e-6;   // ĞÂÔö£ºÑ¹Á¦Ïà¶ÔÈİ²î
-	double tol_T_rel = 1e-6;   // ĞÂÔö£ºÎÂ¶ÈÏà¶ÔÈİ²î
-	double urf_p = 0.7;	// Ñ¹Á¦Ç·ËÉ³ÚÒò×Ó Ó¦ÓÃÓÚÑ¹Á¦³¡¸üĞÂ
-	double urf_T = 0.7; // ÎÂ¶ÈÇ·ËÉ³ÚÒò×Ó Ó¦ÓÃÓÚÎÂ¶È¶È³¡¸üĞÂ
-	double c_phi_const = 1e-12; // ¿×Ï¶¶È¿ÉÑ¹ËõĞÔ
-	double theta_p = 0.5;	// Ê±¼äÏîtheta_p
-	double theta_T = 0.5;	// Ê±¼äÏîtheta_T
-	JacobiOpts jac_p; //Ñ¹Á¦ÏßĞÔ½â
-	JacobiOpts jac_T; //ÎÂ¶ÈÏßĞÔ½â
-	LinearSolverOptions lin_p; // Ñ¹Á¦Çó½âÉèÖÃ
-	LinearSolverOptions lin_T; // ÎÂ¶ÈÇó½âÉèÖÃ
-	bool useJacobi = false;    // Ä¬ÈÏÓÃ Krylov£¬±ØÒªÊ±ÍË»Ø Jacobi
+	int maxOuter = 50;	// æœ€å¤§å¤–è¿­ä»£æ¬¡æ•°
+	double tol_p_abs = 1e-6; // å‹åŠ›æ–¹ç¨‹ç»å¯¹æ®‹å·®æ”¶æ•›
+	double tol_T_abs = 1e-6; // æ¸©åº¦æ–¹ç¨‹ç»å¯¹æ®‹å·®æ”¶æ•›
+	double tol_p_rel = 1e-6;   // æ–°å¢ï¼šå‹åŠ›ç›¸å¯¹å®¹å·®
+	double tol_T_rel = 1e-6;   // æ–°å¢ï¼šæ¸©åº¦ç›¸å¯¹å®¹å·®
+	double urf_p = 0.7;	// å‹åŠ›æ¬ æ¾å¼›å› å­ åº”ç”¨äºå‹åŠ›åœºæ›´æ–°
+	double urf_T = 0.7; // æ¸©åº¦æ¬ æ¾å¼›å› å­ åº”ç”¨äºæ¸©åº¦åº¦åœºæ›´æ–°
+	double c_phi_const = 1e-12; // å­”éš™åº¦å¯å‹ç¼©æ€§
+	double theta_p = 0.5;	// æ—¶é—´é¡¹theta_p
+	double theta_T = 0.5;	// æ—¶é—´é¡¹theta_T
+	JacobiOpts jac_p; //å‹åŠ›çº¿æ€§è§£
+	JacobiOpts jac_T; //æ¸©åº¦çº¿æ€§è§£
+	LinearSolverOptions lin_p; // å‹åŠ›æ±‚è§£è®¾ç½®
+	LinearSolverOptions lin_T; // æ¸©åº¦æ±‚è§£è®¾ç½®
+	bool useJacobi = false;    // é»˜è®¤ç”¨ Krylovï¼Œå¿…è¦æ—¶é€€å› Jacobi
 
 
-	// ¿ÉÑ¡£ºÊÇ·ñÃ¿´Îµü´ú´òÓ¡×°Åä±¨¸æ£¨Ä¬ÈÏ false£©
+	// å¯é€‰ï¼šæ˜¯å¦æ¯æ¬¡è¿­ä»£æ‰“å°è£…é…æŠ¥å‘Šï¼ˆé»˜è®¤ falseï¼‰
 	bool reportPerIter = false;
-	// ¿ÉÑ¡£ºÊÇ·ñµ¼³ö MatrixMarket£¨½öÔÚ reportPerIter Îª true Ê±£¬ÇÒÖ»µ¼³ö×îºóÒ»´Îµü´ú£©
+	// å¯é€‰ï¼šæ˜¯å¦å¯¼å‡º MatrixMarketï¼ˆä»…åœ¨ reportPerIter ä¸º true æ—¶ï¼Œä¸”åªå¯¼å‡ºæœ€åä¸€æ¬¡è¿­ä»£ï¼‰
 	bool dumpMMOnLastIter = false;
 
 };
 
 
-// ============ Ò»´ÎÍâµü´ú£ºCO2Ïà ============
+// ============ ä¸€æ¬¡å¤–è¿­ä»£ï¼šCO2ç›¸ ============
 inline bool doOneOuter_CO2
 (
 	MeshManager& mgr,
@@ -179,10 +183,10 @@ inline bool doOneOuter_CO2
 {
 	Mesh& mesh = mgr.mesh();
 
-	// 1) k²ã³õÖµ -> ¹¤×÷³¡
+	// 1) kå±‚åˆå€¼ -> å·¥ä½œåœº
 	if (!startOuterIteration(reg, "p_g", "T", "p_g_prev", "T_prev")) return false;
 
-	// 2) ¹¹½¨ ¦È-ÆÀ¹Àµã£¨Ö»¿ØÖÆÒ»´Î£¬¸É¾»£©
+	// 2) æ„å»º Î¸-è¯„ä¼°ç‚¹ï¼ˆåªæ§åˆ¶ä¸€æ¬¡ï¼Œå¹²å‡€ï¼‰
 	const double theta_p = std::min(1.0, std::max(0.0, ctrl.theta_p));
 	const double theta_T = std::min(1.0, std::max(0.0, ctrl.theta_T));
 	buildEvalFields(
@@ -193,13 +197,13 @@ inline bool doOneOuter_CO2
 		theta_p, theta_T
 	);
 
-	// 3) ÎïĞÔÔÚ¡°ÆÀ¹À³¡¡±´¦ÆÀ¹À£¨Ò»´ÎĞÔ£©
+	// 3) ç‰©æ€§åœ¨â€œè¯„ä¼°åœºâ€å¤„è¯„ä¼°ï¼ˆä¸€æ¬¡æ€§ï¼‰
 	ppm.UpdateMatrixRockAt(mgr, reg, "p_eval", "T_eval");
 	ppm.UpdateMatrixFluidAt(mgr, reg, "p_eval", "T_eval", "CO2");
 	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_eval", "T_eval", "CO2", 1e-12);
 
-	// ¡ª¡ª Ñ¹Á¦Ê±¼äÏîĞèÒª£ºrho_eval Óë drho_dp_eval£¨ÆÀ¹Àµã£©£¬ÒÔ¼° rho_old£¨¾É²ã£© ¡ª¡ª
-	// 3.1 ÆÀ¹ÀµãµÄ rho ºÍ drho/dp
+	// â€”â€” å‹åŠ›æ—¶é—´é¡¹éœ€è¦ï¼šrho_eval ä¸ drho_dp_evalï¼ˆè¯„ä¼°ç‚¹ï¼‰ï¼Œä»¥åŠ rho_oldï¼ˆæ—§å±‚ï¼‰ â€”â€”
+	// 3.1 è¯„ä¼°ç‚¹çš„ rho å’Œ drho/dp
 	computeRhoAndDrhoDpAt(
 		mgr, reg,
 		/*p_name*/ "p_eval",
@@ -208,10 +212,10 @@ inline bool doOneOuter_CO2
 		/*rho_out*/     "rho_eval",
 		/*drhodp_out*/  "drho_dp_eval"
 	);
-	// 3.2 ¾É²ãÃÜ¶È£¨ÈôÄãÒÑÓĞ computeRhoAt ¾ÍÓÃËü£»Ã»ÓĞµÄ»°ÓÃ AndDrhoDp ÍË¶øÇóÆä´Î£©
+	// 3.2 æ—§å±‚å¯†åº¦ï¼ˆè‹¥ä½ å·²æœ‰ computeRhoAt å°±ç”¨å®ƒï¼›æ²¡æœ‰çš„è¯ç”¨ AndDrhoDp é€€è€Œæ±‚å…¶æ¬¡ï¼‰
 	// computeRhoAt(mgr, reg, "p_g_old", "T_old", "CO2", "rho_old");
 	{
-		// ÁÙÊ±£ºÔÙËãÒ»´Î£¬µ¼Êı¶ªµô¼´¿É
+		// ä¸´æ—¶ï¼šå†ç®—ä¸€æ¬¡ï¼Œå¯¼æ•°ä¸¢æ‰å³å¯
 		computeRhoAndDrhoDpAt(
 			mgr, reg,
 			/*p_name*/ "p_g_old",
@@ -222,7 +226,7 @@ inline bool doOneOuter_CO2
 		);
 	}
 
-	// 4) Ñ¹Á¦£ºÀ©É¢ + £¨¦È-°æ£©Ê±¼äÏî + ×é×° + ½â
+	// 4) å‹åŠ›ï¼šæ‰©æ•£ + ï¼ˆÎ¸-ç‰ˆï¼‰æ—¶é—´é¡¹ + ç»„è£… + è§£
 	SparseSystemCOO sysP;
 	{
 		DiffusionIterm_TPFA_CO2_singlePhase_DarcyFlow
@@ -235,7 +239,7 @@ inline bool doOneOuter_CO2
 			/*gradSmoothIters*/ 1
 		);
 
-		// ¦È-ÆÀ¹ÀÍ³Ò»°æÊ±¼äÏî£¨ÓëÎÂ¶È·ç¸ñÒ»ÖÂ£©
+		// Î¸-è¯„ä¼°ç»Ÿä¸€ç‰ˆæ—¶é—´é¡¹ï¼ˆä¸æ¸©åº¦é£æ ¼ä¸€è‡´ï¼‰
 		TimeTerm_Theta_SinglePhase_Flow
 		(
 			mgr, reg, dt, ctrl.c_phi_const,
@@ -280,7 +284,7 @@ inline bool doOneOuter_CO2
 		scatterVecToField(reg, mesh, "p_g", lid, p_vec);
 	}
 
-	// 5) ÎÂ¶È£ºÀ©É¢ + ¶ÔÁ÷ + £¨¦È-°æ£©Ê±¼äÏî + ½â
+	// 5) æ¸©åº¦ï¼šæ‰©æ•£ + å¯¹æµ + ï¼ˆÎ¸-ç‰ˆï¼‰æ—¶é—´é¡¹ + è§£
 	SparseSystemCOO sysT;
 	{
 		DiffusionIterm_TPFA_Temperature_singlePhase(
@@ -304,8 +308,8 @@ inline bool doOneOuter_CO2
 			/*bP*/  "bP_conv"
 		);
 
-		// ¦È-ÆÀ¹ÀÍ³Ò»°æÎÂ¶ÈÊ±¼äÏî
-		// ´ËÊ± rho_r/cp_r/rho_g/cp_g ÒÑÓÉ ppm ÔÚ (p_eval,T_eval) ´¦¸üĞÂµ½×Ö¶ÎÀï
+		// Î¸-è¯„ä¼°ç»Ÿä¸€ç‰ˆæ¸©åº¦æ—¶é—´é¡¹
+		// æ­¤æ—¶ rho_r/cp_r/rho_g/cp_g å·²ç”± ppm åœ¨ (p_eval,T_eval) å¤„æ›´æ–°åˆ°å­—æ®µé‡Œ
 		TimeTerm_Theta_SinglePhase_Temperature
 		(
 			mgr, reg, dt,
@@ -318,7 +322,7 @@ inline bool doOneOuter_CO2
 			/*T_old_name*/ "T_old",
 			/*aC_name*/    "aC_time_T",
 			/*bC_name*/    "bC_time_T",
-			/*Ceff_out*/   "Ceff_T"  // ¿ÉÑ¡Õï¶ÏÊä³ö
+			/*Ceff_out*/   "Ceff_T"  // å¯é€‰è¯Šæ–­è¾“å‡º
 		);
 
 		assembleTemperature_singlePhase_COO(
@@ -353,7 +357,7 @@ inline bool doOneOuter_CO2
 		}
 		scatterVecToField(reg, mesh, "T", lid, T_vec);
 
-		// ¿ÉÑ¡£ºÎÂ¶ÈÏŞ·ù£¨ÈôÈÔÏë±£Áô£©
+		// å¯é€‰ï¼šæ¸©åº¦é™å¹…ï¼ˆè‹¥ä»æƒ³ä¿ç•™ï¼‰
 		//if (auto Tfield = reg.get<volScalarField>("T")) {
 		//	for (double& val : Tfield->data) {
 		//		if (val < 373.15)      val = 373.15;
@@ -362,7 +366,7 @@ inline bool doOneOuter_CO2
 		//}
 	}
 
-	// 6) Ç·ËÉ³Ú + ÊÕÁ²ºâÁ¿
+	// 6) æ¬ æ¾å¼› + æ”¶æ•›è¡¡é‡
 	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
 	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
 
@@ -376,7 +380,7 @@ inline bool doOneOuter_CO2
 	return true;
 }
 
-// ============ Ò»´ÎÍâµü´ú£ºWATER ============
+// ============ ä¸€æ¬¡å¤–è¿­ä»£ï¼šWATER ============
 inline bool doOneOuter_WATER
 (
 	MeshManager& mgr,
@@ -399,10 +403,10 @@ inline bool doOneOuter_WATER
 {
 	Mesh& mesh = mgr.mesh();
 
-	// 1) k²ã³õÖµ -> ¹¤×÷³¡
+	// 1) kå±‚åˆå€¼ -> å·¥ä½œåœº
 	if (!startOuterIteration(reg, "p_w", "T", "p_w_prev", "T_prev")) return false;
 
-	// 2) ¹¹½¨ ¦È-ÆÀ¹Àµã£¨Ö»¿ØÖÆÒ»´Î£¬¸É¾»£©
+	// 2) æ„å»º Î¸-è¯„ä¼°ç‚¹ï¼ˆåªæ§åˆ¶ä¸€æ¬¡ï¼Œå¹²å‡€ï¼‰
 	const double theta_p = std::min(1.0, std::max(0.0, ctrl.theta_p));
 	const double theta_T = std::min(1.0, std::max(0.0, ctrl.theta_T));
 	buildEvalFields(
@@ -413,13 +417,13 @@ inline bool doOneOuter_WATER
 		theta_p, theta_T
 	);
 
-	// 3) ÎïĞÔÔÚ¡°ÆÀ¹À³¡¡±´¦ÆÀ¹À£¨Ò»´ÎĞÔ£©
+	// 3) ç‰©æ€§åœ¨â€œè¯„ä¼°åœºâ€å¤„è¯„ä¼°ï¼ˆä¸€æ¬¡æ€§ï¼‰
 	ppm.UpdateMatrixRockAt(mgr, reg, "p_eval", "T_eval");
 	ppm.UpdateMatrixFluidAt(mgr, reg, "p_eval", "T_eval", "water");
 	ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_eval", "T_eval", "water", 1e-12);
 
-	// ¡ª¡ª Ñ¹Á¦Ê±¼äÏîĞèÒª£ºrho_eval Óë drho_dp_eval£¨ÆÀ¹Àµã£©£¬ÒÔ¼° rho_old£¨¾É²ã£© ¡ª¡ª
-	// 3.1 ÆÀ¹ÀµãµÄ rho ºÍ drho/dp
+	// â€”â€” å‹åŠ›æ—¶é—´é¡¹éœ€è¦ï¼šrho_eval ä¸ drho_dp_evalï¼ˆè¯„ä¼°ç‚¹ï¼‰ï¼Œä»¥åŠ rho_oldï¼ˆæ—§å±‚ï¼‰ â€”â€”
+	// 3.1 è¯„ä¼°ç‚¹çš„ rho å’Œ drho/dp
 	computeRhoAndDrhoDpAt(
 		mgr, reg,
 		/*p_name*/ "p_eval",
@@ -428,9 +432,9 @@ inline bool doOneOuter_WATER
 		/*rho_out*/     "rho_eval",
 		/*drhodp_out*/  "drho_dp_eval"
 	);
-	// 3.2 ¾É²ãÃÜ¶È
+	// 3.2 æ—§å±‚å¯†åº¦
 	{
-		// ÁÙÊ±£ºÔÙËãÒ»´Î£¬µ¼Êı¶ªµô¼´¿É
+		// ä¸´æ—¶ï¼šå†ç®—ä¸€æ¬¡ï¼Œå¯¼æ•°ä¸¢æ‰å³å¯
 		computeRhoAndDrhoDpAt(
 			mgr, reg,
 			/*p_name*/ "p_w_old",
@@ -441,7 +445,7 @@ inline bool doOneOuter_WATER
 		);
 	}
 
-	// 4) Ñ¹Á¦£ºÀ©É¢ + £¨¦È-°æ£©Ê±¼äÏî + ×é×° + ½â
+	// 4) å‹åŠ›ï¼šæ‰©æ•£ + ï¼ˆÎ¸-ç‰ˆï¼‰æ—¶é—´é¡¹ + ç»„è£… + è§£
 	SparseSystemCOO sysP;
 	{
 		DiffusionIterm_TPFA_water_singlePhase_DarcyFlow(
@@ -453,7 +457,7 @@ inline bool doOneOuter_WATER
 			/*gradSmoothIters*/ 1
 		);
 
-		// ¦È-ÆÀ¹ÀÍ³Ò»°æÊ±¼äÏî£¨ÓëÎÂ¶È·ç¸ñÒ»ÖÂ£©
+		// Î¸-è¯„ä¼°ç»Ÿä¸€ç‰ˆæ—¶é—´é¡¹ï¼ˆä¸æ¸©åº¦é£æ ¼ä¸€è‡´ï¼‰
 		TimeTerm_Theta_SinglePhase_Flow(
 			mgr, reg, dt, ctrl.c_phi_const,
 			/*phi_name*/        "phi",
@@ -494,7 +498,7 @@ inline bool doOneOuter_WATER
 		scatterVecToField(reg, mesh, "p_w", lid, p_vec);
 	}
 
-	// 5) ÎÂ¶È£ºÀ©É¢ + ¶ÔÁ÷ + £¨¦È-°æ£©Ê±¼äÏî + ½â
+	// 5) æ¸©åº¦ï¼šæ‰©æ•£ + å¯¹æµ + ï¼ˆÎ¸-ç‰ˆï¼‰æ—¶é—´é¡¹ + è§£
 	SparseSystemCOO sysT;
 	{
 		DiffusionIterm_TPFA_Temperature_singlePhase(
@@ -518,8 +522,8 @@ inline bool doOneOuter_WATER
 			/*bP*/  "bP_conv"
 		);
 
-		// ¦È-ÆÀ¹ÀÍ³Ò»°æÎÂ¶ÈÊ±¼äÏî
-		// ´ËÊ± rho_r/cp_r/rho_g/cp_g ÒÑÓÉ ppm ÔÚ (p_eval,T_eval) ´¦¸üĞÂµ½×Ö¶ÎÀï
+		// Î¸-è¯„ä¼°ç»Ÿä¸€ç‰ˆæ¸©åº¦æ—¶é—´é¡¹
+		// æ­¤æ—¶ rho_r/cp_r/rho_g/cp_g å·²ç”± ppm åœ¨ (p_eval,T_eval) å¤„æ›´æ–°åˆ°å­—æ®µé‡Œ
 		TimeTerm_Theta_SinglePhase_Temperature
 		(
 			mgr, reg, dt,
@@ -532,7 +536,7 @@ inline bool doOneOuter_WATER
 			/*T_old_name*/ "T_old",
 			/*aC_name*/    "aC_time_T",
 			/*bC_name*/    "bC_time_T",
-			/*Ceff_out*/   "Ceff_T"  // ¿ÉÑ¡Õï¶ÏÊä³ö
+			/*Ceff_out*/   "Ceff_T"  // å¯é€‰è¯Šæ–­è¾“å‡º
 		);
 
 		assembleTemperature_singlePhase_COO(
@@ -567,7 +571,7 @@ inline bool doOneOuter_WATER
 		}
 		scatterVecToField(reg, mesh, "T", lid, T_vec);
 
-		//// ¿ÉÑ¡£ºÎÂ¶ÈÏŞ·ù£¨ÈôÈÔÏë±£Áô£©
+		//// å¯é€‰ï¼šæ¸©åº¦é™å¹…ï¼ˆè‹¥ä»æƒ³ä¿ç•™ï¼‰
 		//if (auto Tfield = reg.get<volScalarField>("T")) {
 		//	for (double& val : Tfield->data) {
 		//		if (val < 373.15)      val = 373.15;
@@ -576,7 +580,7 @@ inline bool doOneOuter_WATER
 		//}
 	}
 
-	// 6) Ç·ËÉ³Ú + ÊÕÁ²ºâÁ¿
+	// 6) æ¬ æ¾å¼› + æ”¶æ•›è¡¡é‡
 	underRelaxInPlace(reg, "p_w", "p_g_prev", ctrl.urf_p);
 	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
 
@@ -592,11 +596,11 @@ inline bool doOneOuter_WATER
 
 
 
-// ============ Íâµü´úÇı¶¯£¨µ¥²½£© ============
+// ============ å¤–è¿­ä»£é©±åŠ¨ï¼ˆå•æ­¥ï¼‰ ============
 /**
- * @brief µ¥²½Íâµü´úÇı¶¯£¨¸ù¾İ phase Ñ¡Ôñ CO2/WATER µÄÒ»´ÎÍâµü´ú£©
- * @param phase ×Ö·û´® "CO2" »ò "water"
- * ÆäÓà²ÎÊıÍ¬ÉÏ¡£
+ * @brief å•æ­¥å¤–è¿­ä»£é©±åŠ¨ï¼ˆæ ¹æ® phase é€‰æ‹© CO2/WATER çš„ä¸€æ¬¡å¤–è¿­ä»£ï¼‰
+ * @param phase å­—ç¬¦ä¸² "CO2" æˆ– "water"
+ * å…¶ä½™å‚æ•°åŒä¸Šã€‚
  */
 
 inline bool outerIter_OneStep_singlePhase(
@@ -612,7 +616,7 @@ inline bool outerIter_OneStep_singlePhase(
 	const SolverControls& ctrl,
 	const std::string& phase = "CO2"
 ) {
-	// Ê±¼ä²½¿ªÊ¼£¨¶³½á *_old£¬³õÊ¼»¯ *_prev£©
+	// æ—¶é—´æ­¥å¼€å§‹ï¼ˆå†»ç»“ *_oldï¼Œåˆå§‹åŒ– *_prevï¼‰
 	if (phase == "CO2" || phase == "co2") {
 		if (!startTimeStep(mgr.mesh(), reg, "p_g", "T", "p_g_old", "T_old", "p_g_prev", "T_prev")) return false;
 	}
@@ -624,7 +628,7 @@ inline bool outerIter_OneStep_singlePhase(
 		return false;
 	}
 
-	// Íâµü´ú
+	// å¤–è¿­ä»£
 	for (int it = 0; it < ctrl.maxOuter; ++it) 
 	{
 		double dp = 0, dT = 0;
@@ -639,7 +643,7 @@ inline bool outerIter_OneStep_singlePhase(
 				ctrl.dumpMMOnLastIter ? &lastT : nullptr);
 		if (!ok) return false;
 
-		std::cout << "[Outer " << it << "]  |¦¤p|_inf=" << dp << "  |¦¤T|_inf=" << dT << "\n";
+		std::cout << "[Outer " << it << "]  |Î”p|_inf=" << dp << "  |Î”T|_inf=" << dT << "\n";
 
 		static double prev_dp = 1e300;
 		static double prev_dT = 1e300;
@@ -705,8 +709,8 @@ inline bool outerIter_OneStep_singlePhase(
 
 
 
-// ²âÊÔº¯Êı£º2D-³£ÎïĞÔ-µ¥Ïà-CO2-ÈÈÀ©É¢ÎÊÌâ
-inline bool doOneOuters_test_singlePhase_CO2_T_diffusion
+// æµ‹è¯•å‡½æ•°ï¼š2D-å¸¸ç‰©æ€§-å•ç›¸-CO2-çƒ­æ‰©æ•£é—®é¢˜
+inline bool doOneOuters_test_constProperties_singlePhase_CO2_T_diffusion
 (
 	MeshManager& mgr,
 	FieldRegistry& reg,
@@ -727,15 +731,15 @@ inline bool doOneOuters_test_singlePhase_CO2_T_diffusion
 	Mesh& mesh = mgr.mesh();
 	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
 
-	// ÀûÓÃµ±Ç°Íâµü´ú²ãµÄÎÂ¶È³¡¼ÆËãÎïĞÔ²ÎÊı£¨³£ÎïĞÔ£© 
+	// åˆ©ç”¨å½“å‰å¤–è¿­ä»£å±‚çš„æ¸©åº¦åœºè®¡ç®—ç‰©æ€§å‚æ•°ï¼ˆå¸¸ç‰©æ€§ï¼‰ 
 	ppm.RockProperties_test_constProperties_singlePhase_CO2_T_diffusion(mgr, reg);
 	ppm.CO2Properties_test_constProperties_singlePhase_CO2_T_diffusion(mgr, reg);
 	ppm.ComputeEffectiveThermalProperties_test_constProperties_singlePhase_CO2_T_diffusion(mgr, reg);
 
-	// ÎÂ¶ÈÀ©É¢·½³ÌÀëÉ¢Óë×é×°
-	// ÀëÉ¢
+	// æ¸©åº¦æ‰©æ•£æ–¹ç¨‹ç¦»æ•£ä¸ç»„è£…
+	// ç¦»æ•£
 	{
-		// À©É¢Ïî
+		// æ‰©æ•£é¡¹
 		DiffusionIterm_TPFA_Temperature_singlePhase
 		(
 			mgr, reg, freg, gu,
@@ -746,7 +750,7 @@ inline bool doOneOuters_test_singlePhase_CO2_T_diffusion
 			/*T_field*/ "T"
 		);
 
-		//Ê±¼äÏî
+		//æ—¶é—´é¡¹
 		TimeTerm_Theta_SinglePhase_Temperature
 		(
 			mgr, reg, dt,
@@ -759,17 +763,17 @@ inline bool doOneOuters_test_singlePhase_CO2_T_diffusion
 			/*T_old_name*/ "T_old",
 			/*aC_name*/    "aC_time_T",
 			/*bC_name*/    "bC_time_T",
-			/*Ceff_out*/   "Ceff_T"  // ¿ÉÑ¡Õï¶ÏÊä³ö
+			/*Ceff_out*/   "Ceff_T"  // å¯é€‰è¯Šæ–­è¾“å‡º
 		);
 	}
-	//×é×°
+	//ç»„è£…
 	SparseSystemCOO sysT_test;
 	{
-		const OperatorFieldNames nmT = makeNames("T");  //	È¡³öÎÂ¶È³¡Ïà¹ØµÄËã×Ó³¡Ãû
+		const OperatorFieldNames nmT = makeNames("T");  //	å–å‡ºæ¸©åº¦åœºç›¸å…³çš„ç®—å­åœºå
 		assemble_COO(mgr, reg, freg, "ddt+laplacian", nmT, &sysT_test);  //
 		if (lastSysT) *lastSysT = sysT_test; //
 
-		//´òÓ¡×°Åä±¨¸æ
+		//æ‰“å°è£…é…æŠ¥å‘Š
 		if (ctrl.reportPerIter)
 		{
 			auto R = PostChecks::reportAssembly(sysT_test, false);
@@ -777,41 +781,43 @@ inline bool doOneOuters_test_singlePhase_CO2_T_diffusion
 		}
 	}
 
-	//Çó½â
+	//æ±‚è§£
 	{
-		int N = 0; auto lid = buildUnknownMap(mesh, N); //Éú³É´ıÇó½â±äÁ¿ÏòÁ¿
+		int N = 0; auto lid = buildUnknownMap(mesh, N); //ç”Ÿæˆå¾…æ±‚è§£å˜é‡å‘é‡
 
-		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N); //´Ó³¡ÖĞÌáÈ¡´ıÇó½â±äÁ¿ÏòÁ¿
+		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N); //ä»åœºä¸­æå–å¾…æ±‚è§£å˜é‡å‘é‡
 
-		//Çó½âÏßĞÔÏµÍ³
+		//æ±‚è§£çº¿æ€§ç³»ç»Ÿ
 
 		double resT = 0.0; int itT = 0; bool okT = false;
-		auto opt = ctrl.lin_T; //´«ÈëÏßĞÔÇó½âÆ÷ÉèÖÃ£¬Î»ÓÚ  LinearSolverOptions ½á¹¹ÌåÄÚ
+		auto opt = ctrl.lin_T; //ä¼ å…¥çº¿æ€§æ±‚è§£å™¨è®¾ç½®ï¼Œä½äº  LinearSolverOptions ç»“æ„ä½“å†…
 		if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
 
-		//µ÷ÓÃEigenÇó½âÆ÷,ÊµÏÖ·½³Ì×éµÄÇó½â
-		okT = solveCOO_Eigen(sysT_test, T_vec, opt, &itT, &resT); //ÊäÈë²ÎÊıÎªÏµÊı¾ØÕó£¬´ıÇó½âÏòÁ¿£¬ÏßĞÔÇó½âÆ÷ÉèÖÃ£¬Êä³öµü´ú´ÎÊıºÍ×îÖÕ²Ğ²î
+		//è°ƒç”¨Eigenæ±‚è§£å™¨,å®ç°æ–¹ç¨‹ç»„çš„æ±‚è§£
+		okT = solveCOO_Eigen(sysT_test, T_vec, opt, &itT, &resT); //è¾“å…¥å‚æ•°ä¸ºç³»æ•°çŸ©é˜µï¼Œå¾…æ±‚è§£å‘é‡ï¼Œçº¿æ€§æ±‚è§£å™¨è®¾ç½®ï¼Œè¾“å‡ºè¿­ä»£æ¬¡æ•°å’Œæœ€ç»ˆæ®‹å·®
 		if (!okT) {
 			std::cerr << "[LinearSolver] temperature solve failed.\n";
 			return false;
 		}
 
-		//É¢Éä»Ø³¡
+		//æ•£å°„å›åœº
 		scatterVecToField(reg, mesh, "T", lid, T_vec);
 
 	}
 
-	//Íâµü´úËÉ³Ú
+	//å¤–è¿­ä»£æ¾å¼›
 	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
-	//ÊÕÁ²ĞÔ¼ì²é
+	//æ”¶æ•›æ€§æ£€æŸ¥
 	dT_inf = maxAbsDiff(reg, "T", "T_prev");
 	updatePrevIterates(reg, { {"T","T_prev"} });
 
 	return true;
 
 }
-// ½öÎÂ¶ÈµÄÍâµü´úÇı¶¯Æ÷£º2D / µ¥Ïà CO2 / ·ÇÎÈÌ¬ / ´¿ÒşÊ½ÈÈÀ©É¢
-inline bool outerIter_test_singlePhase_CO2_T_diffusion(
+
+// ä»…æ¸©åº¦çš„å¤–è¿­ä»£é©±åŠ¨å™¨ï¼š2D / å•ç›¸ CO2 / éç¨³æ€ / çº¯éšå¼çƒ­æ‰©æ•£
+inline bool outerIter_test_constProperties_singlePhase_CO2_T_diffusion
+(
 	MeshManager& mgr,
 	FieldRegistry& reg,
 	FaceFieldRegistry& freg,
@@ -823,24 +829,24 @@ inline bool outerIter_test_singlePhase_CO2_T_diffusion(
 )
 {
 
-	// Íâµü´ú
+	// å¤–è¿­ä»£
 	double prev_dT = 1e300;
 
 	for (int it = 0; it < ctrl.maxOuter; ++it) {
 
 		double dT = 0.0;
-		SparseSystemCOO lastT; //´¢´æÉÏÒ»Ê±²ãµÄÏßĞÔÏµÍ³¾ØÕó
-		bool ok = doOneOuters_test_singlePhase_CO2_T_diffusion
+		SparseSystemCOO lastT; //å‚¨å­˜ä¸Šä¸€æ—¶å±‚çš„çº¿æ€§ç³»ç»ŸçŸ©é˜µ
+		bool ok = doOneOuters_test_constProperties_singlePhase_CO2_T_diffusion
 		(
 			mgr, reg, freg, ppm, Tbc, gu, dt, ctrl, dT, (ctrl.dumpMMOnLastIter ? &lastT : nullptr)
 		);
 
 		if (!ok) return false;
 
-		// ¡ª¡ª ½ø¶ÈÊä³ö ¡ª¡ª 
-		std::cout << "[Outer " << it << "]  |¦¤T|_inf=" << dT << "\n";
+		// â€”â€” è¿›åº¦è¾“å‡º â€”â€” 
+		std::cout << "[Outer " << it << "]  |Î”T|_inf=" << dT << "\n";
 
-		// ¡ª¡ª ËÉ³ÚÒò×Ó×ÔÊÊÓ¦µ÷Õû ¡ª¡ª
+		// â€”â€” æ¾å¼›å› å­è‡ªé€‚åº”è°ƒæ•´ â€”â€”
 		if (it > 0) 
 		{
 			double rT = dT / std::max(prev_dT, 1e-30);
@@ -896,3 +902,1261 @@ inline bool outerIter_test_singlePhase_CO2_T_diffusion(
 	return true;
 
 }
+
+
+//æµ‹è¯•å‡½æ•°ï¼š2D-å˜ç‰©æ€§-å•ç›¸-CO2-å¯¼çƒ­é—®é¢˜
+
+inline bool doOneOuters_test_varyProperties_singlePhase_CO2_T_diffusion(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const GravUpwind& gu,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dT_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr,
+	SparseSystemCOO* lastSysT = nullptr
+
+)
+{
+	Mesh& mesh = mgr.mesh();
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	ppm.RockProperties_test_constProperties_singlePhase_CO2_T_diffusion(mgr, reg);
+	ppm.CO2Properties_test_varProperties_singlePhase_CO2_T_diffusion(mgr, reg, "T");
+	ppm.ComputeEffectiveThermalProperties_test_varProperties_singlePhase_CO2_T_diffusion(mgr, reg, "T");
+
+	// æ¸©åº¦æ‰©æ•£æ–¹ç¨‹ç¦»æ•£ä¸ç»„è£…
+// ç¦»æ•£
+	{
+		// æ‰©æ•£é¡¹
+		DiffusionIterm_TPFA_Temperature_singlePhase
+		(
+			mgr, reg, freg, gu,
+			/*lambda_eff*/ "lambda_eff",
+			Tbc,
+			/*a_f*/ "a_f_Diff_T",
+			/*s_f*/ "s_f_Diff_T",
+			/*T_field*/ "T"
+		);
+
+		//æ—¶é—´é¡¹
+		TimeTerm_Theta_SinglePhase_Temperature
+		(
+			mgr, reg, dt,
+			/*Ceff_floor*/ 1e-12,
+			/*phi_name*/   "phi",
+			/*rho_r_name*/ "rho_r",
+			/*cp_r_name*/  "cp_r",
+			/*rho_f_name*/ "rho_g",
+			/*cp_f_name*/  "cp_g",
+			/*T_old_name*/ "T_old",
+			/*aC_name*/    "aC_time_T",
+			/*bC_name*/    "bC_time_T",
+			/*Ceff_out*/   "Ceff_T"  // å¯é€‰è¯Šæ–­è¾“å‡º
+		);
+	}
+	//ç»„è£…
+	SparseSystemCOO sysT_test;
+	{
+		const OperatorFieldNames nmT = makeNames("T");  //	å–å‡ºæ¸©åº¦åœºç›¸å…³çš„ç®—å­åœºå
+		assemble_COO(mgr, reg, freg, "ddt+laplacian", nmT, &sysT_test);  //
+		if (lastSysT) *lastSysT = sysT_test; //
+
+		//æ‰“å°è£…é…æŠ¥å‘Š
+		if (ctrl.reportPerIter)
+		{
+			auto R = PostChecks::reportAssembly(sysT_test, false);
+			PostChecks::printAssemblyReport(R, "T(diffusion, implicit)");
+		}
+	}
+
+	//æ±‚è§£
+	{
+		int N = 0; auto lid = buildUnknownMap(mesh, N); //ç”Ÿæˆå¾…æ±‚è§£å˜é‡å‘é‡
+
+		auto T_vec = gatherFieldToVec(reg, mesh, "T", lid, N); //ä»åœºä¸­æå–å¾…æ±‚è§£å˜é‡å‘é‡
+
+		//æ±‚è§£çº¿æ€§ç³»ç»Ÿ
+
+		double resT = 0.0; int itT = 0; bool okT = false;
+		auto opt = ctrl.lin_T; //ä¼ å…¥çº¿æ€§æ±‚è§£å™¨è®¾ç½®ï¼Œä½äº  LinearSolverOptions ç»“æ„ä½“å†…
+		if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+
+		//è°ƒç”¨Eigenæ±‚è§£å™¨,å®ç°æ–¹ç¨‹ç»„çš„æ±‚è§£
+		okT = solveCOO_Eigen(sysT_test, T_vec, opt, &itT, &resT); //è¾“å…¥å‚æ•°ä¸ºç³»æ•°çŸ©é˜µï¼Œå¾…æ±‚è§£å‘é‡ï¼Œçº¿æ€§æ±‚è§£å™¨è®¾ç½®ï¼Œè¾“å‡ºè¿­ä»£æ¬¡æ•°å’Œæœ€ç»ˆæ®‹å·®
+		if (!okT) {
+			std::cerr << "[LinearSolver] temperature solve failed.\n";
+			return false;
+		}
+
+		//æ•£å°„å›åœº
+		scatterVecToField(reg, mesh, "T", lid, T_vec);
+
+	}
+
+	//å¤–è¿­ä»£æ¾å¼›
+	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+	//æ”¶æ•›æ€§æ£€æŸ¥
+	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+	updatePrevIterates(reg, { {"T","T_prev"} });
+
+	return true;
+
+}
+//è¾“å…¥å‚æ•° ï¼šç½‘æ ¼ä¿¡æ¯ åœºä¿¡æ¯
+inline bool outerIter_test_varyProperties_singlePhase_CO2_T_diffusion
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const GravUpwind& gu,
+	double dt,
+	const SolverControls& ctrl
+
+)
+{
+	// å¤–è¿­ä»£
+	double prev_dT = 1e300;
+
+	for (int it = 0; it < ctrl.maxOuter; ++it) {
+
+		double dT = 0.0;
+		SparseSystemCOO lastT; //å‚¨å­˜ä¸Šä¸€æ—¶å±‚çš„çº¿æ€§ç³»ç»ŸçŸ©é˜µ
+		bool ok = doOneOuters_test_varyProperties_singlePhase_CO2_T_diffusion
+		(
+			mgr, reg, freg, ppm, Tbc, gu, dt, ctrl, dT, (ctrl.dumpMMOnLastIter ? &lastT : nullptr)
+		);
+
+		if (!ok) return false;
+
+		// â€”â€” è¿›åº¦è¾“å‡º â€”â€” 
+		std::cout << "[Outer " << it << "]  |Î”T|_inf=" << dT << "\n";
+
+		// â€”â€” æ¾å¼›å› å­è‡ªé€‚åº”è°ƒæ•´ â€”â€”
+		if (it > 0)
+		{
+			double rT = dT / std::max(prev_dT, 1e-30);
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+		}
+		prev_dT = dT;
+
+		auto maxAbsField = [&](const std::string& fld) -> double
+			{
+				double m = 0.0;
+				auto f = reg.get<volScalarField>(fld);
+				if (!f) return 1.0;
+				const auto& cells = mgr.mesh().getCells();
+				const auto& id2idx = mgr.mesh().getCellId2Index();
+				for (const auto& c : cells) {
+					if (c.id < 0) continue;
+					size_t i = id2idx.at(c.id);
+					m = std::max(m, std::abs((*f)[i]));
+				}
+				return std::max(1.0, m);
+			};
+
+		double TScale = maxAbsField("T");
+		bool convT = dT < std::max(ctrl.tol_T_abs, ctrl.tol_T_rel * TScale);
+
+		if (convT) {
+			std::cout << "Converged at outer iter " << it << "\n";
+
+			if (ctrl.dumpMMOnLastIter) {
+#if __cplusplus >= 201703L
+				try { std::filesystem::create_directories("mm"); }
+				catch (...) {}
+#endif
+				PostChecks::dumpCOO_to_matrix_market(
+					lastT,
+					"mm/A_T_CO2_diff.mtx",
+					"mm/b_T_CO2_diff.txt",
+					/*sym=*/false
+				);
+			}
+			break;
+		}
+
+		if (it == ctrl.maxOuter - 1) {
+			std::cout << "Reached maxOuter without meeting T tolerances.\n";
+		}
+
+
+	}
+
+	return true;
+
+
+}
+
+
+//æµ‹è¯•å‡½æ•°ï¼š 2D-å¸¸ç‰©æ€§-å•ç›¸-CO2-è¾¾è¥¿æ¸—æµé—®é¢˜
+inline bool doOneOuters_test_constProperties_singlePhase_CO2_p_flow
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+
+	// 1) å¤–è¿­ä»£èµ·æ­¥ï¼šä¿å­˜ä¸Šä¸€è¿­ä»£å€¼ p_g_prevï¼ˆåŒä¸€æ—¶é—´å±‚å†…ï¼‰
+	if (!startOuterIteration_p(reg, "p_g", "p_g_prev")) return false;
+
+	// 2) å¸¸ç‰©æ€§è£…å¡«ï¼ˆè‹¥å·²è£…è¿‡ä¹Ÿæ²¡å…³ç³»ï¼‰
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+
+	// 3) é¢ç³»æ•°ï¼ˆè´¨é‡å½¢ï¼‰ï¼ša_f,s_f ç›´æ¥åŒ…å«â€œå¯†åº¦1â€
+	//    å…³é”®ï¼šmobility_tokens é‡Œå¸¦ "rho:rho_g" â†’ MASS_FORM æ‰“å¼€
+	const OperatorFieldNames nmP = makeNames("p_g");
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		/*mgr,reg,freg*/ mgr, reg, freg,
+		/*a_name*/ nmP.a_f_diff,             // "a_f_Diff_p_g"
+		/*s_name*/ nmP.s_f_diff,             // "s_f_Diff_p_g"
+		/*x_name*/ "p_g",
+		/*mobility_tokens*/
+		std::vector<std::string>{ "kxx:kxx", "kyy:kyy", "kzz:kzz", "/mu_g", "rho:rho_g" },
+		/*rho_field_for_buoy*/ "rho_g",      // æµ®åŠ›çº¿æ€§åŒ–ç”¨Ïï¼ˆä¸ MASS_FORM ä¸€è‡´å³å¯ï¼‰
+		/*rho_method*/ RhoFaceMethod::Linear,
+		/*g*/ g,
+		/*bc*/ Pbc,
+		/*enable_buoy*/ true,
+		/*gradSmoothIters*/ 0
+	);
+	if (!ok) return false;
+
+	// 4) æ—¶é—´é¡¹ï¼šå…¨éšï¼ˆç”¨ä¸Šä¸€æ—¶é—´å±‚ p_g_old ä¸å½“å‰çº¿æ€§åŒ–ç‚¹ p_g_prevï¼‰
+	ok = TimeTerm_FullyImplicit_SinglePhase_Flow(
+		mgr, reg, dt,
+		/*c_phi_name   */ "c_phi",
+		/*phi_name     */ "phi",
+		/*p_old_name   */ "p_g_old",     // ä¸Šä¸€æ—¶é—´å±‚ n
+		/*rho_old_name */ "rho_g",
+		/*p_lin_name   */ "p_g_prev",    // æœ¬å±‚è¿­ä»£çº¿æ€§åŒ–ç‚¹
+		/*rho_lin_name */ "rho_g",
+		/*drdp_lin_name*/ "Drho_Dp_g",
+		/*aC_name      */ nmP.a_time,    // "aC_time_p_g"
+		/*bC_name      */ nmP.b_time     // "bC_time_p_g"
+	);
+	if (!ok) return false;
+
+	// 5) ç»„è£…å¹¶æ±‚è§£ï¼š TIME + DIFFUSION
+	SparseSystemCOO sysP;
+	{
+		// ä½ å·²æœ‰ä¸¤å¥—è£…é…å…¥å£ï¼Œè¿™é‡Œæ²¿ç”¨â€œå­—ç¬¦ä¸²è¡¨è¾¾å¼â€ç‰ˆæœ¬
+		assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysP);
+		if (lastSysP) *lastSysP = sysP;
+
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysP, false);
+			PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+		}
+	}
+
+	// 6) çº¿æ€§æ±‚è§£
+	int N = 0; auto lid = buildUnknownMap(mesh, N);
+	auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid, N);
+
+	auto opt = ctrl.lin_p; if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+	double res = 0.0; int itL = 0;
+	bool okLin = solveCOO_Eigen(sysP, pvec, opt, &itL, &res);
+	if (!okLin) { std::cerr << "[LinearSolver] pressure solve failed.\n"; return false; }
+	scatterVecToField(reg, mesh, "p_g", lid, pvec);
+
+	// 7) æ¾å¼›ä¸æ”¶æ•›åº¦é‡ï¼ˆåŒä¸€æ—¶é—´å±‚å†…ï¼‰
+	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+	return true;
+
+}
+
+// ä»…å‹åŠ›çš„å¤–è¿­ä»£é©±åŠ¨å™¨ï¼š2D / å•ç›¸ CO2 / éç¨³æ€ / è¾¾è¥¿æ¸—æµ
+//è¾“å…¥å‚æ•° ï¼šç½‘æ ¼ä¿¡æ¯ åœºä¿¡æ¯
+// ================== å¤–è¿­ä»£é©±åŠ¨ï¼šå•ç›¸Â·å¸¸ç‰©æ€§Â·CO2Â·è¾¾è¥¿æ¸—æµï¼ˆå‹åŠ›ï¼‰ ==================
+inline bool outerIter_test_constProperties_singlePhase_CO2_p_flow
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl
+)
+{
+	double prev_dp = 1e300;
+
+	for (int it = 0; it < ctrl.maxOuter; ++it) {
+
+		double dp = 0.0;
+		SparseSystemCOO lastP;
+
+		// â€”â€” å•æ­¥å¤–è¿­ä»£ï¼šè£…é… TIME+CONVECTION å¹¶æ±‚è§£ â€”â€” //
+		bool ok = doOneOuters_test_constProperties_singlePhase_CO2_p_flow(
+			mgr, reg, freg, ppm, Pbc, g, dt, ctrl,
+			/*out*/ dp,
+			/*lastSysP*/ (ctrl.dumpMMOnLastIter ? &lastP : nullptr)
+		);
+		if (!ok) return false;
+
+		// â€”â€” è¿›åº¦è¾“å‡º â€”â€” //
+		std::cout << "[Outer " << it << "]  |Î”p|_inf=" << dp << "\n";
+
+		// â€”â€” è‡ªé€‚åº”æ¾å¼›ï¼ˆä¸æ¸©åº¦ç‰ˆåŒç­–ç•¥ï¼‰â€”â€” //
+		if (it > 0) {
+			double rp = dp / std::max(prev_dp, 1e-30);
+			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+		}
+		prev_dp = dp;
+
+		// â€”â€” å½’ä¸€åŒ–å°ºåº¦ï¼šç”¨å½“å‰ p_g çš„æœ€å¤§å¹…å€¼ â€”â€” //
+		auto maxAbsField = [&](const std::string& fld)->double {
+			double m = 0.0;
+			auto f = reg.get<volScalarField>(fld);
+			if (!f) return 1.0;
+			const auto& cells = mgr.mesh().getCells();
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+			for (const auto& c : cells) {
+				if (c.id < 0) continue;
+				size_t i = id2idx.at(c.id);
+				m = std::max(m, std::abs((*f)[i]));
+			}
+			return std::max(1.0, m);
+			};
+
+		double Pscale = maxAbsField("p_g");
+		bool convP = dp < std::max(ctrl.tol_p_abs, ctrl.tol_p_rel * Pscale);
+
+		if (convP) {
+			std::cout << "Converged at outer iter " << it << "\n";
+			if (ctrl.dumpMMOnLastIter) {
+#if __cplusplus >= 201703L
+				try { std::filesystem::create_directories("mm"); }
+				catch (...) {}
+#endif
+				PostChecks::dumpCOO_to_matrix_market(
+					lastP,
+					"mm/A_P_CO2_flow.mtx",
+					"mm/b_P_CO2_flow.txt",
+					/*sym=*/false
+				);
+			}
+			break;
+		}
+
+		if (it == ctrl.maxOuter - 1) {
+			std::cout << "Reached maxOuter without meeting P tolerances.\n";
+		}
+	}
+	return true;
+}
+
+
+
+
+
+//æµ‹è¯•å‡½æ•° å¯¼çƒ­é—®é¢˜
+//æµ‹è¯•å‡½æ•°ï¼š 2D-å¸¸ç‰©æ€§-å•ç›¸-CO2-è¾¾è¥¿æ¸—æµé—®é¢˜
+inline bool doOneOuters_test_constProperties_singlePhase_CO2_T_newT
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dT_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+
+	// 1) å¤–è¿­ä»£èµ·æ­¥ï¼šä¿å­˜ä¸Šä¸€è¿­ä»£å€¼ p_g_prevï¼ˆåŒä¸€æ—¶é—´å±‚å†…ï¼‰
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	// 2) å¸¸ç‰©æ€§è£…å¡«ï¼ˆè‹¥å·²è£…è¿‡ä¹Ÿæ²¡å…³ç³»ï¼‰
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.ComputeEffectiveThermalProperties_test_constProperties_singlePhase_CO2_T_diffusion(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+
+	// 3) é¢ç³»æ•°ï¼ˆè´¨é‡å½¢ï¼‰ï¼ša_f,s_f ç›´æ¥åŒ…å«â€œå¯†åº¦1â€
+	//    å…³é”®ï¼šmobility_tokens é‡Œå¸¦ "rho:rho_g" â†’ MASS_FORM æ‰“å¼€
+	const OperatorFieldNames nmT = makeNames("T");
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		/*mgr,reg,freg*/ mgr, reg, freg,
+		/*a_name*/ nmT.a_f_diff,             // "a_f_Diff_p_g"
+		/*s_name*/ nmT.s_f_diff,             // "s_f_Diff_p_g"
+		/*x_name*/ "T",
+		/*mobility_tokens*/
+		std::vector<std::string>{ "iso:lambda_eff" },
+		/*rho_field_for_buoy*/ "",      // æµ®åŠ›çº¿æ€§åŒ–ç”¨Ïï¼ˆä¸ MASS_FORM ä¸€è‡´å³å¯ï¼‰
+		/*rho_method*/ RhoFaceMethod::Linear,
+		/*g*/ Vector{0,0,0},
+		/*bc*/ Tbc,
+		/*enable_buoy*/ false,
+		/*gradSmoothIters*/ 0
+	);
+	if (!ok) return false;
+
+	// 4) æ—¶é—´é¡¹ï¼šå…¨éšï¼ˆç”¨ä¸Šä¸€æ—¶é—´å±‚ p_g_old ä¸å½“å‰çº¿æ€§åŒ–ç‚¹ p_g_prevï¼‰
+	ok = TimeTerm_Theta_SinglePhase_Temperature
+	(
+		mgr, reg, dt,
+		/*Ceff_floor*/ 1e-12,
+		/*phi_name*/   "phi",
+		/*rho_r_name*/ "rho_r",
+		/*cp_r_name*/  "cp_r",
+		/*rho_f_name*/ "rho_g",
+		/*cp_f_name*/  "cp_g",
+		/*T_old_name*/ "T_old",
+		/*aC_name*/    "aC_time_T",
+		/*bC_name*/    "bC_time_T",
+		/*Ceff_out*/   "Ceff_T"  // å¯é€‰è¯Šæ–­è¾“å‡º
+	);
+	if (!ok) return false;
+
+	// 5) ç»„è£…å¹¶æ±‚è§£ï¼š TIME + DIFFUSION
+	SparseSystemCOO sysT;
+	{
+		// ä½ å·²æœ‰ä¸¤å¥—è£…é…å…¥å£ï¼Œè¿™é‡Œæ²¿ç”¨â€œå­—ç¬¦ä¸²è¡¨è¾¾å¼â€ç‰ˆæœ¬
+		assemble_COO(mgr, reg, freg, "ddt+diffusion", nmT, &sysT);
+		if (lastSysP) *lastSysP = sysT;
+
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysT, false);
+			PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+		}
+	}
+
+	// 6) çº¿æ€§æ±‚è§£
+	int N = 0; auto lid = buildUnknownMap(mesh, N);
+	auto pvec = gatherFieldToVec(reg, mesh, "T", lid, N);
+
+	auto opt = ctrl.lin_T; if (opt.tol <= 0.0) opt.tol = ctrl.tol_T_abs;
+	double res = 0.0; int itL = 0;
+	bool okLin = solveCOO_Eigen(sysT, pvec, opt, &itL, &res);
+	if (!okLin) { std::cerr << "[LinearSolver] pressure solve failed.\n"; return false; }
+	scatterVecToField(reg, mesh, "T", lid, pvec);
+
+	// 7) æ¾å¼›ä¸æ”¶æ•›åº¦é‡ï¼ˆåŒä¸€æ—¶é—´å±‚å†…ï¼‰
+	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+	updatePrevIterates(reg, { {"T","T_prev"} });
+
+	return true;
+
+}
+
+//
+
+
+
+
+
+
+
+
+
+
+
+
+// ä»…å‹åŠ›çš„å¤–è¿­ä»£é©±åŠ¨å™¨ï¼š2D / å•ç›¸ CO2 / éç¨³æ€ / è¾¾è¥¿æ¸—æµ
+//è¾“å…¥å‚æ•° ï¼šç½‘æ ¼ä¿¡æ¯ åœºä¿¡æ¯
+// ================== å¤–è¿­ä»£é©±åŠ¨ï¼šå•ç›¸Â·å¸¸ç‰©æ€§Â·CO2Â·è¾¾è¥¿æ¸—æµï¼ˆå‹åŠ›ï¼‰ ==================
+inline bool outerIter_test_constProperties_singlePhase_CO2_T_newT
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl
+)
+{
+	double prev_dT = 1e300;
+
+	for (int it = 0; it < ctrl.maxOuter; ++it) {
+
+		double dT = 0.0;
+		SparseSystemCOO lastT;
+
+		// â€”â€” å•æ­¥å¤–è¿­ä»£ï¼šè£…é… TIME+CONVECTION å¹¶æ±‚è§£ â€”â€” //
+		bool ok = doOneOuters_test_constProperties_singlePhase_CO2_T_newT(
+			mgr, reg, freg, ppm, Tbc, {0,0,0}, dt, ctrl,
+			/*out*/ dT,
+			/*lastSysP*/ (ctrl.dumpMMOnLastIter ? &lastT : nullptr)
+		);
+		if (!ok) return false;
+
+		// â€”â€” è¿›åº¦è¾“å‡º â€”â€” //
+		std::cout << "[Outer " << it << "]  |Î”T|_inf=" << dT << "\n";
+
+		// â€”â€” è‡ªé€‚åº”æ¾å¼›ï¼ˆä¸æ¸©åº¦ç‰ˆåŒç­–ç•¥ï¼‰â€”â€” //
+		if (it > 0) {
+			double rT = dT / std::max(prev_dT, 1e-30);
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+		}
+		prev_dT = dT;
+
+		// â€”â€” å½’ä¸€åŒ–å°ºåº¦ï¼šç”¨å½“å‰ p_g çš„æœ€å¤§å¹…å€¼ â€”â€” //
+		auto maxAbsField = [&](const std::string& fld)->double {
+			double m = 0.0;
+			auto f = reg.get<volScalarField>(fld);
+			if (!f) return 1.0;
+			const auto& cells = mgr.mesh().getCells();
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+			for (const auto& c : cells) {
+				if (c.id < 0) continue;
+				size_t i = id2idx.at(c.id);
+				m = std::max(m, std::abs((*f)[i]));
+			}
+			return std::max(1.0, m);
+			};
+
+		double Tscale = maxAbsField("T");
+		bool convT = dT < std::max(ctrl.tol_T_abs, ctrl.tol_T_rel * Tscale);
+
+		if (convT) {
+			std::cout << "Converged at outer iter " << it << "\n";
+			if (ctrl.dumpMMOnLastIter) {
+#if __cplusplus >= 201703L
+				try { std::filesystem::create_directories("mm"); }
+				catch (...) {}
+#endif
+				PostChecks::dumpCOO_to_matrix_market(
+					lastT,
+					"mm/A_T_CO2_flow.mtx",
+					"mm/b_T_CO2_flow.txt",
+					/*sym=*/false
+				);
+			}
+			break;
+		}
+
+		if (it == ctrl.maxOuter - 1) {
+			std::cout << "Reached maxOuter without meeting P tolerances.\n";
+		}
+	}
+	return true;
+}
+
+
+
+inline bool doOneOutert_constProperties_singlePhase_CO2_pressure
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+
+	if (!startOuterIteration_scatter(reg, "p_g", "p_g_prev")) return false;
+
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+	const OperatorFieldNames nm = makeNames("p_g");
+
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nm.a_f_diff, nm.s_f_diff, "p_g", {"kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g"}, "rho_g", RhoFaceMethod::Linear, g, Pbc, true, 0);
+	if (!ok) return false;
+	ok = TimeTerm_FullyImplicit_SinglePhase_Flow(mgr, reg, dt, "c_phi", "phi", "p_g_old", "rho_g", "p_g_prev", "rho_g", "Drho_Dp_g", nm.a_time, nm.b_time);
+	if (!ok) return false;
+
+	SparseSystemCOO sysp;
+	{
+		assemble_COO(mgr, reg, freg, "ddt+diffusion", nm, &sysp);
+		if (lastSysP) *lastSysP = sysp;
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysp, false);
+			PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+		}
+	}
+	int N = 0; auto lid = buildUnknownMap(mesh, N);
+	auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid, N);
+	auto opt = ctrl.lin_p; if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+	double res = 0.0; int itL = 0;
+	bool okLin = solveCOO_Eigen(sysp, pvec, opt, &itL, &res);
+	if (!okLin) { std::cerr << "[LinearSolver] pressure solve failed.\n"; return false; }
+	scatterVecToField(reg, mesh, "p_g", lid, pvec);
+
+	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+	return true;
+
+
+
+}
+
+inline bool outerIter_constProperties_singlePhase_CO2_Pressure
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl
+)
+{
+	double prev_dp_g = 1e300;
+	for (int it = 0; it < ctrl.maxOuter; ++it) 
+	{
+		double dp  = 0.0;
+		SparseSystemCOO lastT;
+
+		//ä¸€æ¬¡å¤–è¿­ä»£æ¨è¿›
+		bool ok = doOneOutert_constProperties_singlePhase_CO2_pressure(mgr, reg, freg, ppm, Pbc, g, dt, ctrl, dp, (ctrl.dumpMMOnLastIter ? &lastT : nullptr));
+		if (!ok) return false;
+
+		// â€”â€” è¿›åº¦è¾“å‡º â€”â€” //
+		std::cout << "[Outer " << it << "]  |Î”p|_inf=" << dp << "\n";
+
+		// â€”â€” è‡ªé€‚åº”æ¾å¼›â€”â€” //
+		if (it > 0)
+		{
+			double rT = dp / std::max(prev_dp_g, 1e-30);
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + uT));
+		}
+		prev_dp_g = dp;
+
+		auto maxAbsField = [&](const std::string& fld)->double {
+			double m = 0.0;
+			auto f = reg.get<volScalarField>(fld);
+			if (!f) return 1.0;
+			const auto& cells = mgr.mesh().getCells();
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+			for (const auto& c : cells) {
+				if (c.id < 0) continue;
+				size_t i = id2idx.at(c.id);
+				m = std::max(m, std::abs((*f)[i]));
+			}
+			return std::max(1.0, m);
+			};
+		double PScale = maxAbsField("p_g");
+
+		bool convP = dp < std::max(ctrl.tol_p_abs, ctrl.tol_p_rel * PScale);
+
+		if (convP) {
+			std::cout << "Converged at outer iter " << it << "\n";
+			if (ctrl.dumpMMOnLastIter) {
+#if __cplusplus >= 201703L
+				try { std::filesystem::create_directories("mm"); }
+				catch (...) {}
+#endif
+				PostChecks::dumpCOO_to_matrix_market(
+					lastT,
+					"mm/A_P_CO2_flow.mtx",
+					"mm/b_P_CO2_flow.txt",
+					/*sym=*/false
+				);
+			}
+			break;
+		}
+
+		if (it == ctrl.maxOuter - 1) {
+			std::cout << "Reached maxOuter without meeting P tolerances.\n";
+		}
+	}
+	return true;
+}
+
+
+inline bool doOneOutert_constProperties_singlePhase_CO2_T_H
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dT_inf,
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr,
+	SparseSystemCOO* lastSysT = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+	if (!startOuterIteration_scatter(reg, "p_g", "p_g_prev")) return false;
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+	//å‹åŠ›æ–¹ç¨‹é¢ç³»æ•°
+	const OperatorFieldNames nmP = makeNames("p_g");
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nmP.a_f_diff, nmP.s_f_diff, "p_g", { "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" }, "rho_g", RhoFaceMethod::Linear, g, Pbc, true, 0);
+	if (!ok) return false;
+	ok = TimeTerm_FullyImplicit_SinglePhase_Flow(mgr, reg, dt, "c_phi", "phi", "p_g_old", "rho_g", "p_g_prev", "rho_g", "Drho_Dp_g", nmP.a_time, nmP.b_time,
+		/*strongBCmask=*/nullptr);
+	if (!ok) return false;
+
+	//å‹åŠ›æ–¹ç¨‹ç»„è£…æ±‚è§£
+	SparseSystemCOO sysp;
+	{
+		assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysp);
+		if (lastSysP) *lastSysP = sysp;
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysp, false);
+			PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+		}
+	}
+	int N = 0; auto lid = buildUnknownMap(mesh, N);
+	auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid, N);
+	auto opt = ctrl.lin_p; if (opt.tol <= 0.0) opt.tol = ctrl.tol_p_abs;
+	double res = 0.0; int itL = 0;
+	bool okLin = solveCOO_Eigen(sysp, pvec, opt, &itL, &res);
+	if (!okLin) { std::cerr << "[LinearSolver] pressure solve failed.\n"; return false; }
+	scatterVecToField(reg, mesh, "p_g", lid, pvec);
+
+	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+	//æ¸©åº¦æ–¹ç¨‹é¢ç³»æ•°
+	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
+	std::vector<double> Ttar;
+	
+	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+
+	const double PIN_W = 1e7;
+
+	const OperatorFieldNames nmT = makeNames("T");
+	ok = TimeTerm_FullyImplicit_SinglePhase_Temperature(mgr, reg, dt, "C_eff", "T_old", nmT.a_time, nmT.b_time, &maskT, &Ttar, PIN_W);
+	if (!ok) return false;
+	ok = FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nmT.a_f_diff, nmT.s_f_diff, "T", { "iso:lambda_eff" }, "", RhoFaceMethod::Linear, { 0,0,0 }, Tbc, false, 0);
+	if (!ok) return false;
+	ok = FVM::Convection::buildFlux_Darcy_Mass(mgr, reg, freg, nmP.a_f_diff, nmP.s_f_diff, "p_g", "rho_g", "mf_g", "Qf_g", "ufn_g");
+	if (!ok) return false;
+	ok = FVM::Convection::build_FaceCoeffs_Upwind(mgr, reg, freg, "T", "mf_g", { "cp_g" }, nmT, Tbc);
+	if (!ok) return false;
+
+	//æ¸©åº¦æ–¹ç¨‹ç»„è£…æ±‚è§£
+	SparseSystemCOO sysT;
+	{
+		assemble_COO(mgr, reg, freg, "ddt+diffusion+convection", nmT, &sysT);
+		if (lastSysT) *lastSysT = sysT;
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysT, false);
+			PostChecks::printAssemblyReport(R, "T(Time-implicit + Diffusion + Convection)");
+		}
+	}
+	{
+		int N = 0; auto lid = buildUnknownMap(mesh, N);
+		auto Tvec = gatherFieldToVec(reg, mesh, "T", lid, N);
+		auto optT = ctrl.lin_T; if (optT.tol <= 0.0) optT.tol = ctrl.tol_T_abs;
+		double resT = 0.0; int itLT = 0;
+		bool okLinT = solveCOO_Eigen(sysT, Tvec, optT, &itLT, &resT);
+		if (!okLinT) { std::cerr << "[LinearSolver] temperature solve failed.\n"; return false; }
+		scatterVecToField(reg, mesh, "T", lid, Tvec);
+	}
+
+	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+	updatePrevIterates(reg, { {"T","T_prev"} });
+	return true;
+
+}
+//================================================================================================================//
+
+inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_withouPIN
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dT_inf,
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr,
+	SparseSystemCOO* lastSysT = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+
+	// â€”â€” å¤–è¿­ä»£èµ·æ­¥ï¼šæŠŠä¸Šä¸€è½®è§£æ‹·è´åˆ° *_prevï¼Œä¾¿äºæ¬ æ¾å¼›ä¸æ”¶æ•›è¯„ä¼° â€”â€” //
+	if (!startOuterIteration_scatter(reg, "p_g", "p_g_prev")) return false;
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	// â€”â€” å¸¸ç‰©æ€§ï¼šæ›´æ–°ä¸€æ¬¡ï¼ˆä¿æŒæ¥å£ä¸€è‡´ï¼Œåç»­ä¹Ÿå¯åˆ‡æ¢å˜ç‰©æ€§ï¼‰ â€”â€” //
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+
+	// =========================
+	// 1) å‹åŠ›ï¼šæ—¶é—´é¡¹ + è¾¾è¥¿æ‰©æ•£ï¼ˆè´¨é‡å¼ï¼‰
+	// =========================
+	const OperatorFieldNames nmP = makeNames("p_g");
+
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		mgr, reg, freg,
+		nmP.a_f_diff, nmP.s_f_diff,
+		"p_g",
+		{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },  // K/mu â‹… rho_g
+		"rho_g", RhoFaceMethod::Linear,
+		g, Pbc,
+		/*massForm=*/true, /*alpha_anisotropy=*/0
+	);
+	if (!ok) return false;
+
+	ok = TimeTerm_FullyImplicit_SinglePhase_Flow(
+		mgr, reg, dt,
+		"c_phi",             // å­”éš™åº¦å‹ç¼©æ€§
+		"phi",               // Ï†^n
+		"p_g_old",           // p^n
+		"rho_g",             // Ï^n
+		"p_g_prev",          // p^â‹†
+		"rho_g",             // Ï^â‹†
+		"Drho_Dp_g",         // (âˆ‚Ï/âˆ‚p)^â‹†
+		nmP.a_time, nmP.b_time
+		/* strongBCmask = */ // è¿™é‡Œä¸åšè¡Œè¦†ç›–ï¼›é‡‡ç”¨æ ‡å‡†è¾¹ç•Œå¤„ç†
+	);
+	if (!ok) return false;
+
+	SparseSystemCOO sysp;
+	assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysp);
+	if (lastSysP) *lastSysP = sysp;
+	if (ctrl.reportPerIter) {
+		auto R = PostChecks::reportAssembly(sysp, /*brief=*/false);
+		PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+	}
+
+	int Np = 0; auto lid_p = buildUnknownMap(mesh, Np);
+	auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid_p, Np);
+
+	auto optP = ctrl.lin_p;
+	if (optP.tol <= 0.0) optP.tol = ctrl.tol_p_abs;
+
+	double resP = 0.0; int itP = 0;
+	bool okLinP = solveCOO_Eigen(sysp, pvec, optP, &itP, &resP);
+	if (!okLinP) return false;
+
+	scatterVecToField(reg, mesh, "p_g", lid_p, pvec);
+
+	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+	// =========================
+	// 2) æ¸©åº¦ï¼šæ—¶é—´é¡¹ + ä¼ å¯¼ + å¯¹æµï¼ˆæ—  PINï¼Œå¼º Dirichlet è¡Œè¦†ç›–ï¼‰
+	// =========================
+
+	// 2.1 è¾¹ç•Œå¯¹åº”çš„â€œéœ€è¦å¼ºåˆ¶â€çš„å•å…ƒï¼Œä»¥åŠç›®æ ‡ T_bï¼ˆé¢ç§¯åŠ æƒï¼‰
+	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
+	std::vector<double> Ttar;
+	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+
+	const OperatorFieldNames nmT = makeNames("T");
+
+	// æ—¶é—´é¡¹ï¼ˆä¸åš PINï¼‰ï¼Œä¿æŒç»Ÿä¸€è£…é…æ¥å£
+	ok = TimeTerm_FullyImplicit_SinglePhase_Temperature(
+		mgr, reg, dt,
+		"C_eff", "T_old",
+		nmT.a_time, nmT.b_time
+		/* æ— éœ€ä¼  mask/pin */
+	);
+	if (!ok) return false;
+
+	// ä¼ å¯¼é¡¹
+	ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		mgr, reg, freg,
+		nmT.a_f_diff, nmT.s_f_diff,
+		"T",
+		{ "iso:lambda_eff" },  // ç­‰æ•ˆå¯¼çƒ­ç³»æ•°
+		"",
+		RhoFaceMethod::Linear,
+		{ 0,0,0 }, Tbc,
+		/*massForm=*/false, /*alpha_anisotropy=*/0
+	);
+	if (!ok) return false;
+
+	// å…ˆç®—è¾¾è¥¿è´¨é‡é€šé‡/ä½“ç§¯é€šé‡/æ³•å‘é€Ÿåº¦
+	ok = FVM::Convection::buildFlux_Darcy_Mass(
+		mgr, reg, freg,
+		nmP.a_f_diff, nmP.s_f_diff,
+		"p_g", "rho_g",
+		"mf_g", "Qf_g", "ufn_g"
+	);
+	if (!ok) return false;
+
+	// å¯¹æµé¡¹ï¼ˆä¸€é˜¶è¿é£ï¼›mf Ã— cpï¼‰
+	ok = FVM::Convection::build_FaceCoeffs_Upwind(
+		mgr, reg, freg,
+		"T",
+		"mf_g",            // è´¨é‡é€šé‡ï¼šå†…éƒ¨å·²é¿å…å†æ¬¡ä¹˜ rho
+		{ "cp_g" },        // ä¸Šé£æºå¸¦ç‰©æ€§
+		nmT, Tbc
+	);
+	if (!ok) return false;
+
+	// ç»„è£…çº¿æ€§ç³»ç»Ÿ
+	SparseSystemCOO sysT;
+	assemble_COO(mgr, reg, freg, "ddt+diffusion+convection", nmT, &sysT);
+	if (lastSysT) *lastSysT = sysT;
+	if (ctrl.reportPerIter) {
+		auto R = PostChecks::reportAssembly(sysT, /*brief=*/false);
+		PostChecks::printAssemblyReport(R, "T(Time-implicit + Diffusion + Convection)");
+	}
+
+	// å¼º Dirichlet è¡Œè¦†ç›–ï¼ˆæ—  PINï¼‰
+	int Nt = 0; auto lid_t = buildUnknownMap(mesh, Nt);
+	apply_strong_dirichlet_rows_T(lid_t, maskT, Ttar, sysT);
+
+	// æ±‚è§£
+	auto Tvec = gatherFieldToVec(reg, mesh, "T", lid_t, Nt);
+
+	auto optT = ctrl.lin_T;
+	if (optT.tol <= 0.0) optT.tol = ctrl.tol_T_abs;
+
+	double resT = 0.0; int itT = 0;
+	bool okLinT = solveCOO_Eigen(sysT, Tvec, optT, &itT, &resT);
+	if (!okLinT) return false;
+
+	scatterVecToField(reg, mesh, "T", lid_t, Tvec);
+
+	// æ¬ æ¾å¼› + æ”¶æ•›
+	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+	updatePrevIterates(reg, { {"T","T_prev"} });
+
+	return true;
+}
+//================================================================================================================//
+
+inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dT_inf,
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr,
+	SparseSystemCOO* lastSysT = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+
+	// â€”â€” å¤–è¿­ä»£èµ·æ­¥ï¼šæŠŠä¸Šä¸€è½®è§£æ‹·è´åˆ° *_prevï¼Œä¾¿äºæ¬ æ¾å¼›ä¸æ”¶æ•›è¯„ä¼° â€”â€” //
+	if (!startOuterIteration_scatter(reg, "p_g", "p_g_prev")) return false;
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	// â€”â€” å¸¸ç‰©æ€§ï¼šæ›´æ–°ä¸€æ¬¡ï¼ˆä¿æŒæ¥å£ä¸€è‡´ï¼Œåç»­ä¹Ÿå¯åˆ‡æ¢å˜ç‰©æ€§ï¼‰ â€”â€” //
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+
+	// =========================
+	// 1) å‹åŠ›ï¼šæ—¶é—´é¡¹ + è¾¾è¥¿æ‰©æ•£ï¼ˆè´¨é‡å¼ï¼‰
+	// =========================
+	const OperatorFieldNames nmP = makeNames("p_g");
+
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		mgr, reg, freg,
+		nmP.a_f_diff, nmP.s_f_diff,
+		"p_g",
+		{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },  // K/mu â‹… rho_g
+		"rho_g", RhoFaceMethod::Linear,
+		g, Pbc,
+		/*massForm=*/true, /*alpha_anisotropy=*/0
+	);
+	if (!ok) return false;
+
+	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
+		mgr, reg, dt,
+		"c_phi",             // å­”éš™åº¦å‹ç¼©æ€§
+		"phi",               // Ï†^n
+		"p_g_old",           // p^n
+		"rho_g",             // Ï^n
+		"p_g_prev",          // p^â‹†
+		"rho_g",             // Ï^â‹†
+		"Drho_Dp_g",         // (âˆ‚Ï/âˆ‚p)^â‹†
+		nmP.a_time, nmP.b_time
+	);
+	if (!ok) return false;
+
+	SparseSystemCOO sysp;
+	assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysp);
+	if (lastSysP) *lastSysP = sysp;
+	if (ctrl.reportPerIter) {
+		auto R = PostChecks::reportAssembly(sysp, /*brief=*/false);
+		PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+	}
+
+	int Np = 0; auto lid_p = buildUnknownMap(mesh, Np);
+	auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid_p, Np);
+
+	auto optP = ctrl.lin_p;
+	if (optP.tol <= 0.0) optP.tol = ctrl.tol_p_abs;
+
+	double resP = 0.0; int itP = 0;
+	bool okLinP = solveCOO_Eigen(sysp, pvec, optP, &itP, &resP);
+	if (!okLinP) return false;
+
+	scatterVecToField(reg, mesh, "p_g", lid_p, pvec);
+
+	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+	// =========================
+	// 2) æ¸©åº¦ï¼šæ—¶é—´é¡¹ + ä¼ å¯¼ + å¯¹æµï¼ˆæ—  PINï¼Œå¼º Dirichlet è¡Œè¦†ç›–ï¼‰
+	// =========================
+
+	// 2.1 è¾¹ç•Œå¯¹åº”çš„â€œéœ€è¦å¼ºåˆ¶â€çš„å•å…ƒï¼Œä»¥åŠç›®æ ‡ T_bï¼ˆé¢ç§¯åŠ æƒï¼‰
+	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
+	std::vector<double> Ttar;
+	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+
+	const OperatorFieldNames nmT = makeNames("T");
+
+	// æ—¶é—´é¡¹ï¼Œä¿æŒç»Ÿä¸€è£…é…æ¥å£
+	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature(
+		mgr, reg, dt,
+		"C_eff", "T_old",
+		nmT.a_time, nmT.b_time
+	);
+	if (!ok) return false;
+
+	// ä¼ å¯¼é¡¹
+	ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		mgr, reg, freg,
+		nmT.a_f_diff, nmT.s_f_diff,
+		"T",
+		{ "iso:lambda_eff" },  // ç­‰æ•ˆå¯¼çƒ­ç³»æ•°
+		"",
+		RhoFaceMethod::Linear,
+		{ 0,0,0 }, Tbc,
+		/*massForm=*/false, /*alpha_anisotropy=*/0
+	);
+	if (!ok) return false;
+
+	// å…ˆç®—è¾¾è¥¿è´¨é‡é€šé‡/ä½“ç§¯é€šé‡/æ³•å‘é€Ÿåº¦
+	ok = FVM::Convection::buildFlux_Darcy_Mass(
+		mgr, reg, freg,
+		nmP.a_f_diff, nmP.s_f_diff,
+		"p_g", "rho_g",
+		"mf_g", "Qf_g", "ufn_g"
+	);
+	if (!ok) return false;
+
+	// å¯¹æµé¡¹ï¼ˆä¸€é˜¶è¿é£ï¼›mf Ã— cpï¼‰
+	ok = FVM::Convection::build_FaceCoeffs_Upwind(
+		mgr, reg, freg,
+		"T",
+		"mf_g",            // è´¨é‡é€šé‡ï¼šå†…éƒ¨å·²é¿å…å†æ¬¡ä¹˜ rho
+		{ "cp_g" },        // ä¸Šé£æºå¸¦ç‰©æ€§
+		nmT, Tbc
+	);
+	if (!ok) return false;
+
+	// ç»„è£…çº¿æ€§ç³»ç»Ÿ
+	SparseSystemCOO sysT;
+	assemble_COO(mgr, reg, freg, "ddt+diffusion+convection", nmT, &sysT);
+	if (lastSysT) *lastSysT = sysT;
+	if (ctrl.reportPerIter) {
+		auto R = PostChecks::reportAssembly(sysT, /*brief=*/false);
+		PostChecks::printAssemblyReport(R, "T(Time-implicit + Diffusion + Convection)");
+	}
+
+	// å¼º Dirichlet è¡Œè¦†ç›–
+	int Nt = 0; auto lid_t = buildUnknownMap(mesh, Nt);
+	apply_strong_dirichlet_rows_T(lid_t, maskT, Ttar, sysT);
+
+	// æ±‚è§£
+	auto Tvec = gatherFieldToVec(reg, mesh, "T", lid_t, Nt);
+
+	auto optT = ctrl.lin_T;
+	if (optT.tol <= 0.0) optT.tol = ctrl.tol_T_abs;
+
+	double resT = 0.0; int itT = 0;
+	bool okLinT = solveCOO_Eigen(sysT, Tvec, optT, &itT, &resT);
+	if (!okLinT) return false;
+
+	scatterVecToField(reg, mesh, "T", lid_t, Tvec);
+
+	// æ¬ æ¾å¼› + æ”¶æ•›
+	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+	updatePrevIterates(reg, { {"T","T_prev"} });
+
+	return true;
+}
+
+
+
+
+
+inline bool outerIter_constProperties_singlePhase_CO2_T_H
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl
+)
+{
+	double prev_dp_g = 1e300;
+	double prev_dT = 1e300;
+
+	for (int it = 0; it < ctrl.maxOuter; ++it)
+	{
+		double dp = 0.0;
+		double dT = 0.0;
+		SparseSystemCOO lastP;
+		SparseSystemCOO lastT;
+		//ä¸€æ¬¡å¤–è¿­ä»£æ¨è¿›
+		bool ok = doOneOutert_constProperties_singlePhase_CO2_T_H_closed(mgr, reg, freg, ppm, Tbc, Pbc, g, dt, ctrl, dT, dp, (ctrl.dumpMMOnLastIter ? &lastP : nullptr),(ctrl.dumpMMOnLastIter ? &lastT : nullptr));
+		if (!ok) return false;
+
+		// â€”â€” è¿›åº¦è¾“å‡º â€”â€” //
+		std::cout << "[Outer " << it << "]  |Î”p|_inf=" << dp << "  |Î”T|_inf=" << dT << "\n";
+
+		// â€”â€” è‡ªé€‚åº”æ¾å¼›â€”â€” //
+		if (it > 0)
+		{
+			double rT = dT / std::max(prev_dT, 1e-30);
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+			double rp = dp / std::max(prev_dp_g, 1e-30);
+			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+		}
+
+		prev_dp_g = dp;
+		prev_dT = dT;
+		// æ”¶æ•›åˆ¤æ®ï¼šç»å¯¹/ç›¸å¯¹ï¼ˆç›¸å¯¹é‡‡ç”¨åœºé‡æ ‡åº¦ï¼‰
+		auto maxAbsField = [&](const std::string& fld)->double {
+			double m = 0.0;
+			auto f = reg.get<volScalarField>(fld);
+			if (!f) return 1.0;
+			const auto& cells = mgr.mesh().getCells();
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+			for (const auto& c : cells) {
+				if (c.id < 0) continue;
+				size_t i = id2idx.at(c.id);
+				m = std::max(m, std::abs((*f)[i]));
+			}
+			return std::max(1.0, m);
+			};
+
+		const double PScale = maxAbsField("p_g");
+		const double TScale = maxAbsField("T");
+
+		const bool convP = (dp < std::max(ctrl.tol_p_abs, ctrl.tol_p_rel * PScale));
+		const bool convT = (dT < std::max(ctrl.tol_T_abs, ctrl.tol_T_rel * TScale));
+
+		if (convP && convT) {
+			std::cout << "Converged at outer iter " << it << "\n";
+
+			if (ctrl.dumpMMOnLastIter) {
+#if __cplusplus >= 201703L
+				try { std::filesystem::create_directories("mm"); }
+				catch (...) {}
+#endif
+				// åŒæ—¶å¯¼å‡º P/T çš„çŸ©é˜µè´¦æœ¬ï¼ˆä¾¿äºæ ¸å¯¹è¾¹ç•Œè¡Œä¸å¯¹æµè¡Œï¼‰
+				PostChecks::dumpCOO_to_matrix_market(
+					lastP,
+					"mm/A_P_CO2_pTH.mtx",
+					"mm/b_P_CO2_pTH.txt",
+					/*sym=*/false
+				);
+				PostChecks::dumpCOO_to_matrix_market(
+					lastT,
+					"mm/A_T_CO2_pTH.mtx",
+					"mm/b_T_CO2_pTH.txt",
+					/*sym=*/false
+				);
+			}
+			break;
+		}
+
+		if (it == ctrl.maxOuter - 1) {
+			std::cout << "Reached maxOuter without meeting P/T tolerances.\n";
+		}
+	}
+
+	return true;
+
+
+}
+
+

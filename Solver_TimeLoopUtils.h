@@ -130,6 +130,61 @@ inline bool ensureTransientFields_test_singlePhase_CO2_T_diffusion(Mesh& mesh, F
     return true;
 }
 
+
+///**新添加 
+// 通用助手：确保(var, var_old, var_prev)三联体存在且尺寸正确；必要时用 var 初始化 *_old/*_prev
+inline bool ensureTransientFields_scalar
+(
+    Mesh& mesh,
+    FieldRegistry& reg,
+    const std::string& var_name,
+    const std::string& var_old_name,
+    const std::string& var_prev_name
+)
+{
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
+    const size_t n = cells.size();
+
+    // —— 基础场：若不存在就创建，若尺寸不符就调整 —— //
+    auto var = reg.get<volScalarField>(var_name);
+    bool base_created_or_resized = false;
+    if (!var) {
+        var = reg.getOrCreate<volScalarField>(var_name, n, 0.0);
+        base_created_or_resized = true;
+    }
+    else if (var->data.size() != n) {
+        var->data.resize(n, 0.0);
+        base_created_or_resized = true;
+    }
+
+    // 小工具：确保某个场存在且尺寸为 n
+    auto ensureSized = [&](const std::string& name, std::shared_ptr<volScalarField>& out)->bool {
+        out = reg.get<volScalarField>(name);
+        bool changed = false;
+        if (!out) { out = reg.getOrCreate<volScalarField>(name, n, 0.0); changed = true; }
+        else if (out->data.size() != n) { out->data.resize(n, 0.0); changed = true; }
+        return changed;
+        };
+
+    std::shared_ptr<volScalarField> var_old, var_prev;
+    const bool need_init_old = ensureSized(var_old_name, var_old);
+    const bool need_init_prev = ensureSized(var_prev_name, var_prev);
+
+    // 若新建/尺寸变化（包括基础场）→ 用当前 var 值初始化 *_old/*_prev
+    if (need_init_old || need_init_prev || base_created_or_resized) {
+        for (const auto& c : cells) {
+            if (c.id < 0) continue; // 跳过 ghost
+            const size_t i = id2idx.at(c.id);
+            if (need_init_old || base_created_or_resized) (*var_old)[i] = (*var)[i];
+            if (need_init_prev || base_created_or_resized) (*var_prev)[i] = (*var)[i];
+        }
+    }
+    return true;
+}
+
+
+
 // 1) 复制标量场：dst <- src
 inline bool copyField
 (
@@ -188,6 +243,19 @@ inline bool startTimeStep_test_singlePhase_CO2_T_diffusion
 	return true;
 }
 
+//***新添加-通用模板
+
+inline bool startTimeStep_scalar(Mesh& mesh, FieldRegistry& reg, const std::string& x_name, const std::string& x_old_name, const std::string& x_prev_name)
+{
+    if (!ensureTransientFields_scalar(mesh, reg, x_name, x_old_name, x_prev_name)) return false;
+    // x^n
+    if (!copyField(reg, x_name, x_old_name)) return false; //将x 复制到_old
+    // prev ← old (给 k=0 的外迭代作为初值)
+    if (!copyField(reg, x_old_name, x_prev_name)) return false; //将x_old 复制到 x_prev
+    return true;
+}
+
+
 
 
 // 3) 外迭代开始：把 prev (k层) 拷到当前工作场 (p,T)
@@ -223,13 +291,27 @@ inline bool startOuterIteration_T
 inline bool startOuterIteration_p
 (
     FieldRegistry& reg,
-    const std::string& p_name = "p_w",
-    const std::string& p_prev_name = "p_w_prev"
+    const std::string& p_name,
+    const std::string& p_prev_name
 )
 {
     bool ok = true;
     ok = ok && copyField(reg, p_prev_name, p_name);
     return ok;
+}
+
+
+inline bool startOuterIteration_scatter
+(
+    FieldRegistry& reg,
+    const std::string& x_name,
+    const std::string& x_prev_name
+)
+{
+	bool ok = true;
+	ok = ok && copyField(reg, x_prev_name, x_name);
+	return ok;
+
 }
 
 
@@ -518,3 +600,137 @@ inline void buildEvalFields(
     }
 }
 
+
+inline void build_dirichlet_T_targets(
+    MeshManager& mgr,
+    const TemperatureBCAdapter& Tbc,
+    std::vector<char>& mask_dirichlet_cell,   // out: 1 表示该 cell 需要强制钉扎
+    std::vector<double>& T_target_cell        // out: 目标温度 T_b（面积加权）
+) {
+    auto& mesh = mgr.mesh();
+    const auto& faces = mesh.getFaces();
+    const auto& id2idx = mesh.getCellId2Index();
+    const auto& cells = mesh.getCells();
+
+    mask_dirichlet_cell.assign(cells.size(), 0);
+    T_target_cell.assign(cells.size(), 0.0);
+
+    // 面积加权
+    std::vector<double> sumA(cells.size(), 0.0), sumAT(cells.size(), 0.0);
+
+    for (const auto& F : faces) {
+        if (!F.isBoundary()) continue;
+
+        double a = 0, b = 0, c = 0;
+        if (!Tbc.getABC(F.id, a, b, c)) continue;
+        if (std::abs(a) <= 1e-30) continue;            // 非 Dirichlet/Robin
+
+        const double Tb = c / a;                       // 面上温度
+        Vector A; double Aabs;
+        A = F.vectorE + F.vectorT;
+        Aabs = A.Mag(); if (Aabs <= 0) Aabs = 0.0;
+
+        const int P = F.ownerCell;
+        if (P < 0) continue;
+        const size_t iP = id2idx.at(P);
+
+        sumA[iP] += Aabs;
+        sumAT[iP] += Aabs * Tb;
+    }
+
+    for (const auto& c : cells) {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        if (sumA[i] > 0.0) {
+            mask_dirichlet_cell[i] = 1;
+            T_target_cell[i] = sumAT[i] / sumA[i];     // 面积加权平均 Tb
+        }
+    }
+}
+
+
+
+// 你已有：int N=0; auto lid = buildUnknownMap(mesh, N);
+inline std::vector<int> invert_lid(const std::vector<int>& lid, int N) {
+    std::vector<int> inv(N, -1);
+    for (size_t ic = 0; ic < lid.size(); ++ic) if (lid[ic] >= 0) inv[lid[ic]] = (int)ic;
+    return inv;
+}
+
+inline void apply_strong_dirichlet_rows_T(
+    const std::vector<int>& lid_cell,
+    const std::vector<char>& mask_cell,
+    const std::vector<double>& Ttar_cell,
+    SparseSystemCOO& sys)
+{
+    const int N = sys.n;
+    // 标记被强制的“行”以及目标值
+    std::vector<char>   is_row(N, 0);
+    std::vector<double> row_val(N, 0.0);
+
+    // cell -> row 映射到行约束
+    const size_t nCell = lid_cell.size();
+    for (size_t ic = 0; ic < nCell; ++ic) {
+        const int r = lid_cell[ic];
+        if (r < 0) continue;             // 非未知量
+        if (!mask_cell[ic]) continue;    // 不需要强制
+        is_row[r] = 1;
+        row_val[r] = Ttar_cell[ic];
+    }
+
+    // 过滤掉被强制行的原三元组（只清“行”）
+    std::vector<Triplet> A2;  A2.reserve(sys.A.size());
+    for (const auto& t : sys.A) {
+        if (is_row[t.r]) continue;       // 丢掉整个行
+        A2.push_back(t);
+    }
+    sys.A.swap(A2);
+
+    // 覆盖 RHS，并追加单位对角
+    for (int r = 0; r < N; ++r) {
+        if (!is_row[r]) continue;
+        sys.b[r] = row_val[r];           // 直接覆盖 b[r]（不是 +=）
+        sys.A.push_back({ r, r, 1.0 });  // 单位对角
+    }
+
+    // 可选：合并重复项（安全起见，尤其在多次调用时）
+    sys.compressInPlace(/*drop_tol=*/0.0);
+}
+
+
+
+inline bool ensureTransientFields_scalar_BDF2
+(
+    Mesh& mesh, FieldRegistry& reg,
+    const std::string& name,    // "T" / "p_g" / "rho_g"
+    const std::string& old,     // "T_old"
+    const std::string& old2,    // "T_old2"
+    const std::string& prev)    // "T_prev"（外迭代参考）
+{
+    auto f = reg.getOrCreate<volScalarField>(name.c_str(), mesh.getCells().size(), 0.0);
+    auto f1 = reg.getOrCreate<volScalarField>(old.c_str(), mesh.getCells().size(), 0.0);
+    auto f2 = reg.getOrCreate<volScalarField>(old2.c_str(), mesh.getCells().size(), 0.0);
+    auto fp = reg.getOrCreate<volScalarField>(prev.c_str(), mesh.getCells().size(), 0.0);
+    return (f && f1 && f2 && fp);
+}
+
+inline bool startTimeStep_scalar_BDF2
+(
+    Mesh& mesh, FieldRegistry& reg,
+    const std::string& name,
+    const std::string& old,
+    const std::string& old2,
+    const std::string& prev)
+{
+    auto f = reg.get<volScalarField>(name.c_str());
+    auto f1 = reg.get<volScalarField>(old.c_str());
+    auto f2 = reg.get<volScalarField>(old2.c_str());
+    auto fp = reg.get<volScalarField>(prev.c_str());
+    if (!f || !f1 || !f2 || !fp) return false;
+
+    // old2 = old; old = cur; prev = cur（外迭代参考）
+    *f2 = *f1;
+    *f1 = *f;
+    *fp = *f;
+    return true;
+}

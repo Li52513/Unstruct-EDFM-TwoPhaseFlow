@@ -54,6 +54,8 @@ static inline void ensureMatrixFluidFields(FieldRegistry& reg, std::size_t n)
 	reg.getOrCreate<volScalarField>("mu_g", n, 1.48e-5);	//二氧化碳的粘度，Pa·s
 	reg.getOrCreate<volScalarField>("cp_g", n, 846.0);		//二氧化碳的比热容，J/(kg·K)
 	reg.getOrCreate<volScalarField>("k_g", n, 0.0146);		//二氧化碳的导热系数，W/(m·K)
+	reg.getOrCreate<volScalarField>("Drho_Dp_w", n, 0.0);	//水的密度对压力的导数，kg/(m³·Pa)
+	reg.getOrCreate<volScalarField>("Drho_Dp_g", n, 0.0);	//二氧化碳的密度对压力的导数，kg/(m³·Pa)
 }
 
 static inline void ensureFractureFluidFields(FieldRegistry& reg_fr, std::size_t ne)
@@ -76,7 +78,8 @@ static inline void ensureRockFields(FieldRegistry& reg, size_t n)
 	reg.getOrCreate<volScalarField>("kzz", n, 1e-14);
 	reg.getOrCreate<volScalarField>("rho_r", n, 2650.0);
 	reg.getOrCreate<volScalarField>("cp_r", n, 1000.0);
-	reg.getOrCreate<volScalarField>("lambda_r", n, 2.5); //
+	reg.getOrCreate<volScalarField>("lambda_r", n, 2.5); 
+	reg.getOrCreate<volScalarField>("c_phi", n, 1e-12); //孔隙度可压缩性
 }
 
 static inline void ensureFracRockFields(FieldRegistry& reg_fr, size_t ne) //确保裂缝物性参数场存在，若不存在则创建并赋默认值
@@ -104,7 +107,7 @@ inline void ensureFracPrimaryFields(FieldRegistry& freg, size_t ne)
 	freg.getOrCreate<volScalarField>("Tf", ne, 303.15);
 }
 
-// test_constProperties_singlePhase_CO2_T_diffusion
+//常物性测试 test_constProperties_singlePhase_CO2_T_diffusion
 void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg)
 {
 	auto& mesh = mgr.mesh();
@@ -128,6 +131,8 @@ void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_
 		(*lam_r)[i] = 3;
 	}
 }
+
+
 
 void PhysicalPropertiesManager::CO2Properties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg)
 {
@@ -183,9 +188,172 @@ void PhysicalPropertiesManager::ComputeEffectiveThermalProperties_test_constProp
 		(*Ceff)[i] = (1.0 - (*phiF)[i]) * (*rrF)[i] * (*cprF)[i] + (*phiF)[i] * (*rho_gF)[i] * (*cp_gF)[i];
 		(*lame)[i] = (1.0 - (*phiF)[i]) * (*lamrF)[i] + (*phiF)[i] * (*k_gF)[i];
 	}
-
-
 }
+
+void PhysicalPropertiesManager::ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(MeshManager& mgr, FieldRegistry& reg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	//ensureMatrixFluidFields(reg, n);
+	//ensureRockFields(reg, n);
+
+	// 岩石参数（必须存在）
+	auto phiF = reg.get<volScalarField>("phi");
+	auto rrF = reg.get<volScalarField>("rho_r");
+	auto cprF = reg.get<volScalarField>("cp_r");
+	auto lamrF = reg.get<volScalarField>("lambda_r");
+
+	//流体物性参数
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+	// 有效热参数场
+	auto Ceff = reg.getOrCreate<volScalarField>("C_eff", n, 0.0);
+	auto lame = reg.getOrCreate<volScalarField>("lambda_eff", n, 0.0);
+
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& c = cells[ic];
+		if (c.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(c.id);
+
+		(*Ceff)[i] = (1.0 - (*phiF)[i]) * (*rrF)[i] * (*cprF)[i] + (*phiF)[i] * (*rho_gF)[i] * (*cp_gF)[i];
+		(*lame)[i] = (1.0 - (*phiF)[i]) * (*lamrF)[i] + (*phiF)[i] * (*k_gF)[i];
+	}
+}
+
+
+//固体常物性，流体变物性测试案例，取COMSOL计算模型
+//流体相参数
+void PhysicalPropertiesManager::CO2Properties_test_varProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg,  const std::string& T_field)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	ensureMatrixFluidFields(reg, n);
+	auto TF = reg.get<volScalarField>(T_field);
+
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+
+
+	//取消并行计算
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& c = cells[ic];
+
+		const size_t i = mesh.getCellId2Index().at(c.id);
+		double T = (*TF)[i]; 
+
+			const double rho = CO2::rho_CO2_kg_m3(T);// ρ(T) = 539.7 / T
+			const double mu = CO2::mu_CO2_Pa_s(T);   // 220–1000 K 多项式
+			const double cp = CO2::cp_mass_J_kgK(T);   // 293–3000 K 分段多项式（质量比热）
+			const double k = CO2::k_W_mK(T);    // 220–3273 K 分段多项式
+
+			(*rho_gF)[i] = rho;
+			(*cp_gF)[i] = cp;
+			(*k_gF)[i] = k;
+
+	}
+}
+
+void PhysicalPropertiesManager::ComputeEffectiveThermalProperties_test_varProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg, const std::string& Tf_field)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	//ensureMatrixFluidFields(reg, n);
+	//ensureRockFields(reg, n);
+
+	// 岩石参数（必须存在）
+	auto phiF = reg.get<volScalarField>("phi");
+	auto rrF = reg.get<volScalarField>("rho_r");
+	auto cprF = reg.get<volScalarField>("cp_r");
+	auto lamrF = reg.get<volScalarField>("lambda_r");
+
+	//流体物性参数
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+	// 有效热参数场
+	auto Ceff = reg.getOrCreate<volScalarField>("C_eff", n, 0.0);
+	auto lame = reg.getOrCreate<volScalarField>("lambda_eff", n, 0.0);
+
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& c = cells[ic];
+		if (c.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(c.id);
+
+		(*Ceff)[i] = (1.0 - (*phiF)[i]) * (*rrF)[i] * (*cprF)[i] + (*phiF)[i] * (*rho_gF)[i] * (*cp_gF)[i];
+		(*lame)[i] = (1.0 - (*phiF)[i]) * (*lamrF)[i] + (*phiF)[i] * (*k_gF)[i];
+	}
+}
+
+
+
+//对流项 常物性测试
+void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	ensureRockFields(reg, n);
+
+	auto phi_r = reg.get<volScalarField>("phi"); //孔隙度
+	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
+	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
+	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
+	auto c_phi = reg.get<volScalarField>("c_phi"); //孔隙度可压缩性，1/Pa
+	auto k_xx = reg.get<volScalarField>("kxx"); //基岩渗透率，m²
+	auto k_yy = reg.get<volScalarField>("kyy");	
+	auto k_zz = reg.get<volScalarField>("kzz");
+
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& cell = cells[ic];
+		if (cell.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(cell.id);
+		(*phi_r)[i] = 0.15;
+		(*rho_r)[i] = 2650.0;
+		(*cp_r)[i] = 1000.0;
+		(*lam_r)[i] = 3;
+		(*c_phi)[i] = 0;
+		(*k_xx)[i] = 1e-14;
+		(*k_yy)[i] = 1e-14;
+		(*k_zz)[i] = 1e-14;
+	}
+}
+
+void PhysicalPropertiesManager::CO2Properties_test_constProperties_singlePhase_CO2 (MeshManager& mgr, FieldRegistry& reg)
+{
+	auto& mesh = mgr.mesh();
+	const auto& cells = mesh.getCells();
+	const size_t n = cells.size();
+	ensureMatrixFluidFields(reg, n);
+
+	auto rho_gF = reg.get<volScalarField>("rho_g");
+	auto cp_gF = reg.get<volScalarField>("cp_g");
+	auto k_gF = reg.get<volScalarField>("k_g");
+	auto mu_gF = reg.get<volScalarField>("mu_g");
+	auto Drho_Dp_gF = reg.get<volScalarField>("Drho_Dp_g");
+
+	for (size_t ic = 0; ic < cells.size(); ++ic)
+	{
+		const auto& c = cells[ic];
+		if (c.id < 0) continue;
+		const size_t i = mesh.getCellId2Index().at(c.id);
+		(*rho_gF)[i] = 800.0;
+		(*cp_gF)[i] = 1200.0;
+		(*k_gF)[i] = 0.05;
+		(*mu_gF)[i] = 1.48e-5;
+		(*Drho_Dp_gF)[i] = 0;
+	}
+}
+
+
 
 
 

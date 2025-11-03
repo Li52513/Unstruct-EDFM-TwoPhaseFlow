@@ -52,9 +52,6 @@ inline void Convective_FirstOrder_SinglePhase_Temperature_BoundaryFace
 	auto aPP_conv = freg.getOrCreate<faceScalarField>(af_PP_name, faces.size(), 0.0); // 对角线
     auto aPN_conv = freg.getOrCreate<faceScalarField>(af_PN_name, faces.size(), 0.0); // 相邻项
 	auto bP_conv = freg.getOrCreate<faceScalarField>(bP_name, faces.size(), 0.0); // 源项
-    std::fill(aPP_conv->data.begin(), aPP_conv->data.end(), 0.0);
-    std::fill(aPN_conv->data.begin(), aPN_conv->data.end(), 0.0);
-    std::fill(bP_conv->data.begin(), bP_conv->data.end(), 0.0);
 
 
     for (const auto& F : faces)

@@ -99,9 +99,16 @@ public:
 	void CO2Properties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
     void ComputeEffectiveThermalProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
 
+    //单相-CO2变物性-温度扩散试算补充函数
+	void CO2Properties_test_varProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg, const std::string& Tf_field);
+	void ComputeEffectiveThermalProperties_test_varProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg, const std::string& Tf_field);
+
+    void RockProperties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg);
+	void CO2Properties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg);
 
 
-
+    //单相-CO2常物性-渗流传热补充函数
+    void ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(MeshManager & mgr, FieldRegistry & reg);
 
 
 

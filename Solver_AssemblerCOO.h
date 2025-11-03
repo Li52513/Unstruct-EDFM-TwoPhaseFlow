@@ -200,7 +200,7 @@ bool assemble_sparse_system_coo_item
     SparseSystemCOO* out = nullptr
 );
 
-//===== 语义友好：字符串 =====进一步封装
+//***最终系数组装函数===== 语义友好：字符串 =====进一步封装
 inline bool assemble_COO
 (
     MeshManager& mgr, const FieldRegistry& reg, const FaceFieldRegistry& freg,
@@ -464,6 +464,179 @@ inline bool assembleTemperature_singlePhase_COO
             out->addA(rN, rN, -aPNf);
         }
         // 内部面对流没有 b 源（你已在内部面把 bP_conv 置 0）
+    }
+
+    // 3) 时间项
+    for (const auto& c : cells) {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        const int r = lid_of_cell[i];
+        if (r < 0) continue;
+        out->addA(r, r, (*aC)[i]);
+        out->addb(r, (*bC)[i]);
+    }
+    return true;
+}
+
+
+inline bool assembleTemperature_singlePhase_COO_BDF(
+    MeshManager& mgr,
+    const FieldRegistry& reg,
+    const FaceFieldRegistry& freg,
+    const std::string& a_face_diff = "a_f_Diff_T",
+    const std::string& s_face_diff = "s_f_Diff_T",
+    const std::string& aPP_conv = "aPP_conv",
+    const std::string& aPN_conv = "aPN_conv",
+    const std::string& bP_conv = "bP_conv",
+    const std::string& a_time = "aC_time_T",
+    const std::string& b_time = "bC_time_T",
+    SparseSystemCOO* out = nullptr,
+    const std::vector<char>* strongMask = nullptr,
+    const std::vector<double>* strongTarget = nullptr
+    )
+{
+    Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
+    const auto& faces = mesh.getFaces();
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
+
+    auto aF = freg.get<faceScalarField>(a_face_diff);
+    auto sF = freg.get<faceScalarField>(s_face_diff);
+    auto aPP = freg.get<faceScalarField>(aPP_conv);
+    auto aPN = freg.get<faceScalarField>(aPN_conv);
+    auto bPc = freg.get<faceScalarField>(bP_conv);
+    auto aC = reg.get<volScalarField>(a_time);
+    auto bC = reg.get<volScalarField>(b_time);
+
+    if (!aF || !sF || !aPP || !aPN || !bPc || !aC || !bC) {
+        std::cerr << "[assembleTemperature] missing diffusion/conv/time fields.\n";
+        return false;
+    }
+    if (strongMask && !strongTarget) {
+        std::cerr << "[assembleTemperature] strongMask provided without strongTarget.\n";
+        return false;
+    }
+
+    int N = 0;
+    const auto lid_of_cell = buildUnknownMap(mesh, N);
+    if (!out) return true;
+    out->reset(N, faces.size() * 6 + cells.size() * 2);
+
+    const bool useStrong = (strongMask && strongTarget);
+    auto isStrongIdx = [&](int idx)->bool {
+        return useStrong && idx >= 0
+            && static_cast<size_t>(idx) < strongMask->size()
+            && (*strongMask)[idx] != 0;
+        };
+    auto strongValueIdx = [&](int idx)->double {
+        return (*strongTarget)[idx];
+        };
+
+    // 1) 扩散项（TPFA）
+    for (const auto& F : faces) {
+        const int iF = F.id - 1;
+        const double af = (*aF)[iF];
+        const double sf = (*sF)[iF];
+
+        const int Pid = F.ownerCell;
+        const int Nid = F.neighborCell;
+        const int iP = (Pid >= 0 ? id2idx.at(Pid) : -1);
+        const int iN = (Nid >= 0 ? id2idx.at(Nid) : -1);
+        const int rP = (iP >= 0 ? lid_of_cell[iP] : -1);
+        const int rN = (iN >= 0 ? lid_of_cell[iN] : -1);
+
+        const bool strongP = isStrongIdx(iP);
+        const bool strongN = isStrongIdx(iN);
+
+        if (F.isBoundary()) {
+            if (rP >= 0 && !strongP) {
+                out->addA(rP, rP, af);
+                out->addb(rP, sf);
+            }
+            continue;
+        }
+        if (rP < 0 || rN < 0) continue;
+
+        if (!strongP && !strongN) {
+            out->addA(rP, rP, af);
+            out->addA(rP, rN, -af);
+            out->addb(rP, sf);
+            out->addA(rN, rN, af);
+            out->addA(rN, rP, -af);
+            out->addb(rN, -sf);
+            continue;
+        }
+        if (strongP && strongN) continue;
+
+        if (strongP && !strongN) {
+            out->addA(rN, rN, af);
+            out->addb(rN, -sf + af * strongValueIdx(iP));
+            continue;
+        }
+        if (!strongP && strongN) {
+            out->addA(rP, rP, af);
+            out->addb(rP, sf + af * strongValueIdx(iN));
+            continue;
+        }
+    }
+
+    // 2) 对流项（迎风）
+    for (const auto& F : faces) {
+        const int iF = F.id - 1;
+        const int Pid = F.ownerCell;
+        const int Nid = F.neighborCell;
+        const int iP = (Pid >= 0 ? id2idx.at(Pid) : -1);
+        const int iN = (Nid >= 0 ? id2idx.at(Nid) : -1);
+        const int rP = (iP >= 0 ? lid_of_cell[iP] : -1);
+        const int rN = (iN >= 0 ? lid_of_cell[iN] : -1);
+
+        const double aPPf = (*aPP)[iF];
+        const double aPNf = (*aPN)[iF];
+        const double bPf = (*bPc)[iF];
+
+        const bool strongP = isStrongIdx(iP);
+        const bool strongN = isStrongIdx(iN);
+
+        if (F.isBoundary()) {
+            if (rP >= 0 && !strongP) {
+                if (aPPf != 0.0) out->addA(rP, rP, aPPf);
+                if (bPf != 0.0) out->addb(rP, bPf);
+            }
+            continue;
+        }
+        if (rP < 0 || rN < 0) continue;
+
+        if (!strongP && !strongN) {
+            if (aPPf > 0.0) {
+                out->addA(rP, rP, aPPf);
+                out->addA(rN, rP, -aPPf);
+            }
+            else if (aPNf != 0.0) {
+                out->addA(rP, rN, aPNf);
+                out->addA(rN, rN, -aPNf);
+            }
+            continue;
+        }
+        if (strongP && strongN) continue;
+
+        if (strongP && !strongN) {
+            if (aPPf > 0.0) {
+                out->addb(rN, aPPf * strongValueIdx(iP));
+            }
+            else if (aPNf != 0.0) {
+                out->addA(rN, rN, -aPNf); // 入流写在自身对角
+            }
+            continue;
+        }
+        if (!strongP && strongN) {
+            if (aPPf > 0.0) {
+                out->addA(rP, rP, aPPf);
+            }
+            else if (aPNf != 0.0) {
+                out->addA(rP, rN, aPNf);
+                out->addb(rP, -aPNf * strongValueIdx(iN));
+            }
+        }
     }
 
     // 3) 时间项

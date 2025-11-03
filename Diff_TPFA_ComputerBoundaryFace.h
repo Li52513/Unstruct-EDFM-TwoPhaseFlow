@@ -50,7 +50,7 @@ inline void Diffusion_TPFA_BoundaryFace_SinglePhase(
 
     const double eps_d = 1e-14, eps_l = 1e-30;
 
-    //取消并行计算
+  
     for (size_t f = 0; f < faces.size(); ++f)
     {
         const Face& F = faces[f];
@@ -124,7 +124,6 @@ inline void Diffusion_TPFA_BoundaryFace_SinglePhase(
         const double s_aux = s_cross + s_buoy;
         const double s_aux_limited = std::max(-0.5 * a_face, std::min(0.5 * a_face, s_aux));
         (*s_f_Diff)[F.id - 1] = s_aux_limited + s_BC;
-        //(*s_f_Diff)[F.id - 1] = s_cross + s_buoy + s_BC;
     }
 
 //#pragma omp parallel for schedule(static)
