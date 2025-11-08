@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <vector>
 #include <memory>
@@ -15,8 +15,7 @@
 #include "Diff_TPFA_GradientsOperation.h"
 
 namespace FVM {
-    namespace Diffusion 
-    {
+    namespace Diffusion {
 
         enum class RhoFaceMethod { Linear, Harmonic };
 
@@ -170,8 +169,7 @@ namespace FVM {
                     return (1.0 - gamma) * rP + gamma * rN;
                 };
 
-            for (const auto& F : faces) 
-            {
+            for (const auto& F : faces) {
                 const int iF = F.id - 1;
 
                 const Vector A = F.vectorE + F.vectorT;
@@ -195,8 +193,7 @@ namespace FVM {
                     const double s = (F.midpoint - cells.at(id2idx.at(P)).center) * eON;
                     gamma = std::max(0.0, std::min(1.0, s / dON));
                 }
-                else if (N < 0) 
-                {
+                else if (N < 0) {
                     gamma = 0.0;
                 }
 
@@ -207,10 +204,8 @@ namespace FVM {
                 double s_cross = 0.0;
                 double s_buoy = 0.0;
                 double s_BC_unmass = 0.0;
-                double s_total_vol = 0.0;
 
-                if (N >= 0) 
-                {
+                if (N >= 0) {
                     // —— 内部面 —— //
                     const double lamN = lamAlong(N, ehat);
                     const double lam_f = 1.0 / std::max(gamma / lamP + (1.0 - gamma) / lamN, eps_l);
@@ -219,46 +214,62 @@ namespace FVM {
                     const Vector& gP = grad.at(id2idx.at(P));
                     const Vector& gN = grad.at(id2idx.at(N));
                     const Vector  gf = (1.0 - gamma) * gP + gamma * gN;
-                    s_cross = lam_f * (gf * F.vectorT);
+                    s_cross = orthoLimiter * lam_f * (gf * F.vectorT);
 
-                    if (enable_buoy && rhoF) 
-                    {
+                    if (enable_buoy && rhoF) {
                         const double rho_lin = rho_face(gamma, P, N);
                         s_buoy = -lam_f * rho_lin * (g * A);
                     }
-
-                    s_total_vol = s_cross + s_buoy;
                 }
-                else 
-                {
+                else {
                     // —— 边界面 —— //
                     const double a_face0 = lamP * Eabs / dON;
+                    const Vector& gP = grad.at(id2idx.at(P));
+                    const double crossRaw = lamP * (gP * F.vectorT);
 
-                    if (enable_buoy && rhoF) { const double rhoP = (*rhoF)[id2idx.at(P)]; 
-                    s_buoy = -lamP * rhoP * (g * A); } 
-                    
-                    double a = 0.0, b = 0.0, c = 0.0;
-                    if (bc.getABC(F.id, a, b, c))
-                    {
-                        s_cross = 0; //因为当前不处理边界面为曲面的情况，所以A == E，不进行非正交修正
-
-                        double alpha = b * (Eabs / dON);
-                        alpha = alpha / (a * Aabs + alpha);
-
-                        double beta = c * Aabs;  //因为当前不处理边界面为曲面的情况，所以A == E，不进行非正交修正 所以 gf * F.vectorT =0
-                        beta = beta / (a * Aabs + b * (Eabs / dON));
-
-                        a_vol = (1 - alpha) * a_face0;
-                        s_BC_unmass = a_face0 * beta;
-
+                    if (enable_buoy && rhoF) {
+                        const double rhoP = (*rhoF)[id2idx.at(P)];
+                        s_buoy = -lamP * rhoP * (g * A);
                     }
-                    s_total_vol = s_BC_unmass + s_buoy;
 
+                    double a = 0.0, b = 0.0, c = 0.0;
+                    if (bc.getABC(F.id, a, b, c)) {
+                        // Robin 边界条件: aφ + b∂nφ = c
+                        const double den = a * std::max(Aabs, epsA) + b * (Eabs / dON);
+                        if (den > epsA) {
+                            const double alpha_f = b * (Eabs / dON) / den;
+                            const double beta_f = c * Aabs / den;
+
+                            a_vol = a_face0 * (1.0 - alpha_f);
+                            s_cross = orthoLimiter * (1.0 - alpha_f) * crossRaw;  // 修正符号
+                            s_BC_unmass = a_face0 * beta_f;
+                        }
+                    }
+                    else {
+                        // 纯 Neumann 边界条件 (∂nφ = 0)
+                        a_vol = 0.0;
+                        s_cross = 0.0;
+                        s_BC_unmass = 0.0;
+                    }
                 }
+
+                // —— 乘以密度并做限幅 —— //
                 const double rho_f = rho_face(gamma, P, N);
-                (*aF)[iF] = rho_f * a_vol;
-                (*sF)[iF] = s_total_vol * rho_f;
-              
+                const double a_face = rho_f * a_vol;
+
+                const double s_nb_unmass = s_cross + s_buoy;
+                const double s_nb = rho_f * s_nb_unmass;
+                const double s_BC = rho_f * s_BC_unmass;
+
+                const double maxCrossRatio = 0.45 * orthoLimiter;
+                const double lower = -maxCrossRatio * a_face;
+                const double upper = +maxCrossRatio * a_face;
+                const double s_nb_limited = std::max(lower, std::min(upper, s_nb));
+
+                const double s_total = s_nb_limited + s_BC;
+
+                (*aF)[iF] = a_face;
+                (*sF)[iF] = s_total;
             }
 
             return true;

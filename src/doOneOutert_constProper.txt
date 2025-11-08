@@ -1,0 +1,170 @@
+inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	// out
+	double& dT_inf,
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr,
+	SparseSystemCOO* lastSysT = nullptr
+)
+{
+	Mesh& mesh = mgr.mesh();
+
+	// —— 外迭代起步：把上一轮解拷贝到 *_prev，便于欠松弛与收敛评估 —— //
+	if (!startOuterIteration_scatter(reg, "p_g", "p_g_prev")) return false;
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	// —— 常物性：更新一次（保持接口一致，后续也可切换变物性） —— //
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
+
+	using FVM::Diffusion::RhoFaceMethod;
+
+	// =========================
+	// 1) 压力：时间项 + 达西扩散（质量式）
+	// =========================
+	const OperatorFieldNames nmP = makeNames("p_g");
+
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		mgr, reg, freg,
+		nmP.a_f_diff, nmP.s_f_diff,
+		"p_g",
+		{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },  // K/mu ⋅ rho_g
+		"rho_g", RhoFaceMethod::Linear,
+		g, Pbc,
+		/*massForm=*/false, /*alpha_anisotropy=*/0
+	);
+	if (!ok) return false;
+
+	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
+		mgr, reg, dt,
+		"c_phi",             // 孔隙度压缩性
+		"phi",               // φ^n
+		"p_g_old",           // p^n
+		"rho_g",             // ρ^n
+		"p_g_prev",          // p^⋆
+		"rho_g",             // ρ^⋆
+		"Drho_Dp_g",         // (∂ρ/∂p)^⋆
+		nmP.a_time, nmP.b_time
+	);
+	if (!ok) return false;
+
+	SparseSystemCOO sysp;
+	assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysp);
+	if (lastSysP) *lastSysP = sysp;
+	if (ctrl.reportPerIter) {
+		auto R = PostChecks::reportAssembly(sysp, /*brief=*/false);
+		PostChecks::printAssemblyReport(R, "P(Time-implicit + Diffusion (mass-form Darcy))");
+	}
+
+	int Np = 0; auto lid_p = buildUnknownMap(mesh, Np);
+	auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid_p, Np);
+
+	auto optP = ctrl.lin_p;
+	if (optP.tol <= 0.0) optP.tol = ctrl.tol_p_abs;
+
+	double resP = 0.0; int itP = 0;
+	bool okLinP = solveCOO_Eigen(sysp, pvec, optP, &itP, &resP);
+	if (!okLinP) return false;
+
+	scatterVecToField(reg, mesh, "p_g", lid_p, pvec);
+
+	underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+	dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+	// =========================
+	// 2) 温度：时间项 + 传导 + 对流
+	// =========================
+
+	
+	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
+	std::vector<double> Ttar;
+	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+
+	const OperatorFieldNames nmT = makeNames("T");
+
+	// 时间项，保持统一装配接口
+	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature(
+		mgr, reg, dt,
+		"C_eff", "T_old",
+		nmT.a_time, nmT.b_time
+	);
+	if (!ok) return false;
+
+	// 传导项
+	ok = FVM::Diffusion::build_FaceCoeffs_Central(
+		mgr, reg, freg,
+		nmT.a_f_diff, nmT.s_f_diff,
+		"T",
+		{ "iso:lambda_eff" },  // 等效导热系数
+		"",
+		RhoFaceMethod::Linear,
+		{ 0,0,0 }, Tbc,
+		/*massForm=*/false, /*alpha_anisotropy=*/0
+	);
+	if (!ok) return false;
+
+	// 先算达西质量通量/体积通量/法向速度
+	ok = FVM::Convection::buildFlux_Darcy_Mass(
+		mgr, reg, freg,
+		nmP.a_f_diff, nmP.s_f_diff,
+		"p_g", "rho_g",
+		"mf_g", "Qf_g", "ufn_g",&Pbc,&Tbc
+	);
+
+
+	if (!ok) return false;
+
+	// 对流项（一阶迎风；mf × cp）
+	ok = FVM::Convection::build_FaceCoeffs_Upwind(
+		mgr, reg, freg,
+		"T",
+		"mf_g",            // 质量通量：内部已避免再次乘 rho
+		{ "cp_g" },        // 上风携带物性
+		nmT, Tbc
+	);
+	if (!ok) return false;
+
+	// 组装线性系统
+	SparseSystemCOO sysT;
+	assemble_COO(mgr, reg, freg, "ddt+diffusion+convection", nmT, &sysT);
+	if (lastSysT) *lastSysT = sysT;
+	if (ctrl.reportPerIter) {
+		auto R = PostChecks::reportAssembly(sysT, /*brief=*/false);
+		PostChecks::printAssemblyReport(R, "T(Time-implicit + Diffusion + Convection)");
+	}
+
+	// 强 Dirichlet 行覆盖
+	int Nt = 0; auto lid_t = buildUnknownMap(mesh, Nt);
+	apply_strong_dirichlet_rows_T(lid_t, maskT, Ttar, sysT);
+
+	// 求解
+	auto Tvec = gatherFieldToVec(reg, mesh, "T", lid_t, Nt);
+
+	auto optT = ctrl.lin_T;
+	if (optT.tol <= 0.0) optT.tol = ctrl.tol_T_abs;
+
+	double resT = 0.0; int itT = 0;
+	bool okLinT = solveCOO_Eigen(sysT, Tvec, optT, &itT, &resT);
+	if (!okLinT) return false;
+
+	scatterVecToField(reg, mesh, "T", lid_t, Tvec);
+
+	// 欠松弛 + 收敛
+	underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+	dT_inf = maxAbsDiff(reg, "T", "T_prev");
+	updatePrevIterates(reg, { {"T","T_prev"} });
+
+	return true;
+}

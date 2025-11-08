@@ -1,0 +1,55 @@
+#pragma once
+#include <unordered_map>
+#include <memory>
+#include <string>
+#include <utility>
+#include "VolField.h"  
+
+// 面场类型别名：与体场保持一致的接口与用法
+using faceScalarField = VolField<double>;
+using faceVectorField = VolField<Vector>;
+
+/**
+ * FaceFieldRegistry
+ * - 功能与 FieldRegistry 完全一致，只是语义上用于“面”的场存取
+ * - create/get/has/getOrCreate 接口与实现保持同风格，便于无缝使用
+*/
+
+
+struct FaceFieldRegistry
+{
+    std::unordered_map<std::string, std::shared_ptr<BaseField>> fields;
+
+    template<class FieldType, class... Args>
+    std::shared_ptr<FieldType> create(const std::string& name, Args&&... args)
+    {
+        auto f = std::make_shared<FieldType>(name, std::forward<Args>(args)...);
+        fields[name] = f;
+        return f;
+    }
+
+    template<class FieldType>
+    std::shared_ptr<FieldType> get(const std::string& name) const
+    {
+        auto it = fields.find(name);
+        if (it == fields.end()) return nullptr;
+        return std::dynamic_pointer_cast<FieldType>(it->second);
+    }
+
+    bool has(const std::string& name) const
+    {
+        return fields.count(name) > 0;
+    }
+
+    template<class FieldType, class... Args>
+    std::shared_ptr<FieldType> getOrCreate(const std::string& name, Args&&... args)
+    {
+        auto it = fields.find(name);
+        if (it != fields.end())
+            return std::dynamic_pointer_cast<FieldType>(it->second);
+
+        auto f = std::make_shared<FieldType>(name, std::forward<Args>(args)...);
+        fields[name] = f;
+        return f;
+    }
+};

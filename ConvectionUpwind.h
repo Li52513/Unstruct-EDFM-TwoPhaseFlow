@@ -152,8 +152,7 @@ namespace FVM {
                         if (Wface) (*Wface)[iF] = Wb;
 
                         double phi_b = 0.0;
-                        if (getDirichletFromABC(phiBC, F.id, phi_b)) {
-                            (*bP)[iF] += (-flux) * Wb * phi_b; // ע�⣺-flux>0
+                        if (getDirichletFromABC(phiBC, F.id, phi_b)) {(*bP)[iF] += (-flux) * Wb * phi_b; // ע�⣺-flux>0
                         }
                     }
                 }

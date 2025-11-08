@@ -4,7 +4,8 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "PhysicalProperties_CO2.h"
-
+#include <cassert>
+#include "Solver_AssemblerCOO.h" 
 
 // ——确保瞬态计算所需的 *_old 和 *_prev 场存在且尺寸正确 —— //
 inline bool ensureTransientFields
@@ -733,4 +734,78 @@ inline bool startTimeStep_scalar_BDF2
     *f1 = *f;
     *fp = *f;
     return true;
+}
+
+
+inline double maxAbsDiff_excluding_mask(FieldRegistry& reg,
+    const std::string& fld,
+    const std::string& fld_prev,
+    const std::string& maskName)
+{
+    auto* u = reg.get<volScalarField>(fld).get();
+    auto* v = reg.get<volScalarField>(fld_prev).get();
+    auto* mk = reg.get<volScalarField>(maskName).get();
+    double m = 0.0;
+    for (size_t i = 0; i < u->data.size(); ++i) {
+        if (mk && mk->data[i] > 0.5) continue; // 跳过强边界单元
+        m = std::max(m, std::abs(u->data[i] - v->data[i]));
+    }
+    return m;
+}
+
+
+// 将线性系统维度从 Nc 扩展到 Ntot（保留已有 A 与 b 条目）
+inline void extend_linear_system_size(SparseSystemCOO& sys, int Ntot)
+{
+    if (Ntot <= sys.n) return;
+    // 扩展 RHS 到 Ntot（保留已有值，新增填 0）
+    if ((int)sys.b.size() < Ntot) sys.b.resize(Ntot, 0.0);
+    sys.n = Ntot; // 注意：在调用 addA/addb 前先设 n，使断言通过
+}
+
+
+
+inline void debugCheckMassFlux(
+    MeshManager& mgr,
+    FaceFieldRegistry& freg,
+    const std::string& mf_name = "mf_g",
+    double eps = 1e-18)
+{
+    auto mfF = freg.get<faceScalarField>(mf_name.c_str());
+    if (!mfF) {
+        std::cerr << "[debugCheckMassFlux] face field '" << mf_name << "' not found.\n";
+        return;
+    }
+
+    const auto& faces = mgr.mesh().getFaces();
+    double minFlux = std::numeric_limits<double>::infinity();
+    double maxFlux = -std::numeric_limits<double>::infinity();
+    double sumFlux = 0.0;
+    size_t nPos = 0, nNeg = 0, nZero = 0;
+    double bIn = 0.0, bOut = 0.0;
+
+    for (const auto& F : faces) {
+        const double flux = (*mfF)[F.id - 1];
+        minFlux = std::min(minFlux, flux);
+        maxFlux = std::max(maxFlux, flux);
+        sumFlux += flux;
+
+        if (flux > eps) ++nPos;
+        else if (flux < -eps) ++nNeg;
+        else ++nZero;
+
+        if (F.isBoundary()) {
+            if (flux > eps)  bOut += flux;      // owner → boundary
+            if (flux < -eps) bIn += -flux;     // boundary → owner
+        }
+    }
+
+    std::cout << "[debugCheckMassFlux] field=" << mf_name
+        << " | min=" << minFlux << " | max=" << maxFlux
+        << " | sum=" << sumFlux << "\n";
+    std::cout << "   positives=" << nPos
+        << " | negatives=" << nNeg
+        << " | zeros=" << nZero << "\n";
+    std::cout << "   boundary inflow=" << bIn
+        << " | boundary outflow=" << bOut << std::endl;
 }

@@ -1,0 +1,53 @@
+#pragma once
+#include "PressureBC.h"
+
+// 边界条件提供器：必须实现
+//   bool getABC(int faceId, double& a, double& b, double& c) const;
+// 返回 true 表示该面有设置（a,b,c 已被面积化）；false 则无（按自然边界处理）
+// 边界条件提供器：统一从面ID取 “原始” a,b,c（未面积化）
+struct PressureBCAdapter 
+{
+	// 1) 首选：包装你现有的 PressureBC::Registry（非拥有指针）
+	const PressureBC::Registry* reg = nullptr;
+
+	// 2) 备选：若你把 a,b,c 直接存在一个哈希表里（原始 a,b,c）
+	const std::unordered_map<int, PressureBC::BoundaryCoefficient>* tableBC = nullptr;
+
+	// 3) 备选：若你用 tuple 存（原始 a,b,c）
+	const std::unordered_map<int, std::tuple<double, double, double>>* tableTuple = nullptr;
+
+	PressureBCAdapter() = default;
+	explicit PressureBCAdapter(const PressureBC::Registry& r) : reg(&r) {}
+	explicit PressureBCAdapter(const std::unordered_map<int, PressureBC::BoundaryCoefficient>& t) : tableBC(&t) {}
+	explicit PressureBCAdapter(const std::unordered_map<int, std::tuple<double, double, double>>& t) : tableTuple(&t) {}
+
+	// 取原始系数 a,b,c；成功返回 true，未设置该面则返回 false
+	bool getABC(int faceId, double& a, double& b, double& c) const
+	{
+		// 1) 从 Registry 查
+		if (reg) {
+			if (const auto* bc = reg->find(faceId)) {
+				a = bc->a; b = bc->b; c = bc->c;
+				return true;
+			}
+		}
+		// 2) 从 map<faceId, BoundaryCoefficient> 查
+		if (tableBC) {
+			auto it = tableBC->find(faceId);
+			if (it != tableBC->end()) {
+				a = it->second.a; b = it->second.b; c = it->second.c;
+				return true;
+			}
+		}
+		// 3) 从 map<faceId, tuple<double,double,double>> 查
+		if (tableTuple) {
+			auto it = tableTuple->find(faceId);
+			if (it != tableTuple->end()) {
+				std::tie(a, b, c) = it->second;
+				return true;
+			}
+		}
+		// 未设置该面
+		return false;
+	}
+};

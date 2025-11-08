@@ -46,7 +46,7 @@ struct InitFields
 	double dpdy = 0.0; //基岩压力梯度，单位 Pa/m
 	double dpdz = 0.0; //基岩压力梯度，单位 Pa/m
 
-	double T0 = 373.15; //基岩初始温度，单位 K
+	double T0 = 573.15; //基岩初始温度，单位 K
 	double dTdx = 0.0; //基岩温度梯度，单位 K/m
 	double dTdy = 0.0; //基岩温度梯度，单位 K/m
 	double dTdz = 0.0; //基岩温度梯度，单位 K/m

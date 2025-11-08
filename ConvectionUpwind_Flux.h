@@ -7,6 +7,8 @@
 #include "FaceFieldRegistry.h"
 #include "FieldAcessForDiscre.h"
 #include "Solver_AssemblerCOO.h"
+#include "BCAdapter.h"
+#include "TemperatureBCAdapter.h"
 namespace FVM {
 	namespace Convection {
 
@@ -34,7 +36,9 @@ namespace FVM {
             const std::string& rho_name = "rho",
             const std::string& mf_name = "mf",
             const std::string& Qf_name = "Qf",
-            const std::string& ufn_name = "ufn");
+            const std::string& ufn_name = "ufn",
+            const PressureBCAdapter* bc = nullptr,
+            bool clampDirichletBackflow = false);
 
 
         /**
@@ -53,7 +57,8 @@ namespace FVM {
         * @param Qf_name 输出体积通量面场名
         * @param ufn_name 输出法向速度面场名
         */
-        bool buildFlux_Darcy_Vol(
+        bool buildFlux_Darcy_Vol
+        (
             MeshManager& mgr, const FieldRegistry& reg, FaceFieldRegistry& freg,
             const std::string& a_vol = "a_f_Diff_vol",
             const std::string& s_vol = "s_f_Diff_vol",
@@ -61,7 +66,10 @@ namespace FVM {
             const std::string& rho_name = "rho",
             const std::string& mf_name = "mf",
             const std::string& Qf_name = "Qf",
-            const std::string& ufn_name = "ufn");
+            const std::string& ufn_name = "ufn",
+            const PressureBCAdapter* bc = nullptr,
+            const TemperatureBCAdapter* tbc = nullptr)
+            ;
 
         /**
         * @brief 路线 B：外给速度（常量或体场 U），直接构造通量
@@ -86,7 +94,8 @@ namespace FVM {
             const std::string& rho_name = "rho",
             const std::string& mf_name = "mf",
             const std::string& Qf_name = "Qf",
-            const std::string& ufn_name = "ufn");
+            const std::string& ufn_name = "ufn",
+            const PressureBCAdapter * bc = nullptr);
 
 
 

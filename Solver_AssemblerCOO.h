@@ -39,7 +39,7 @@ struct SparseSystemCOO
         b[r] += v;                 // RHS 已经是 +=
     }
 
-    // —— 新增：COO -> COO（原位）压缩合并（相同 (r,c) 累加）
+    // —— COO -> COO（原位）压缩合并（相同 (r,c) 累加）
     void compressInPlace(double drop_tol = 0.0) 
     {
         if (A.empty()) return;
@@ -60,7 +60,7 @@ struct SparseSystemCOO
         A.resize(write);
     }
 
-    // （可选）导出 CSR，便于自写/第三方求解器
+    // 导出 CSR，便于自写/第三方求解器
     void toCSR(std::vector<int>& rowPtr, std::vector<int>& colInd, std::vector<double>& val,
         double drop_tol = 0.0)
     {
@@ -110,9 +110,10 @@ inline std::vector<int> buildUnknownMap(Mesh& mesh, int& nUnknowns)
 enum OpMask : unsigned 
 {
     OP_NONE = 0,
-    OP_DIFFUSION = 1u << 0,  // laplacian
-    OP_CONVECTION = 1u << 1,  // advection
-    OP_TIME = 1u << 2   // ddt
+    OP_DIFFUSION = 1u << 0,     // laplacian
+    OP_CONVECTION = 1u << 1,    // advection
+    OP_TIME = 1u << 2,          // ddt
+	OP_SOURCE = 1u << 3         // source term
 };
 inline bool has(unsigned mask, OpMask op) { return (mask & op) != 0; }
 
@@ -121,48 +122,48 @@ inline bool has(unsigned mask, OpMask op) { return (mask & op) != 0; }
 
 struct OperatorFieldNames 
 {
-    std::string a_f_diff;  // "a_f_Diff_<tag>"
-    std::string s_f_diff;  // "s_f_Diff_<tag>"
-    std::string aPP_conv;     // "aPP_conv_<tag>"
-    std::string aPN_conv;     // "aPN_conv_<tag>"
-    std::string bP_conv;      // "bP_conv_<tag>"
-    std::string a_time;       // "aC_time_<tag>"
-    std::string b_time;       // "bC_time_<tag>"
+    std::string a_f_diff;       // "a_f_Diff_<tag>" 
+    std::string s_f_diff;       // "s_f_Diff_<tag>"
+    std::string aPP_conv;       // "aPP_conv_<tag>"
+    std::string aPN_conv;       // "aPN_conv_<tag>"
+    std::string bP_conv;        // "bP_conv_<tag>"
+    std::string a_time;         // "aC_time_<tag>"
+    std::string b_time;         // "bC_time_<tag>"
+	std::string a_src;		    // "aC_src_<tag>"
+	std::string b_src;		    // "bC_src_<tag>"
+    std::string s_f_deferred;
 };
 
 // 通用：给任意 tag 直接拼字段名
 inline OperatorFieldNames makeNames(const std::string& tag) 
 {
     OperatorFieldNames nm;
-	nm.a_f_diff = "a_f_Diff_" + tag;
-	nm.s_f_diff = "s_f_Diff_" + tag;
-	nm.aPP_conv = "aPP_conv_" + tag;
-	nm.aPN_conv = "aPN_conv_" + tag;
-	nm.bP_conv = "bP_conv_" + tag;
-	nm.a_time = "aC_time_" + tag;
-	nm.b_time = "bC_time_" + tag;
+	nm.a_f_diff =   "a_f_Diff_" + tag;
+	nm.s_f_diff =   "s_f_Diff_" + tag;
+	nm.aPP_conv =   "aPP_conv_" + tag;
+	nm.aPN_conv =   "aPN_conv_" + tag;
+	nm.bP_conv  =   "bP_conv_" + tag;
+	nm.a_time   =   "aC_time_" + tag;
+	nm.b_time   =   "bC_time_" + tag;
+    nm.a_src    =   "a_src_" + tag;
+	nm.b_src    =   "b_src_" + tag;
+    nm.s_f_deferred = "s_f_deferred_" + tag;
 	return nm;
 }
 
-// —— 单相压力 —— 
-inline OperatorFieldNames makeNames_pCO2() { return makeNames("p_g"); } // CO2 气相压力
-inline OperatorFieldNames makeNames_pH2O() { return makeNames("p_w"); } // 水相压力
+// —— 常用别名 —— 
+inline OperatorFieldNames makeNames_pCO2() { return makeNames("p_g"); }
+inline OperatorFieldNames makeNames_pH2O() { return makeNames("p_w"); }
+inline OperatorFieldNames makeNames_Sw() { return makeNames("Sw"); }
+inline OperatorFieldNames makeNames_T() { return makeNames("T"); }
+inline OperatorFieldNames makeNames_pfCO2() { return makeNames("pf_g"); }
+inline OperatorFieldNames makeNames_pfH2O() { return makeNames("pf_w"); }
+inline OperatorFieldNames makeNames_Tf() { return makeNames("Tf"); }
+inline OperatorFieldNames makeNames_Swf() { return makeNames("Swf"); }
 
-// —— 两相主变量（经典油水两相：p_w + Sw；pc(Sw) 在账本生成阶段处理）——
-inline OperatorFieldNames makeNames_Sw() { return makeNames("Sw"); } // 水相饱和度
-
-// —— 温度/能量 —— 
-// 1) 单相能量（把 conv 系数按单相质量流量与 cp 生成）：
-inline OperatorFieldNames makeNames_T() { return makeNames("T"); } // 基岩温度/单相能量
-
-// —— 若你区分裂缝场（可选）——
-inline OperatorFieldNames makeNames_pfCO2() { return makeNames("pf_g"); } // 裂缝 CO2 压力
-inline OperatorFieldNames makeNames_pfH2O() { return makeNames("pf_w"); } // 裂缝 水压
-inline OperatorFieldNames makeNames_Tf() { return makeNames("Tf"); } // 裂缝 温度/能量
-inline OperatorFieldNames makeNames_Swf() { return makeNames("Swf"); } // 裂缝 饱和度
 
 // ===== 把字符串表达式解析成位掩码 =====
-// 支持："ddt + diffusion + convection"、"laplacian|ddt"、"advection+ddt" 等（大小写/空格/逗号分隔都OK）
+// "ddt + diffusion + convection"、"laplacian|ddt"、"advection+ddt" 等（大小写/空格/逗号分隔都OK）
 unsigned parse_ops(const std::string& expr, std::string* errMsg = nullptr);
 
 // ===== 只读装配上下文 =====
@@ -174,20 +175,24 @@ struct AssembleCtx
     const std::unordered_map<int, int>& id2idx;
     const std::vector<int> lid_of_cell;
 
-    // 可空字段指针：按需填充
+    // 面级
     const faceScalarField* aF = nullptr; // 扩散系数(面)
     const faceScalarField* sF = nullptr; // 扩散源(面)
     const faceScalarField* aPP = nullptr; // 对流 owner 侧系数(面)
     const faceScalarField* aPN = nullptr; // 对流 neighbor 侧系数(面)
     const faceScalarField* bPc = nullptr; // 边界入流源(面)
+    // 体级
     const volScalarField* aC = nullptr; // 时间对角(体)
     const volScalarField* bC = nullptr; // 时间源(体)
+    const volScalarField* aSrc = nullptr; // [ADDED] 源项对角 a_src(体)
+    const volScalarField* bSrc = nullptr; // [ADDED] 源项 RHS  b_src(体)
 };
 
-// ===== 三个原子装配子函数（通用，任何“方程”可复用） =====
+// ===== 四个原子装配子函数（通用，任何“方程”可复用） =====
 void assemble_diffusion_faces(const AssembleCtx& Ctx, SparseSystemCOO& out);
 void assemble_convection_faces(const AssembleCtx& Ctx, SparseSystemCOO& out);
 void assemble_time_cells(const AssembleCtx& Ctx, SparseSystemCOO& out);
+void assemble_source_cells(const AssembleCtx& Ctx, SparseSystemCOO& out);
 
 // ===== 顶层调度（位掩码版） =====
 bool assemble_sparse_system_coo_item

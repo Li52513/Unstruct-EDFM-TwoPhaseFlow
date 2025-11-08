@@ -1,4 +1,4 @@
-﻿#include "ConvectionUpwind_Flux.h"
+#include "ConvectionUpwind_Flux.h"
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
@@ -60,7 +60,7 @@ namespace FVM
 			const std::string& mf_name, const std::string& Qf_name,
 			const std::string& ufn_name,
 			const PressureBCAdapter* bc,
-			bool clampDirichletBackflow
+			const TemperatureBCAdapter* tBC
 		)
 		{
 			Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
@@ -104,26 +104,22 @@ namespace FVM
 					qface = mface / std::max(rho_f, 1e-30);
 				}
 
-				else
-				{
-					bool dirichletOutflow = false;
-					if (clampDirichletBackflow && bc) {
-						double a = 0.0, b = 0.0, c = 0.0;
-						if (bc->getABC(F.id, a, b, c) && std::abs(a) > 1e-30) {
-							const double pBC = c / a;
-							dirichletOutflow = (pP >= pBC);
-						}
+				else {
+				
+					const double raw = (*a_f)[idx] * pP - (*s_f)[idx];
+					if (isAdiabaticZeroFlux(tBC, F.id)) {
+						if (raw <= 0.0) { mface = 0.0; qface = 0.0; }
+						else { mface = raw; qface = (rhoP != 0.0 ? raw / rhoP : 0.0); }
 					}
-
-					mface = (*a_f)[idx] * (pP)-(*s_f)[idx];
-					qface = mface / rhoP;
-
-					//防止回流
-					if (dirichletOutflow && mface < 0.0)
-					{
-						mface = 0.0;
-						qface = 0.0;
+					else if (isPureNeumann(bc, F.id)) {
+						mface = 0.0; qface = 0.0;
 					}
+					else {
+						mface = raw;
+						qface = (rhoP != 0.0 ? raw / rhoP : 0.0);
+					}
+				
+			
 				}
 				(*mf)[idx] = mface;
 				(*Qf)[idx] = qface;

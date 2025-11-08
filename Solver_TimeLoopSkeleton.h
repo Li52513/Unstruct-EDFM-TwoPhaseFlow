@@ -23,6 +23,14 @@
 #include"ConvectionUpwind_Flux.h"
 #include"ConvectionUpwind.h"
 #include"Timeterm_BDF.h"
+#include "FVM_SourceTerm_Sources.h"
+#include "FVM_SourceTerm_StrongDirichlet.h"
+#include"FVM_SourceTerm_ProdWellOps.h"
+#include "FVM_WellCoupling.h"
+#include "FVM_WellDOF.h"
+#include "FVM_SourceTerm_WellHeat.h"
+#include "WellConfig.h"
+#include "InflowPatch.h"
 
 
 //================================小工具：向量-场 gather/scatter,规避ghost单元================================//
@@ -156,6 +164,12 @@ struct SolverControls
 	bool reportPerIter = false;
 	// 可选：是否导出 MatrixMarket（仅在 reportPerIter 为 true 时，且只导出最后一次迭代）
 	bool dumpMMOnLastIter = false;
+
+	struct InjectorPin {
+		bool enable = false;
+		double relativeWeight = 0.0;
+		double minWeight = 0.0;
+	} injectorPin;
 
 };
 
@@ -1671,9 +1685,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H
 
 	//温度方程面系数
 	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
-	std::vector<double> Ttar;
-	
-	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+	std::vector<double> Ttar; build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
 
 	const double PIN_W = 1e7;
 
@@ -1682,7 +1694,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H
 	if (!ok) return false;
 	ok = FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nmT.a_f_diff, nmT.s_f_diff, "T", { "iso:lambda_eff" }, "", RhoFaceMethod::Linear, { 0,0,0 }, Tbc, false, 0);
 	if (!ok) return false;
-	ok = FVM::Convection::buildFlux_Darcy_Mass(mgr, reg, freg, nmP.a_f_diff, nmP.s_f_diff, "p_g", "rho_g", "mf_g", "Qf_g", "ufn_g");
+	ok = FVM::Convection::buildFlux_Darcy_Mass(mgr, reg, freg, nmP.a_f_diff, nmP.s_f_diff, "p_g", "rho_g", "mf_g", "Qf_g", "ufn_g", &Pbc, true);
 	if (!ok) return false;
 	ok = FVM::Convection::build_FaceCoeffs_Upwind(mgr, reg, freg, "T", "mf_g", { "cp_g" }, nmT, Tbc);
 	if (!ok) return false;
@@ -1752,7 +1764,8 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_withouPIN
 	// =========================
 	const OperatorFieldNames nmP = makeNames("p_g");
 
-	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central
+	(
 		mgr, reg, freg,
 		nmP.a_f_diff, nmP.s_f_diff,
 		"p_g",
@@ -1807,8 +1820,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_withouPIN
 
 	// 2.1 边界对应的“需要强制”的单元，以及目标 T_b（面积加权）
 	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
-	std::vector<double> Ttar;
-	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+	std::vector<double> Ttar;build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
 
 	const OperatorFieldNames nmT = makeNames("T");
 
@@ -1839,7 +1851,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_withouPIN
 		mgr, reg, freg,
 		nmP.a_f_diff, nmP.s_f_diff,
 		"p_g", "rho_g",
-		"mf_g", "Qf_g", "ufn_g"
+		"mf_g", "Qf_g", "ufn_g", &Pbc, true
 	);
 	if (!ok) return false;
 
@@ -1924,18 +1936,20 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 	// =========================
 	const OperatorFieldNames nmP = makeNames("p_g");
 
-	bool ok = FVM::Diffusion::build_FaceCoeffs_Central(
+	bool ok = FVM::Diffusion::build_FaceCoeffs_Central
+	(
 		mgr, reg, freg,
 		nmP.a_f_diff, nmP.s_f_diff,
 		"p_g",
 		{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },  // K/mu ⋅ rho_g
 		"rho_g", RhoFaceMethod::Linear,
 		g, Pbc,
-		/*massForm=*/true, /*alpha_anisotropy=*/0
+		/*massForm=*/false, /*alpha_anisotropy=*/0
 	);
 	if (!ok) return false;
 
-	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
+	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow
+	(
 		mgr, reg, dt,
 		"c_phi",             // 孔隙度压缩性
 		"phi",               // φ^n
@@ -1973,18 +1987,14 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 	updatePrevIterates(reg, { {"p_g","p_g_prev"} });
 
 	// =========================
-	// 2) 温度：时间项 + 传导 + 对流（无 PIN，强 Dirichlet 行覆盖）
+	// 2) 温度：时间项 + 传导 + 对流
 	// =========================
-
-	// 2.1 边界对应的“需要强制”的单元，以及目标 T_b（面积加权）
-	std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
-	std::vector<double> Ttar;
-	build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
 
 	const OperatorFieldNames nmT = makeNames("T");
 
 	// 时间项，保持统一装配接口
-	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature(
+	ok = FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature
+	(
 		mgr, reg, dt,
 		"C_eff", "T_old",
 		nmT.a_time, nmT.b_time
@@ -1992,7 +2002,8 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 	if (!ok) return false;
 
 	// 传导项
-	ok = FVM::Diffusion::build_FaceCoeffs_Central(
+	ok = FVM::Diffusion::build_FaceCoeffs_Central
+	(
 		mgr, reg, freg,
 		nmT.a_f_diff, nmT.s_f_diff,
 		"T",
@@ -2005,16 +2016,43 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 	if (!ok) return false;
 
 	// 先算达西质量通量/体积通量/法向速度
-	ok = FVM::Convection::buildFlux_Darcy_Mass(
+	ok = FVM::Convection::buildFlux_Darcy_Mass
+	(
 		mgr, reg, freg,
 		nmP.a_f_diff, nmP.s_f_diff,
 		"p_g", "rho_g",
-		"mf_g", "Qf_g", "ufn_g"
+		"mf_g", "Qf_g", "ufn_g", &Pbc, true
 	);
+
 	if (!ok) return false;
 
+	debugCheckMassFlux(mgr, freg, "mf_g", 1e-20);
+
+	
+
+	//// 1) patch 查询
+	//const auto& bfaces = mgr.boundaryFaces();
+	//auto lookup = BoundaryUtils::makePatchFaceLookup(bfaces);
+
+	//// 2) 条件型入边温度：仅在【温度绝热 && 压力非零通量 && flux<0 && 属于右边界】时给 T_prev(owner)
+	//auto provT_cond_right = BoundaryUtils::makeConditionalPrevTimeValueProviderForPatches(
+	//	mgr, reg, freg,
+	//	lookup, { "xL" },
+	//	/*fieldName_prev*/ "T_prev",
+	//	/*T*/ Tbc,
+	//	/*P*/ Pbc,
+	//	/*flux for temperature*/ "mf_g",   // 或 "Qf_g"，与温度方程使用的通量一致
+	//	/*epsFlux*/ 1e-18
+	//);
+
+	//// 5) 注册到 scalarBC（关键：键名必须与 var_key 一致，这里 var_key="T"）
+	//std::unordered_map<std::string, std::function<bool(int, double&)>> scalarBC;
+	//scalarBC["T"] = provT_cond_right;
+
+
 	// 对流项（一阶迎风；mf × cp）
-	ok = FVM::Convection::build_FaceCoeffs_Upwind(
+	ok = FVM::Convection::build_FaceCoeffs_Upwind
+	(
 		mgr, reg, freg,
 		"T",
 		"mf_g",            // 质量通量：内部已避免再次乘 rho
@@ -2032,9 +2070,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 		PostChecks::printAssemblyReport(R, "T(Time-implicit + Diffusion + Convection)");
 	}
 
-	// 强 Dirichlet 行覆盖
 	int Nt = 0; auto lid_t = buildUnknownMap(mesh, Nt);
-	apply_strong_dirichlet_rows_T(lid_t, maskT, Ttar, sysT);
 
 	// 求解
 	auto Tvec = gatherFieldToVec(reg, mesh, "T", lid_t, Nt);
@@ -2160,3 +2196,400 @@ inline bool outerIter_constProperties_singlePhase_CO2_T_H
 }
 
 
+
+inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed_withWell
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	double dt,
+	const SolverControls& ctrl,
+	const std::vector<WellConfig>& wellsCfg_in,
+	// out
+	double& dT_inf,
+	double& dp_inf,
+	// optional out
+	SparseSystemCOO* lastSysP = nullptr,
+	SparseSystemCOO* lastSysT = nullptr
+)
+{
+
+	Mesh& mesh = mgr.mesh();
+	const int Nc = (int)mesh.getCells().size();
+
+
+
+	// —— 外迭代起步（保持原有） —— //
+	if (!startOuterIteration_scatter(reg, "p_g", "p_g_prev")) return false;
+	if (!startOuterIteration_T(reg, "T", "T_prev")) return false;
+
+	// —— 常物性刷新（你工程内已有三件套，名字按你项目） —— //
+	ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
+	ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
+
+	//离散系数和源项场名称后缀  可以从外部输入 在main函数定义
+	const OperatorFieldNames nmP = makeNames("p_g");
+	const OperatorFieldNames nmT = makeNames("T");
+
+
+	//case1 不包含注/采井
+	if (wellsCfg_in.size() == 0)
+	{
+		// ======================================================
+		// 1.1) 压力方程：离散（ddt+Darcy扩散）
+		// ======================================================
+
+		// a 扩散项
+		if (!FVM::Diffusion::build_FaceCoeffs_Central(mgr,reg,freg,nmP.a_f_diff,nmP.s_f_diff,"p_g" ,{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },"rho_g", FVM::Diffusion::RhoFaceMethod::Linear, g, Pbc,false,3 )) return false;
+
+		// b 时间项 
+		if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(mgr, reg, dt, "c_phi", "phi", "p_g_old", "rho_g", "p_g_prev", "rho_g", "Drho_Dp_g", nmP.a_time, nmP.b_time)) return false;
+
+		// ======================================================
+		// 1.2) 压力方程：装配与求解
+		// ======================================================
+
+		SparseSystemCOO sysp;
+		if (!assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysp)) return false;
+
+		int Np = 0; auto lid_p = buildUnknownMap(mesh, Np);
+		auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid_p, Np);
+
+		auto optP = ctrl.lin_p;
+		if (optP.tol <= 0.0) optP.tol = ctrl.tol_p_abs;
+
+		double resP = 0.0; int itP = 0;
+		bool okLinP = solveCOO_Eigen(sysp, pvec, optP, &itP, &resP);
+		if (!okLinP) return false;
+
+		scatterVecToField(reg, mesh, "p_g", lid_p, pvec);
+
+		underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+		dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+		updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+		// ======================================================
+		// 2.1) 温度方程离散：时间项 + 传导 + 对流
+		// ======================================================
+
+		std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
+		std::vector<double> Ttar; build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+
+		//a 时间项
+		if (! FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature(mgr, reg, dt, "C_eff", "T_old", nmT.a_time, nmT.b_time)) return false;
+
+		//b 扩散项
+		if (!FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nmT.a_f_diff, nmT.s_f_diff, "T", { "iso:lambda_eff" }, "", FVM::Diffusion::RhoFaceMethod::Linear, g, Tbc, false, 3)) return true;
+
+		//c.1 计算质量通量
+		if (!FVM::Convection::buildFlux_Darcy_Mass(mgr, reg, freg,nmP.a_f_diff, nmP.s_f_diff,"p_g", "rho_g","mf_g", "Qf_g", "ufn_g", &Pbc, true)) return false;
+		
+		//c.2 对流项，利用质量通量，采用一阶迎风格式计算面系数
+		if (!FVM::Convection::build_FaceCoeffs_Upwind(mgr, reg, freg,"T","mf_g",{ "cp_g" },nmT, Tbc)) return false;
+
+		// ======================================================
+		// 2.2) 温度方程：装配与求解
+		// ======================================================
+
+		SparseSystemCOO sysT;
+		assemble_COO(mgr, reg, freg, "ddt+diffusion+convection", nmT, &sysT);
+		if (lastSysT) *lastSysT = sysT;
+		if (ctrl.reportPerIter) {
+			auto R = PostChecks::reportAssembly(sysT, /*brief=*/false);
+			PostChecks::printAssemblyReport(R, "T(Time-implicit + Diffusion + Convection)");
+		}
+
+		// 强 Dirichlet 行覆盖
+		int Nt = 0; auto lid_t = buildUnknownMap(mesh, Nt);
+		apply_strong_dirichlet_rows_T(lid_t, maskT, Ttar, sysT);
+
+		// 求解
+		auto Tvec = gatherFieldToVec(reg, mesh, "T", lid_t, Nt);
+
+		auto optT = ctrl.lin_T;
+		if (optT.tol <= 0.0) optT.tol = ctrl.tol_T_abs;
+
+		double resT = 0.0; int itT = 0;
+		bool okLinT = solveCOO_Eigen(sysT, Tvec, optT, &itT, &resT);
+		if (!okLinT) return false;
+
+		scatterVecToField(reg, mesh, "T", lid_t, Tvec);
+
+		// 欠松弛 + 收敛
+		underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+		dT_inf = maxAbsDiff(reg, "T", "T_prev");
+		updatePrevIterates(reg, { {"T","T_prev"} });
+
+		return true;
+	}
+	else {
+		// 1.1 扩散（Darcy mass-form）
+		if (!FVM::Diffusion::build_FaceCoeffs_Central(
+			mgr, reg, freg,
+			nmP.a_f_diff, nmP.s_f_diff,
+			"p_g",
+			{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" }, // (K/mu)*rho
+			"rho_g", FVM::Diffusion::RhoFaceMethod::Linear,
+			g, Pbc,
+			/*massForm=*/true, /*alpha_aniso=*/0)) return false;
+
+		// 1.2 时间项
+		if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
+			mgr, reg, dt,
+			"c_phi", "phi", "p_g_old",
+			"rho_g", "p_g_prev",
+			"rho_g", "Drho_Dp_g",
+			nmP.a_time, nmP.b_time)) return false;
+
+		// 1.3 组装基础系统（不含井）
+		SparseSystemCOO sysp;
+		if (!assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sysp)) return false;
+
+		// 1.4 多井：构建/刷新掩码与 PI、注册井 DoF、扩维、列耦合与井行
+		std::vector<WellConfig> wellsCfg = wellsCfg_in;   // 本地拷贝，便于补齐字段名
+		build_masks_and_PI_for_all(mgr, reg, wellsCfg);   // 每口井：mask_<name>/PI_<name>
+
+		std::vector<WellDOF> wells;
+		const int Ntot = register_well_dofs_for_all(Nc, wellsCfg, wells); // 回填 wells[k].lid
+		extend_linear_system_size(sysp, Ntot);                             // !!! 必须在 addA/addb 前
+
+		std::vector<int> lid_cell(Nc); for (int i = 0; i < Nc; ++i) lid_cell[i] = i;
+
+		for (const auto& w : wells) {
+			// 列耦合：质量导纳 PI，故 scaleByCellMeasure=false
+			add_peaceman_coupling_cell_rows(
+				sysp, mesh, reg, w.PI_field, w.mask_field, lid_cell, w.lid, /*false*/false);
+			// 井行：Pressure/Rate 通吃
+			add_well_row(
+				sysp, mesh, reg, w.PI_field, w.mask_field, lid_cell, w.lid, w.mode, w.target, /*false*/false);
+		}
+		if (lastSysP) *lastSysP = sysp;
+
+		// 1.5 —— 压力求解段：严格保留你的原有结构 —— //
+		int Np = 0; auto lid_p = buildUnknownMap(mesh, Np);
+		auto pvec = gatherFieldToVec(reg, mesh, "p_g", lid_p, Np);
+
+		// 追加井未知到同一解向量尾部（保持原结构，仅加两步：resize + 初猜）
+		pvec.resize(Ntot, 0.0);
+		for (const auto& w : wells) {
+			if (w.mode == WellDOF::Mode::Pressure) pvec[w.lid] = w.target; // BHP 作为井压初猜
+			else                                   pvec[w.lid] = pvec[0];   // 定流：随便给个初猜
+		}
+
+		auto optP = ctrl.lin_p; if (optP.tol <= 0.0) optP.tol = ctrl.tol_p_abs;
+		double resP = 0.0; int itP = 0;
+		bool okLinP = solveCOO_Eigen(sysp, pvec, optP, &itP, &resP);
+		if (!okLinP) return false;
+
+		// 只把“前 Np 分量（单元压力）”散回 p_g（与你原逻辑一致）
+		{
+			std::vector<double> p_cells(Np);
+			std::copy(pvec.begin(), pvec.begin() + Np, p_cells.begin());
+			scatterVecToField(reg, mesh, "p_g", lid_p, p_cells);
+		}
+
+		// 写回每口井的井底压 p_w_<name>（单值场）
+		writeback_pw_fields_for_all(reg, wells, pvec);
+
+		// 欠松弛与收敛评估（原结构不变）
+		underRelaxInPlace(reg, "p_g", "p_g_prev", ctrl.urf_p);
+		dp_inf = maxAbsDiff(reg, "p_g", "p_g_prev");
+		updatePrevIterates(reg, { {"p_g","p_g_prev"} });
+
+		// ======================================================
+		// 2) 温度方程：ddt + 传导 + 对流 + 基于 q_m 的井热源
+		// ======================================================
+		std::vector<char>   maskT = mark_strong_BC_cells(mgr, Tbc);
+		std::vector<double> Ttar; build_dirichlet_T_targets(mgr, Tbc, maskT, Ttar);
+
+
+
+		if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature(
+			mgr, reg, dt, "C_eff", "T_old", nmT.a_time, nmT.b_time)) return false;
+
+		// 1) 纯正交离散
+
+		if (!FVM::Diffusion::build_FaceCoeffs_Central(
+			mgr, reg, freg,
+			nmT.a_f_diff, nmT.s_f_diff,
+			"T",
+			{ "iso:lambda_eff" },
+			"", FVM::Diffusion::RhoFaceMethod::Linear,
+			Vector(0, 0, 0), Tbc,
+			/*enable_buoy=*/false,
+			/*gradSmoothIters=*/1)) return false;
+
+
+		if (!FVM::Convection::buildFlux_Darcy_Mass(
+			mgr, reg, freg,
+			nmP.a_f_diff, nmP.s_f_diff,
+			"p_g", "rho_g",
+			"mf_g", "Qf_g", "ufn_g", &Pbc, true)) return false;
+
+		if (!FVM::Convection::build_FaceCoeffs_Upwind(
+			mgr, reg, freg,
+			"T",
+			"mf_g",
+			{ "cp_g" },
+			nmT, Tbc)) return false;
+
+		// —— 多井 q_m 热源：注井加 b（焓输入），采井加 a（抽能） —— //
+		const FVM::SourceTerm::InjectorDirichletPinOptions pinOpts
+		{
+		ctrl.injectorPin.enable,
+		ctrl.injectorPin.relativeWeight,
+		ctrl.injectorPin.minWeight
+		};
+
+		bool first = true;
+		for (const auto& w : wells) {
+			const double Tin = (w.role == WellDOF::Role::Injector) ? w.Tin : 0.0;
+			if (!FVM::SourceTerm::add_temperature_source_from_qm_single(
+				mgr, reg,
+				w.role,
+				w.PI_field.c_str(), w.mask_field.c_str(), w.name.c_str(),
+				Tin,
+				/*p*/ "p_g", /*cp*/ "cp_g",
+				/*thickness*/ 1.0,
+				/*accumulate*/ !first,
+				/*verbose*/ false,
+				pinOpts))                                  // <- new argument
+				return false;
+			first = false;
+		}
+
+		// 2.1 —— 温度求解段：严格保留你的原有结构 —— //
+		SparseSystemCOO sysT;
+		if (!assemble_COO(mgr, reg, freg, "ddt+diffusion+convection+source", nmT, &sysT)) return false;
+		if (lastSysT) *lastSysT = sysT;
+
+		int Nt = 0; auto lid_t = buildUnknownMap(mesh, Nt);
+		apply_strong_dirichlet_rows_T(lid_t, maskT, Ttar, sysT);
+
+		auto Tvec = gatherFieldToVec(reg, mesh, "T", lid_t, Nt);
+
+		auto optT = ctrl.lin_T; if (optT.tol <= 0.0) optT.tol = ctrl.tol_T_abs;
+		double resT = 0.0; int itT = 0;
+		bool okLinT = solveCOO_Eigen(sysT, Tvec, optT, &itT, &resT);
+		if (!okLinT) return false;
+
+		scatterVecToField(reg, mesh, "T", lid_t, Tvec);
+
+		underRelaxInPlace(reg, "T", "T_prev", ctrl.urf_T);
+		dT_inf = maxAbsDiff(reg, "T", "T_prev");
+		updatePrevIterates(reg, { {"T","T_prev"} });
+
+
+		return true;
+	}
+	
+
+	
+
+}
+
+
+inline bool outerIter_constProperties_singlePhase_CO2_T_H_withWell
+(
+	MeshManager& mgr,
+	FieldRegistry& reg,
+	FaceFieldRegistry& freg,
+	PhysicalPropertiesManager& ppm,
+	const TemperatureBCAdapter& Tbc,
+	const PressureBCAdapter& Pbc,
+	const Vector& g,
+	const std::vector<WellConfig>& wellsCfg_in,
+	double dt,
+	const SolverControls& ctrl
+)
+{
+	double prev_dp_g = 1e300;
+	double prev_dT = 1e300;
+
+	for (int it = 0; it < ctrl.maxOuter; ++it)
+	{
+		double dp = 0.0;
+		double dT = 0.0;
+		SparseSystemCOO lastP;
+		SparseSystemCOO lastT;
+		//一次外迭代推进
+		bool ok = doOneOutert_constProperties_singlePhase_CO2_T_H_closed_withWell(mgr, reg, freg, ppm, Tbc, Pbc, g, dt, ctrl, wellsCfg_in ,dT, dp, (ctrl.dumpMMOnLastIter ? &lastP : nullptr), (ctrl.dumpMMOnLastIter ? &lastT : nullptr));
+		if (!ok) return false;
+
+		// —— 进度输出 —— //
+		std::cout << "[Outer " << it << "]  |Δp|_inf=" << dp << "  |ΔT|_inf=" << dT << "\n";
+
+		// —— 自适应松弛—— //
+		if (it > 0)
+		{
+			double rT = dT / std::max(prev_dT, 1e-30);
+			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+			double rp = dp / std::max(prev_dp_g, 1e-30);
+			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+		}
+
+		prev_dp_g = dp;
+		prev_dT = dT;
+		// 收敛判据：绝对/相对（相对采用场量标度）
+		auto maxAbsField = [&](const std::string& fld)->double {
+			double m = 0.0;
+			auto f = reg.get<volScalarField>(fld);
+			if (!f) return 1.0;
+			const auto& cells = mgr.mesh().getCells();
+			const auto& id2idx = mgr.mesh().getCellId2Index();
+			for (const auto& c : cells) {
+				if (c.id < 0) continue;
+				size_t i = id2idx.at(c.id);
+				m = std::max(m, std::abs((*f)[i]));
+			}
+			return std::max(1.0, m);
+			};
+
+		const double PScale = maxAbsField("p_g");
+		const double TScale = maxAbsField("T");
+
+		const bool convP = (dp < std::max(ctrl.tol_p_abs, ctrl.tol_p_rel * PScale));
+		const bool convT = (dT < std::max(ctrl.tol_T_abs, ctrl.tol_T_rel * TScale));
+
+		if (convP && convT) {
+			std::cout << "Converged at outer iter " << it << "\n";
+
+			if (ctrl.dumpMMOnLastIter) {
+#if __cplusplus >= 201703L
+				try { std::filesystem::create_directories("mm"); }
+				catch (...) {}
+#endif
+				// 同时导出 P/T 的矩阵账本（便于核对边界行与对流行）
+				PostChecks::dumpCOO_to_matrix_market(
+					lastP,
+					"mm/A_P_CO2_pTH.mtx",
+					"mm/b_P_CO2_pTH.txt",
+					/*sym=*/false
+				);
+				PostChecks::dumpCOO_to_matrix_market(
+					lastT,
+					"mm/A_T_CO2_pTH.mtx",
+					"mm/b_T_CO2_pTH.txt",
+					/*sym=*/false
+				);
+			}
+			break;
+		}
+
+		if (it == ctrl.maxOuter - 1) {
+			std::cout << "Reached maxOuter without meeting P/T tolerances.\n";
+		}
+	}
+
+	return true;
+
+
+}
