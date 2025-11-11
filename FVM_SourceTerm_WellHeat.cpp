@@ -26,8 +26,7 @@ namespace FVM {
             const char* cp_field,
             double thickness,
             bool accumulate,
-            bool verbose,
-            const InjectorDirichletPinOptions& pin)
+            bool verbose = false)
         {
             Mesh& mesh = mgr.mesh();
             const int Nc = (int)mesh.getCells().size();
@@ -69,30 +68,21 @@ namespace FVM {
                 const double q_in = (qraw > 0.0) ? qraw : 0.0;
                 const double q_out = (qraw < 0.0) ? -qraw : 0.0;
 
-                const double diagHeat = cp_i * (q_in + q_out) * thickness;
-                (*aT)[cidx] += diagHeat;
-
-                if (q_in > 0.0) {
-                    const double rhs = cp_i * q_in * Tin * thickness;
-                    (*bT)[cidx] += rhs;
-                    Qh_in += rhs;
-                    Qm_in += q_in;
-
-                    // --- new: 强约束 -------------------------------------------------
-                    if (pin.enable && role == WellDOF::Role::Injector) {
-                        double weight = 0.0;
-                        if (pin.relativeWeight > 0.0 && Tin != 0.0)
-                            weight = pin.relativeWeight * rhs / Tin;
-                        weight = std::max(weight, pin.minWeight);
-                        if (weight > 0.0) {
-                            (*aT)[cidx] += weight;
-                            (*bT)[cidx] += weight * Tin;
-                        }
+                if (role == WellDOF::Role::Injector) {
+                    // 注井：只加 RHS（焓输入），不加对角
+                    if (q_in > 0.0) {
+                        const double rhs = cp_i * q_in * Tin * thickness;
+                        (*bT)[cidx] += rhs;
+                        Qh_in += rhs; Qm_in += q_in;
                     }
-                    // -----------------------------------------------------------------
                 }
-
-                if (q_out > 0.0) Qm_out += q_out;
+                else { // Producer
+                    // 采井：只加对角“抽能”，RHS 不加
+                    if (q_out > 0.0) {
+                        (*aT)[cidx] += cp_i * q_out * thickness;
+                        Qm_out += q_out;
+                    }
+                }
                 ++nPerf;
             }
 

@@ -1,464 +1,27 @@
-#pragma once
+ï»¿#pragma once
 #include <functional>
 #include <iostream>
 #include <string>
-#include <sstream>   // ¡ï ĞÂÔö
-#include <iomanip>   // ¡ï ĞÂÔö
+#include <sstream>   // â˜… æ–°å¢
+#include <iomanip>   // â˜… æ–°å¢
 #include <filesystem>   
 #include "Solver_TimeLoopSkeleton.h"  // outerIter_OneStep_singlePhase(...)
+#include "Solver_Accel.h"
 #include "Solver_PostChecks.h"        // PostChecks::export_* / dumpCOO_to_matrix_market
 #include "TecplotExporter.h"          // TecplotExport::export_pT_tecplot_after_step
 #include "Solver_AssemblerCOO.h"      // assemblePressure_* / assembleTemperature_*
 #include "PostProcess_.h"
 
 
-// ¿ÉÑ¡µ¼³ö»Øµ÷£ºÓÃ»§×Ô¶¨Òå¶îÍâÊä³ö
+// å¯é€‰å¯¼å‡ºå›è°ƒï¼šç”¨æˆ·è‡ªå®šä¹‰é¢å¤–è¾“å‡º
 using WriteCallback = std::function<void(int step, double time)>;
 
-// Ğ¡¹¤¾ß£º¸ù¾İÏàÌ¬·µ»ØÑ¹Á¦³¡Ãû
+// å°å·¥å…·ï¼šæ ¹æ®ç›¸æ€è¿”å›å‹åŠ›åœºå
 inline const char* pNameForPhase(const std::string& phase) {
     return (phase == "CO2" || phase == "co2") ? "p_g" : "p_w";
 }
 
-/**
- * @brief µ¥Ïà£¨CO2 / water£©ÉøÁ÷-´«ÈÈ£º¶à²½Ê±¼äÍÆ½øÇı¶¯
- */
-inline bool runTransient_singlePhase(
-    MeshManager& mgr,
-    FieldRegistry& reg,
-    FaceFieldRegistry& freg,
-    PhysicalPropertiesManager& ppm,
-    const PressureBCAdapter& Pbc,
-    const TemperatureBCAdapter& Tbc,
-    const GravUpwind& gu,
-    const RockDefaults& rock,
-    int nSteps,
-    double dt,
-    const SolverControls& ctrl,
-    const std::string& phase = "CO2",
-    int writeEvery = 0,
-    WriteCallback onWrite = nullptr,
-    bool exportCSV = false,
-    bool exportTXT = true,
-    bool exportMM = false,
-    bool exportTecplotP = false,
-    bool exportTecplotT = false
-) {
-    if (nSteps <= 0 || dt <= 0.0) {
-        std::cerr << "[runTransient] invalid nSteps/dt.\n";
-        return false;
-    }
-
-    const char* pField = pNameForPhase(phase);
-    std::string outFolderCSV = std::string("out_pT_") + phase;
-    std::string outFolderTXT = std::string("out_txt_") + phase;
-    std::string mmFolder = "mm";
-
-    // ³õÊ¼Ê±¿Ì t=0, step=0 µÄÊä³ö£¨¿ÉÑ¡£©
-    if (exportTXT) {
-        PostChecks::export_pT_txt_after_step(mgr, reg, pField, "T",
-            /*step=*/0, /*t=*/0.0, outFolderTXT);
-    }
-    if (exportCSV) {
-        PostChecks::export_pT_csv_after_step(mgr, reg, pField, "T",
-            /*step=*/0, /*t=*/0.0, outFolderCSV);
-    }
-    if (exportTecplotP || exportTecplotT)
-    {
-        TecplotExport::TecplotOptions opt;
-        opt.folder = std::string("out_tec_") + phase;
-        opt.filePrefix = phase;
-        if (exportTecplotP) 
-        {
-            TecplotExport::export_cellField_to_tecplot_after_step
-            (
-                mgr, reg, freg, opt,
-                /*cellField*/ pField,
-                /*tmpFace*/   std::string(pField) + "_face_tmp",   // ¡ï ĞŞÕıÆ´½Ó
-                /*varName*/   "P",
-                /*step=*/0, /*t=*/0.0,
-                /*PBC*/ &Pbc, /*TBC*/ nullptr
-            );
-        }
-        if (exportTecplotT) {
-            TecplotExport::export_cellField_to_tecplot_after_step(
-                mgr, reg, freg, opt,
-                /*cellField*/ "T",
-                /*tmpFace*/   "T_face_tmp",
-                /*varName*/   "T",
-                /*step=*/0, /*t=*/0.0,
-                /*PBC*/ nullptr, /*TBC*/ &Tbc);
-        }
-    }
-
-    double t = 0.0;
-    for (int step = 0; step < nSteps; ++step) 
-    {
-        const int step1 = step + 1;
-        t += dt;
-
-        // ¡ª¡ªµ¥²½ÍÆ½ø£¨º¬£ºstartTimeStep/Íâµü´ú/Ìá½» n+1£©¡ª¡ª
-        bool ok = outerIter_OneStep_singlePhase(
-            mgr, reg, freg, ppm, Pbc, Tbc, gu, rock, dt, ctrl, phase
-        );
-        if (!ok) {
-            std::cerr << "[runTransient] step " << step1 << " failed.\n";
-            return false;
-        }
-
-        // ¡ª¡ªÃ¿²½µ¼³ö£ºTXT/CSV¡ª¡ª
-        if (exportTXT) {
-            PostChecks::export_pT_txt_after_step(mgr, reg, pField, "T", step1, t, outFolderTXT);
-        }
-        if (exportCSV) {
-            PostChecks::export_pT_csv_after_step(mgr, reg, pField, "T", step1, t, outFolderCSV);
-        }
-
-
-        const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
-        //if ((exportTecplotP || exportTecplotT) && doThisStep) {
-        //    TecplotExport::TecplotOptions opt;
-        //    opt.folder = std::string("out_tec_") + phase;  // Ä¿Â¼¿É×Ô¶¨Òå
-        //    opt.filePrefix = phase;
-        //    opt.precision = 16;
-
-        //    if (exportTecplotP) {
-        //        const bool okP = TecplotExport::export_cellField_to_tecplot_after_step_cell2face2node(
-        //            mgr, reg, freg, opt,
-        //            /*cellField*/ pField,
-        //            /*tmpFace */ std::string(pField) + "_face_tmp",
-        //            /*varName */ "P",
-        //            step1, t,
-        //            /*PBC*/ &Pbc, /*TBC*/ nullptr);
-        //        if (!okP) std::cerr << "[runTransient] Tecplot(P) export failed at step " << step1 << "\n";
-        //    }
-        //    if (exportTecplotT) {
-        //        const bool okT = TecplotExport::export_cellField_to_tecplot_after_step_cell2face2node(
-        //            mgr, reg, freg, opt,
-        //            /*cellField*/ "T",
-        //            /*tmpFace */ "T_face_tmp",
-        //            /*varName */ "T",
-        //            step1, t,
-        //            /*PBC*/ nullptr, /*TBC*/ &Tbc);
-        //        if (!okT) std::cerr << "[runTransient] Tecplot(T) export failed at step " << step1 << "\n";
-        //    }
-        //}
-        if ((exportTecplotP || exportTecplotT) && doThisStep) {
-            TecplotExport::TecplotOptions opt;
-            opt.folder = std::string("out_tec_") + phase;
-            opt.filePrefix = phase;
-
-            if (exportTecplotP) {
-                const bool okP = TecplotExport::export_cellField_to_tecplot_after_step(
-                    mgr, reg, freg, opt,
-                    /*cellField*/ pField,
-                    /*tmpFace*/   std::string(pField) + "_face_tmp", // ¡ï ĞŞÕıÆ´½Ó
-                    /*varName*/   "P",
-                    step1, t,
-                    /*PBC*/ &Pbc, /*TBC*/ nullptr
-                );
-                if (!okP) std::cerr << "[runTransient] Tecplot(P) export failed at step " << step1 << "\n";
-            }
-            if (exportTecplotT) {
-                const bool okT = TecplotExport::export_cellField_to_tecplot_after_step(
-                    mgr, reg, freg, opt,
-                    /*cellField*/ "T",
-                    /*tmpFace*/   "T_face_tmp",
-                    /*varName*/   "T",
-                    step1, t,
-                    /*PBC*/ nullptr, /*TBC*/ &Tbc
-                );
-                if (!okT) std::cerr << "[runTransient] Tecplot(T) export failed at step " << step1 << "\n";
-            }
-        }
-
-
-
-        // ¡ª¡ª¿ÉÑ¡£ºµ¼³ö MatrixMarket£¨ÖØĞÂ×°ÅäÒ»´ÎÓÃÓÚÍâ²¿ºË²é£©¡ª¡ª
-        if (exportMM && ( (writeEvery <= 0) || (step1 % writeEvery == 0) )) {  // ¡ï ĞŞÕıÓÅÏÈ¼¶
-            SparseSystemCOO sysP, sysT;
-
-            if (phase == "CO2" || phase == "co2") {
-                assemblePressure_CO2_singlePhase_COO(mgr, reg, freg, &sysP);
-            } else {
-                assemblePressure_water_singlePhase_COO(mgr, reg, freg, &sysP);
-            }
-            sysP.compressInPlace(0.0);
-
-            assembleTemperature_singlePhase_COO(
-                mgr, reg, freg,
-                /*a_f_Diff_T*/ "a_f_Diff_T",
-                /*s_f_Diff_T*/ "s_f_Diff_T",
-                /*aPP_conv*/   "aPP_conv",
-                /*aPN_conv*/   "aPN_conv",
-                /*bP_conv */   "bP_conv",
-                /*a_time*/     "aC_time_T",
-                /*b_time*/     "bC_time_T",
-                &sysT
-            );
-            sysT.compressInPlace(0.0);
-
-            std::ostringstream fnA, fnB, fnAT, fnBT;
-            fnA  << mmFolder << "/A_P_" << phase << "_step_" << std::setw(6) << std::setfill('0') << step1 << ".mtx";
-            fnB  << mmFolder << "/b_P_" << phase << "_step_" << std::setw(6) << std::setfill('0') << step1 << ".txt";
-            fnAT << mmFolder << "/A_T_" << phase << "_step_" << std::setw(6) << std::setfill('0') << step1 << ".mtx";
-            fnBT << mmFolder << "/b_T_" << phase << "_step_" << std::setw(6) << std::setfill('0') << step1 << ".txt";
-
-            PostChecks::dumpCOO_to_matrix_market(sysP,  fnA.str(),  fnB.str(),  /*compress*/false);
-            PostChecks::dumpCOO_to_matrix_market(sysT, fnAT.str(), fnBT.str(), /*compress*/false);
-
-            // ×°ÅäÌå¼ì£¨¿ÉÊÓ»¯µ½¿ØÖÆÌ¨£©
-            auto RP = PostChecks::reportAssembly(sysP, /*force_compress*/false);
-            auto RT = PostChecks::reportAssembly(sysT, /*force_compress*/false);
-            PostChecks::printAssemblyReport(RP, "P");
-            PostChecks::printAssemblyReport(RT, "T");
-        }
-
-        // ¡ª¡ª¿ÉÑ¡×Ô¶¨Òå»Øµ÷¡ª¡ª
-        if (writeEvery > 0 && (step1 % writeEvery == 0) && onWrite) {
-            onWrite(step1, t);
-            std::cout << "[runTransient] wrote step " << step1 << " at t=" << t << "\n";
-        }
-
-
-
-
-
-    }
-
-    if (writeEvery > 0 && onWrite && (nSteps % writeEvery != 0)) {
-        onWrite(nSteps, nSteps * dt);
-        std::cout << "[runTransient] wrote final step " << nSteps
-                  << " at t=" << (nSteps * dt) << "\n";
-    }
-    return true;
-}
-
-
-inline bool runTransient_test_constProperties_singlePhase_CO2_T_diffusion
-(
-    MeshManager& mgr,
-    FieldRegistry& reg,
-    FaceFieldRegistry& freg,
-    PhysicalPropertiesManager& ppm,
-    const TemperatureBCAdapter& Tbc,
-    const GravUpwind& gu,
-    int nSteps,
-    double dt,
-    const SolverControls& ctrl,
-    int writeEvery = 1,                         // Ã¿²½/Ã¿¸ô¼¸²½Êä³ö
-    const std::string& outPrefix = "T_CO2_diff" // Êä³öÇ°×º
-)
-{
-
-    //´´½¨²¢´ò¿ªÎÄ¼ş¼Ğ
-#if __cplusplus >= 201703L
-        // ±£Ö¤¸¸Ä¿Â¼´æÔÚ£¨Ö»ÓÃÒ»´Î£¬Ã»±ØÒªÃ¿²½¶¼½¨£©
-    try {
-        std::filesystem::create_directories(std::filesystem::path(outPrefix).parent_path());
-    }
-    catch (...) {
-        std::cerr << "[runTransient] cannot create directory for: " << outPrefix << "\n";
-        return false;
-    }
-#endif
-
-    double t = 0.0;
-    for (int step = 0; step < nSteps; ++step)
-    {
-        
-        //Ê±¼ä²½ÍÆ½ø
-        const int step1 = step + 1;
-        t += dt;
-        
-        if (!startTimeStep_test_singlePhase_CO2_T_diffusion(mgr.mesh(), reg, "T", "T_old", "T_prev")) return false;
-
-		// ¡ª¡ªµ¥²½ÍÆ½ø£¨º¬£ºstartTimeStep/Íâµü´ú/Ìá½» n+1£©¡ª¡ª
-        bool ok = outerIter_test_constProperties_singlePhase_CO2_T_diffusion(mgr, reg, freg, ppm, Tbc, gu, dt, ctrl);
-		
-        if (!ok) {
-			std::cerr << "[runTransient] step " << step1 << " failed.\n";
-			return false;
-		}
-
-        //µ¼³ö¸ÃÊ±¼ä²½½á¹û
-        const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
-		// ¡ª¡ªÃ¿²½µ¼³ö£ºTXT¡ª¡ª
-        if (doThisStep)
-        {
-            const std::vector<Vector> gradT  = computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, "T", /*gradSmoothIters=*/0);
-
-
-            std::ostringstream fn;
-            fn << outPrefix << "_step_" << std::setw(5) << std::setfill('0') << step1 << ".plt";
-
-            const bool okPlt = outputTecplot_cellToFaceToNode_BC(
-                mgr, reg, freg,
-                /*Tbc*/ &Tbc, /*Pbc*/ nullptr,
-                /*cell*/ "T",
-                /*face*/ "T_face_tmp",
-                /*gradBuf*/ &gradT,       // ¡ï Áã¿½±´´«Ìİ¶È»º³å
-                /*out*/  fn.str()
-            );
-            if (!okPlt) {
-                std::cerr << "[Transient(T-diff)] Tecplot export failed at step " << step1 << ".\n";
-                return false;
-            }
-        }
-    }
-	return true;
-}
-
-
-// ²âÊÔ°¸Àı£º2D-³£ÎïĞÔ-µ¥Ïà-CO2-ÈÈÀ©É¢ÎÊÌâ
-inline bool runTransient_test_varyingProperties_singlePhase_CO2_T_diffusion
-(
-    MeshManager& mgr,
-    FieldRegistry& reg,
-    FaceFieldRegistry& freg,
-    PhysicalPropertiesManager& ppm,
-    const TemperatureBCAdapter& Tbc,
-    const GravUpwind& gu,
-    int nSteps,
-    double dt,
-    const SolverControls& ctrl,
-    int writeEvery = 1,                         // Ã¿²½/Ã¿¸ô¼¸²½Êä³ö
-    const std::string& outPrefix = "T_CO2_diff" // Êä³öÇ°×º
-)
-{
-    //´´½¨²¢´ò¿ªÎÄ¼ş¼Ğ
-#if __cplusplus >= 201703L
-        // ±£Ö¤¸¸Ä¿Â¼´æÔÚ£¨Ö»ÓÃÒ»´Î£¬Ã»±ØÒªÃ¿²½¶¼½¨£©
-    try {
-        std::filesystem::create_directories(std::filesystem::path(outPrefix).parent_path());
-    }
-    catch (...) {
-        std::cerr << "[runTransient] cannot create directory for: " << outPrefix << "\n";
-        return false;
-    }
-#endif
-
-    double t = 0.0;
-    for (int step = 0; step < nSteps; ++step)
-    {
-
-        //Ê±¼ä²½ÍÆ½ø
-        const int step1 = step + 1;
-        t += dt;
-
-        if (!startTimeStep_test_singlePhase_CO2_T_diffusion(mgr.mesh(), reg, "T", "T_old", "T_prev")) return false;
-
-        // ¡ª¡ªµ¥²½ÍÆ½ø£¨º¬£ºstartTimeStep/Íâµü´ú/Ìá½» n+1£©¡ª¡ª
-		bool ok = outerIter_test_varyProperties_singlePhase_CO2_T_diffusion(mgr, reg, freg, ppm, Tbc, gu, dt, ctrl);
-
-        if (!ok) {
-            std::cerr << "[runTransient] step " << step1 << " failed.\n";
-            return false;
-        }
-
-        //µ¼³ö¸ÃÊ±¼ä²½½á¹û
-        const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
-        // ¡ª¡ªÃ¿²½µ¼³ö£ºTXT¡ª¡ª
-        if (doThisStep)
-        {
-            const std::vector<Vector> gradT = computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, "T", /*gradSmoothIters=*/0);
-
-
-            std::ostringstream fn;
-            fn << outPrefix << "_step_" << std::setw(5) << std::setfill('0') << step1 << ".plt";
-
-            const bool okPlt = outputTecplot_cellToFaceToNode_BC(
-                mgr, reg, freg,
-                /*Tbc*/ &Tbc, /*Pbc*/ nullptr,
-                /*cell*/ "T",
-                /*face*/ "T_face_tmp",
-                /*gradBuf*/ &gradT,       // ¡ï Áã¿½±´´«Ìİ¶È»º³å
-                /*out*/  fn.str()
-            );
-            if (!okPlt) {
-                std::cerr << "[Transient(T-diff)] Tecplot export failed at step " << step1 << ".\n";
-                return false;
-            }
-        }
-    }
-    return true;
-
-}
-
-
-// ²âÊÔ°¸Àı£º2D-³£ÎïĞÔ-µ¥Ïà-CO2-´ïÎ÷Á÷
-// ================== Transient driver: µ¥Ïà¡¤³£ÎïĞÔ¡¤CO2¡¤´ïÎ÷ÉøÁ÷£¨Ñ¹Á¦£© ==================
-inline bool runTransient_test_constProperties_singlePhase_CO2_p_flow
-(
-    MeshManager& mgr,
-    FieldRegistry& reg,
-    FaceFieldRegistry& freg,
-    PhysicalPropertiesManager& ppm,
-    const  PressureBCAdapter& Pbc,
-    const Vector& g,                       // ÀıÈç {0,-9.81,0}
-    int nSteps,
-    double dt,
-    const SolverControls& ctrl,
-    int writeEvery = 1,                    // Ã¿²½/Ã¿¸ô¼¸²½Êä³ö
-    const std::string& outPrefix = "P_CO2_flow" // Êä³öÇ°×º£¨¿Éº¬Â·¾¶£©
-)
-{
-#if __cplusplus >= 201703L
-    // ±£Ö¤¸¸Ä¿Â¼´æÔÚ
-    try {
-        std::filesystem::create_directories(std::filesystem::path(outPrefix).parent_path());
-    }
-    catch (...) {
-        std::cerr << "[runTransient(P)] cannot create directory for: " << outPrefix << "\n";
-        return false;
-    }
-#endif
-
-    double t = 0.0;
-    for (int step = 0; step < nSteps; ++step) {
-        const int step1 = step + 1;
-        t += dt;
-
-        if (!startTimeStep_scalar (mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev")) return false;
-
-        // ¡ª¡ª µ¥²½Íâµü´ú¡ª¡ª //
-        bool ok = outerIter_constProperties_singlePhase_CO2_Pressure(
-            mgr, reg, freg, ppm, Pbc, g, dt, ctrl
-        );
-        if (!ok) {
-            std::cerr << "[runTransient(P)] step " << step1 << " failed.\n";
-            return false;
-        }
-
-        // ¡ª¡ª µ¼³ö ¡ª¡ª //
-        const bool doThisStep = (writeEvery <= 0) || (step1 % writeEvery == 0);
-        if (doThisStep) {
-            const std::vector<Vector> gradP =
-                computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, "p_g", /*gradSmoothIters=*/0);
-
-            std::ostringstream fn;
-            fn << outPrefix << "_step_" << std::setw(5) << std::setfill('0') << step1 << ".plt";
-
-            const bool okPlt = outputTecplot_cellToFaceToNode_BC(
-                mgr, reg, freg,
-                /*Tbc*/ nullptr, /*Pbc*/ &Pbc,
-                /*cell*/ "p_g",
-                /*face*/ "p_g_face_tmp",
-                /*gradBuf*/ &gradP,
-                /*out*/ fn.str()
-            );
-            if (!okPlt) {
-                std::cerr << "[Transient(P)] Tecplot export failed at step " << step1 << ".\n";
-                return false;
-            }
-        }
-    }
-    return true;
-}
-
-
-
-//²âÊÔ°¸Àı£º2D-³£ÎïĞÔ-µ¥Ïà-CO2-´ïÎ÷ÉøÁ÷-´«ÈÈñîºÏÎÊÌâ
+//æµ‹è¯•æ¡ˆä¾‹ï¼š2D-å¸¸ç‰©æ€§-å•ç›¸-CO2-è¾¾è¥¿æ¸—æµ-ä¼ çƒ­è€¦åˆé—®é¢˜
 inline bool runTransient_constProperties_singlePhase_CO2_T_H
 (
     MeshManager& mgr,
@@ -467,11 +30,11 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H
     PhysicalPropertiesManager& ppm,
     const TemperatureBCAdapter& Tbc,
     const PressureBCAdapter& Pbc,
-    const Vector& g,                   // ÀıÈç {0,-9.81,0}
+    const Vector& g,                   // ä¾‹å¦‚ {0,-9.81,0}
     int nSteps,
     double dt,
     const SolverControls& ctrl,
-    // ¡ª¡ª Êä³ö¿ØÖÆ£¨¿É·Ö±ğÉèÖÃÆµÂÊÓëÂ·¾¶£©¡ª¡ª
+    // â€”â€” è¾“å‡ºæ§åˆ¶ï¼ˆå¯åˆ†åˆ«è®¾ç½®é¢‘ç‡ä¸è·¯å¾„ï¼‰â€”â€”
     int writeEveryP = 1,
     int writeEveryT = 1,
     const std::string& outPrefixP = "P_CO2_pTH/p",
@@ -481,7 +44,7 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H
     if (dt <= 0.0) { std::cerr << "[runTransient(p+T)] invalid dt.\n"; return false; }
 
 #if __cplusplus >= 201703L
-    // ±£Ö¤¸¸Ä¿Â¼´æÔÚ
+    // ä¿è¯çˆ¶ç›®å½•å­˜åœ¨
     try {
         std::filesystem::create_directories(std::filesystem::path(outPrefixP).parent_path());
         std::filesystem::create_directories(std::filesystem::path(outPrefixT).parent_path());
@@ -498,11 +61,11 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H
         const int step1 = step + 1;
         t += dt;
 
-        // ¡ª¡ª Ê±¼ä²ãÇĞ»»£ºÑ¹Á¦ÓëÎÂ¶È ¡ª¡ª //
+        // â€”â€” æ—¶é—´å±‚åˆ‡æ¢ï¼šå‹åŠ›ä¸æ¸©åº¦ â€”â€” //
         if (!startTimeStep_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev")) return false;
         if (!startTimeStep_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev")) return false;
 
-        // ¡ª¡ª µ¥²½Íâµü´ú£ºp¡úmf¡úT£¨³£ÎïĞÔ£©¡ª¡ª //
+        // â€”â€” å•æ­¥å¤–è¿­ä»£ï¼špâ†’mfâ†’Tï¼ˆå¸¸ç‰©æ€§ï¼‰â€”â€” //
         bool ok = outerIter_constProperties_singlePhase_CO2_T_H(
             mgr, reg, freg, ppm, Tbc, Pbc, g, dt, ctrl
         );
@@ -511,7 +74,7 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H
             return false;
         }
 
-        // ¡ª¡ª µ¼³ö£¨¿É·Ö±ğ¿ØÖÆÆµÂÊÓëÂ·¾¶£©¡ª¡ª //
+        // â€”â€” å¯¼å‡ºï¼ˆå¯åˆ†åˆ«æ§åˆ¶é¢‘ç‡ä¸è·¯å¾„ï¼‰â€”â€” //
         const bool dumpP = (writeEveryP <= 0) || (step1 % writeEveryP == 0);
         const bool dumpT = (writeEveryT <= 0) || (step1 % writeEveryT == 0);
 
@@ -558,13 +121,13 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H
                 return false;
             }
 
-            // CO2 Ïà£ºÑ¹Á¦³¡ÃûÊÇ p_g£»ÈçÇĞµ½Ë®Ïà¾Í¸ÄÎª "p_w"
+            // CO2 ç›¸ï¼šå‹åŠ›åœºåæ˜¯ p_gï¼›å¦‚åˆ‡åˆ°æ°´ç›¸å°±æ”¹ä¸º "p_w"
             const char* pField = "p_g";
             const char* TField = "T";
-            // ×Ô¶¨ÒåÒ»¸öÄãÏ²»¶µÄÎÄ¼ş¼ĞÂ·¾¶
+            // è‡ªå®šä¹‰ä¸€ä¸ªä½ å–œæ¬¢çš„æ–‡ä»¶å¤¹è·¯å¾„
             const std::string outFolderTXT = "./Postprocess_Data/TXT";
 
-            // µ¼³ö£º# columns: cell_id  cx  cy  cz  volume  p  T
+            // å¯¼å‡ºï¼š# columns: cell_id  cx  cy  cz  volume  p  T
             PostChecks::export_pT_txt_after_step(
                 mgr, reg,
                 pField, TField,
@@ -577,8 +140,8 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H
 }
 
 
-// ²âÊÔ°¸Àı£º2D-±äÎïĞÔ-µ¥Ïà-CO2-´ïÎ÷ÉøÁ÷-´«ÈÈñîºÏ-´ø¾®Ô´ÎÊÌâ
-//²âÊÔ°¸Àı£º2D-³£ÎïĞÔ-µ¥Ïà-CO2-´ïÎ÷ÉøÁ÷-´«ÈÈñîºÏÎÊÌâ
+// æµ‹è¯•æ¡ˆä¾‹ï¼š2D-å˜ç‰©æ€§-å•ç›¸-CO2-è¾¾è¥¿æ¸—æµ-ä¼ çƒ­è€¦åˆ-å¸¦äº•æºé—®é¢˜
+//æµ‹è¯•æ¡ˆä¾‹ï¼š2D-å¸¸ç‰©æ€§-å•ç›¸-CO2-è¾¾è¥¿æ¸—æµ-ä¼ çƒ­è€¦åˆé—®é¢˜
 inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell
 (
     MeshManager& mgr,
@@ -587,12 +150,12 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell
     PhysicalPropertiesManager& ppm,
     const TemperatureBCAdapter& Tbc,
     const PressureBCAdapter& Pbc,
-    const Vector& g,                   // ÀıÈç {0,-9.81,0}
+    const Vector& g,                   // ä¾‹å¦‚ {0,-9.81,0}
     int nSteps,
     double dt,
     const SolverControls& ctrl,
     const std::vector<WellConfig>& wellsCfg_in,
-    // ¡ª¡ª Êä³ö¿ØÖÆ£¨¿É·Ö±ğÉèÖÃÆµÂÊÓëÂ·¾¶£©¡ª¡ª
+    // â€”â€” è¾“å‡ºæ§åˆ¶ï¼ˆå¯åˆ†åˆ«è®¾ç½®é¢‘ç‡ä¸è·¯å¾„ï¼‰â€”â€”
     int writeEveryP = 1,
     int writeEveryT = 1,
     const std::string& outPrefixP = "P_CO2_pTH/p",
@@ -602,7 +165,7 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell
     if (dt <= 0.0) { std::cerr << "[runTransient(p+T)] invalid dt.\n"; return false; }
 
 #if __cplusplus >= 201703L
-    // ±£Ö¤¸¸Ä¿Â¼´æÔÚ
+    // ä¿è¯çˆ¶ç›®å½•å­˜åœ¨
     try {
         std::filesystem::create_directories(std::filesystem::path(outPrefixP).parent_path());
         std::filesystem::create_directories(std::filesystem::path(outPrefixT).parent_path());
@@ -619,11 +182,11 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell
         const int step1 = step + 1;
         t += dt;
 
-        // ¡ª¡ª Ê±¼ä²ãÇĞ»»£ºÑ¹Á¦ÓëÎÂ¶È ¡ª¡ª //
+        // â€”â€” æ—¶é—´å±‚åˆ‡æ¢ï¼šå‹åŠ›ä¸æ¸©åº¦ â€”â€” //
         if (!startTimeStep_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev")) return false;
         if (!startTimeStep_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev")) return false;
 
-        // ¡ª¡ª µ¥²½Íâµü´ú£ºp¡úmf¡úT£¨³£ÎïĞÔ£©¡ª¡ª //
+        // â€”â€” å•æ­¥å¤–è¿­ä»£ï¼špâ†’mfâ†’Tï¼ˆå¸¸ç‰©æ€§ï¼‰â€”â€” //
         bool ok = outerIter_constProperties_singlePhase_CO2_T_H_withWell( mgr, reg, freg, ppm, Tbc, Pbc, g, wellsCfg_in,dt, ctrl);
         if (!ok) 
         {
@@ -631,7 +194,7 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell
             return false;
         }
 
-        // ¡ª¡ª µ¼³ö£¨¿É·Ö±ğ¿ØÖÆÆµÂÊÓëÂ·¾¶£©¡ª¡ª //
+        // â€”â€” å¯¼å‡ºï¼ˆå¯åˆ†åˆ«æ§åˆ¶é¢‘ç‡ä¸è·¯å¾„ï¼‰â€”â€” //
         const bool dumpP = (writeEveryP <= 0) || (step1 % writeEveryP == 0);
         const bool dumpT = (writeEveryT <= 0) || (step1 % writeEveryT == 0);
 
@@ -678,19 +241,110 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell
                 return false;
             }
 
-            // CO2 Ïà£ºÑ¹Á¦³¡ÃûÊÇ p_g£»ÈçÇĞµ½Ë®Ïà¾Í¸ÄÎª "p_w"
+            // CO2 ç›¸ï¼šå‹åŠ›åœºåæ˜¯ p_gï¼›å¦‚åˆ‡åˆ°æ°´ç›¸å°±æ”¹ä¸º "p_w"
             const char* pField = "p_g";
             const char* TField = "T";
-            // ×Ô¶¨ÒåÒ»¸öÄãÏ²»¶µÄÎÄ¼ş¼ĞÂ·¾¶
+            // è‡ªå®šä¹‰ä¸€ä¸ªä½ å–œæ¬¢çš„æ–‡ä»¶å¤¹è·¯å¾„
             const std::string outFolderTXT = "./Postprocess_Data/TXT";
 
-            // µ¼³ö£º# columns: cell_id  cx  cy  cz  volume  p  T
+            // å¯¼å‡ºï¼š# columns: cell_id  cx  cy  cz  volume  p  T
             PostChecks::export_pT_txt_after_step(
                 mgr, reg,
                 pField, TField,
                 step1, t,
                 outFolderTXT
             );
+        }
+    }
+    return true;
+}
+
+
+inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell_accel(
+    MeshManager& mgr,
+    FieldRegistry& reg,
+    FaceFieldRegistry& freg,
+    PhysicalPropertiesManager& ppm,
+    const TemperatureBCAdapter& Tbc,
+    const PressureBCAdapter& Pbc,
+    const Vector& g,
+    int nSteps,
+    double dt,
+    const SolverControls& ctrl,
+    const std::vector<WellConfig>& wellsCfg_in,
+    int writeEveryP = 1,
+    int writeEveryT = 1,
+    const std::string& outPrefixP = "P_CO2_pTH/p",
+    const std::string& outPrefixT = "T_CO2_pTH/t",
+    Solver::Accel::OuterIterRuntime* runtimeIn = nullptr)
+{
+    if (dt <= 0.0) {
+        std::cerr << "[runTransient_accel] invalid dt.\n";
+        return false;
+    }
+
+#if __cplusplus >= 201703L
+    try {
+        std::filesystem::create_directories(std::filesystem::path(outPrefixP).parent_path());
+        std::filesystem::create_directories(std::filesystem::path(outPrefixT).parent_path());
+    }
+    catch (...) {
+        std::cerr << "[runTransient_accel] cannot create directory for: "
+            << outPrefixP << " or " << outPrefixT << "\n";
+        return false;
+    }
+#endif
+
+    Solver::Accel::OuterIterRuntime ownedRuntime;
+    Solver::Accel::OuterIterRuntime& runtime = runtimeIn ? *runtimeIn : ownedRuntime;
+    runtime.lastDt = dt;
+    Solver::Accel::ensureOuterRuntimeCapacity(mgr.mesh(), runtime);
+
+    double t = 0.0;
+    for (int step = 0; step < nSteps; ++step) {
+        const int step1 = step + 1;
+        t += dt;
+
+        runtime.lastDt = dt;
+        Solver::Accel::ensureOuterRuntimeCapacity(mgr.mesh(), runtime);
+
+        if (!startTimeStep_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev")) return false;
+        if (!startTimeStep_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev"))   return false;
+
+        bool ok = Solver::Accel::outerIter_constProperties_singlePhase_CO2_T_H_withWell_accel(
+            mgr, reg, freg, ppm, Tbc, Pbc, g, wellsCfg_in, dt, ctrl, runtime);
+        if (!ok) {
+            std::cerr << "[runTransient_accel] step " << step1 << " failed.\n";
+            return false;
+        }
+
+        const bool dumpP = (writeEveryP <= 0) || (step1 % writeEveryP == 0);
+        const bool dumpT = (writeEveryT <= 0) || (step1 % writeEveryT == 0);
+
+        if (dumpP) {
+            const std::vector<Vector> gradP =
+                computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, "p_g", /*smoothIters=*/0);
+            std::ostringstream fnP;
+            fnP << outPrefixP << "_step_" << std::setw(5) << std::setfill('0') << step1 << ".plt";
+            if (!outputTecplot_cellToFaceToNode_BC(
+                mgr, reg, freg, /*Tbc*/ nullptr, /*Pbc*/ &Pbc,
+                "p_g", "p_g_face_tmp", &gradP, fnP.str())) {
+                std::cerr << "[Transient_accel(P)] Tecplot export failed at step " << step1 << ".\n";
+                return false;
+            }
+        }
+
+        if (dumpT) {
+            const std::vector<Vector> gradT =
+                computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, "T", /*smoothIters=*/0);
+            std::ostringstream fnT;
+            fnT << outPrefixT << "_step_" << std::setw(5) << std::setfill('0') << step1 << ".plt";
+            if (!outputTecplot_cellToFaceToNode_BC(
+                mgr, reg, freg, /*Tbc*/ &Tbc, /*Pbc*/ nullptr,
+                "T", "T_face_tmp", &gradT, fnT.str())) {
+                std::cerr << "[Transient_accel(T)] Tecplot export failed at step " << step1 << ".\n";
+                return false;
+            }
         }
     }
     return true;

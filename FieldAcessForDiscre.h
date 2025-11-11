@@ -28,3 +28,5 @@ inline Vector cellVector(const FieldRegistry& reg, const Mesh& mesh,
 	if (it == mesh.getCellId2Index().end()) return fallback; // cellId not found
 	return (*fld)[it->second];
 }
+
+
