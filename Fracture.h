@@ -9,7 +9,7 @@
 #include "Fluid.h"
 #include "Matrix.h"
 #include "Mesh.h"
-#include "FractureTypes.h"
+#include "FractureSolidProperties.h "
 
 #pragma message("Fracture.h included!")
 
@@ -184,8 +184,6 @@ public:
     static bool lineSegmentIntersection(const Vector& p, const Vector& q, const Vector& r, const Vector& s, Vector& ip);
     
     void sortAndRenumberIntersections();
-
-    
 
 private:
     static double pointToSegmentDistance(const Vector& p, const Vector& s, const Vector& e);

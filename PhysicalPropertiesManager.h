@@ -2,9 +2,9 @@
 #include <vector>
 #include <unordered_map>
 #include <utility>
-#include "FractureTypes.h" // FractureElement::Type
 #include "Cell.h"  // for Cell::RegionType
 #include "PropertiesSummary.h"
+#include"FractureSolidProperties.h"
 #include "WaterPropertyTable.h"
 #include "CO2PropertyTable.h"
 #include "UserDefineVarType.h"  // for Vector
@@ -32,13 +32,6 @@ public:
 
 
 	//************固相物性参数初始化与更新************//
-    //// 1)【初始化】—在开始计算前根据初始的 P 和 T 初始化固相物性
-    //void InitializeRockMatrixProperties(MeshManager& mgr, FieldRegistry& reg_r);
-    //void InitializeFractureElementsProperties(MeshManager& mgr, FieldRegistry& reg_fr);
-
-    //// 2) 【更新】—每一时间步迭代结束后，根据最新的 P 和 T 更新固相物性
-    //void UpdateMatrixProperties(MeshManager& mgr, FieldRegistry& reg_r);
-    //void UpdateFractureSolidProperties(MeshManager& mgr, FieldRegistry& reg_fr);
 
 
     //【更新】更新基岩单元的分类（低/中/高渗透-孔隙）
@@ -55,16 +48,6 @@ public:
 
 
 	//**************流体物性参数初始化与更新**************//
-
- //   void InitializeMatrixFluidProperties(MeshManager& mgr,FieldRegistry& reg,const VGParams& vg);
-	//void InitializeFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg);
-
-
- //   void UpdateMatrixFluidProperties(MeshManager& mgr,FieldRegistry& reg,const VGParams& vg);
- //   void UpdateFractureFluidProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const VGParams& vg);
-
-
-    void MatrixFluidPropertiesTest(const double& T, const double& P);
 
 
 
@@ -106,10 +89,18 @@ public:
     void RockProperties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg);
 	void CO2Properties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg);
 
-
     //单相-CO2常物性-渗流传热补充函数
     void ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(MeshManager & mgr, FieldRegistry & reg);
 
+
+    //多相
+    void UpdateCO2inRockAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
+
+    void UpdateWaterinRockAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
+
+    void UpdateCO2inFractureAt(MeshManager& mgr, FieldRegistry& reg_fr, FieldRegistry& reg, const std::string& p_field_fr, const std::string& T_field_fr);
+
+    void UpdateWaterinFractureAt(MeshManager& mgr, FieldRegistry& reg_fr, FieldRegistry& reg, const std::string& p_field_fr, const std::string& T_field_fr);
 
 
 

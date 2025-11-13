@@ -73,6 +73,33 @@ struct Initializer
 		if (!reg.has("p_g")) reg.create<volScalarField>("p_g", n, 1e5);   //气相压力，Pa		
 	}
 
+	//===========================两相流 HT_IMPES=====================================//
+	static void createPrimaryFields_TwoPhase_HT_IMPES(Mesh& mesh, FieldRegistry& reg,
+		const std::string& pw_field = "p_w",
+		const std::string& sw_field = "s_w",
+		const std::string& T_field = "T")
+	{
+		const size_t n = mesh.getCells().size();
+		if (!reg.has(pw_field)) reg.create<volScalarField>(pw_field, n, 0);
+		if (!reg.has(sw_field)) reg.create<volScalarField>(sw_field, n, 0);
+		if (!reg.has(T_field)) reg.create<volScalarField>(T_field, n, 0);
+	}
+
+	static void fillBaseDistributions_TwoPhase_HT_IMPES(Mesh& mesh, FieldRegistry& reg, const InitFields& init)
+	{
+		auto p_w = reg.get<volScalarField>("p_w"); //水相压力，Pa
+		auto s_w = reg.get<volScalarField>("s_w");  //水相饱和度，1
+		auto T = reg.get<volScalarField>("T");		//温度，K
+		for (const auto& c : mesh.getCells())
+		{
+			const size_t i = mesh.getCellId2Index().at(c.id); //获取网格单元的内部下标
+			(*p_w)[i] = init.p_w0 + init.dp_wdx * c.center.m_x + init.dp_wdy * c.center.m_y + init.dp_wdz * c.center.m_z;
+			(*T)[i] = init.T0 + init.dTdx * c.center.m_x + init.dTdy * c.center.m_y + init.dTdz * c.center.m_z;
+			(*s_w)[i] = init.s_w;
+
+		}
+	}
+	//===============================================================================//
 
 
 	static void fillBaseDistributions_test_singlePhase_CO2_T_diffusion(Mesh& mesh, FieldRegistry& reg, const InitFields& init)
@@ -82,7 +109,7 @@ struct Initializer
 		for (const auto& c : mesh.getCells())
 		{
 			const size_t i = mesh.getCellId2Index().at(c.id); //获取网格单元的内部下标
-			(*p_g)[i] = init.p0 + init.dpdx * c.center.m_x + init.dpdy * c.center.m_y + init.dpdz * c.center.m_z;
+			(*p_g)[i] = init.p_w0 + init.dp_wdx * c.center.m_x + init.dp_wdy * c.center.m_y + init.dp_wdz * c.center.m_z;
 			(*T)[i] = init.T0 + init.dTdx * c.center.m_x + init.dTdy * c.center.m_y + init.dTdz * c.center.m_z;
 		}
 	}
@@ -93,7 +120,7 @@ struct Initializer
 		for (const auto& c : mesh.getCells())
 		{
 			const size_t i = mesh.getCellId2Index().at(c.id); //获取网格单元的内部下标
-			(*p_g)[i] = init.p0 + init.dpdx * c.center.m_x + init.dpdy * c.center.m_y + init.dpdz * c.center.m_z;
+			(*p_g)[i] = init.p_w0 + init.dp_wdx * c.center.m_x + init.dp_wdy * c.center.m_y + init.dp_wdz * c.center.m_z;
 		}
 	}
 
@@ -117,9 +144,9 @@ struct Initializer
 		for (const auto& c : mesh.getCells())
 		{
 			const size_t i = mesh.getCellId2Index().at(c.id); //获取网格单元的内部下标
-			(*p_w)[i] = init.p0 + init.dpdx * c.center.m_x+ init.dpdy * c.center.m_y + init.dpdz * c.center.m_z;
+			(*p_w)[i] = init.p_w0 + init.dp_wdx * c.center.m_x+ init.dp_wdy * c.center.m_y + init.dp_wdz * c.center.m_z;
 			(*T)[i] = init.T0 + init.dTdx * c.center.m_x + init.dTdy * c.center.m_y + init.dTdz * c.center.m_z;
-			(*S_w)[i] = init.sw0;
+			(*S_w)[i] = init.s_w;
 
 		}
 	}

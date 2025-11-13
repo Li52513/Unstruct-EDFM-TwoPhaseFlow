@@ -17,26 +17,39 @@ struct WaterProperties
     double cv = 0.0;
     double k = 0.0;
     double h = 0.0;
+    double dRho_dP = 0.0;
 };
-using CO2Properties = WaterProperties;  // 字段完全一致
+
+struct CO2Properties
+{
+    double rho = 0.0;
+    double mu = 0.0;
+    double cp = 0.0;
+    double cv = 0.0;
+    double k = 0.0;
+    double h = 0.0;
+    double dRho_dP = 0.0;
+};
 
 struct SolidProperties_RockMatrix 
 {
-    double porosity=0.0;
-    double permeability = 0.0;
+    double phi_r=0.0;
+    double kxx = 0.0;
+    double kyy = 0.0;
+    double kzz = 0.0;
     double compressibility = 0.0;
-    double rho_s = 0.0;
-    double cp_s = 0.0;
-    double k_s = 0.0;
+    double rho_r = 0.0;
+    double cp_r = 0.0;
+    double k_r = 0.0;
 };
 
 struct SolidProperties_Frac 
 {
-    double porosity = 0.0;
+    double phi_f= 0.0;
     double permeability = 0.0;
     double compressibility = 0.0;
     double aperture = 0.0;
-    double rho_s = 0.0;
-    double cp_s = 0.0;
-    double k_s = 0.0;
+    double rho_f = 0.0;
+    double cp_f = 0.0;
+    double k_f = 0.0;
 };

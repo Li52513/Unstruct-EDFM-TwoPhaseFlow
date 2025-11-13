@@ -228,8 +228,8 @@ void build_well_mask_and_PI
     }
 
     // 4) ’Ô∂œ
-    std::cout << "[Peaceman][" << mask_name << "] perfs=" << perf.size()
-        << ", sum(WI)=" << WI_total
-        << ", PI_is_mass=" << (prm.PI_is_mass ? "true" : "false")
-        << ", reFactor=" << prm.reFactor << "\n";
+    //std::cout << "[Peaceman][" << mask_name << "] perfs=" << perf.size()
+    //    << ", sum(WI)=" << WI_total
+    //    << ", PI_is_mass=" << (prm.PI_is_mass ? "true" : "false")
+    //    << ", reFactor=" << prm.reFactor << "\n";
 }

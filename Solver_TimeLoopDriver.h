@@ -301,18 +301,20 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell_accel(
     Solver::Accel::ensureOuterRuntimeCapacity(mgr.mesh(), runtime);
 
     double t = 0.0;
+    double dt_step = dt;
     for (int step = 0; step < nSteps; ++step) {
         const int step1 = step + 1;
-        t += dt;
+        const double dt_this = dt_step;
+        t += dt_this;
 
-        runtime.lastDt = dt;
+        runtime.lastDt = dt_this;
         Solver::Accel::ensureOuterRuntimeCapacity(mgr.mesh(), runtime);
 
         if (!startTimeStep_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev")) return false;
         if (!startTimeStep_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev"))   return false;
 
         bool ok = Solver::Accel::outerIter_constProperties_singlePhase_CO2_T_H_withWell_accel(
-            mgr, reg, freg, ppm, Tbc, Pbc, g, wellsCfg_in, dt, ctrl, runtime);
+            mgr, reg, freg, ppm, Tbc, Pbc, g, wellsCfg_in, dt_this, ctrl, runtime);
         if (!ok) {
             std::cerr << "[runTransient_accel] step " << step1 << " failed.\n";
             return false;
@@ -344,6 +346,34 @@ inline bool runTransient_constProperties_singlePhase_CO2_T_H_withWell_accel(
                 "T", "T_face_tmp", &gradT, fnT.str())) {
                 std::cerr << "[Transient_accel(T)] Tecplot export failed at step " << step1 << ".\n";
                 return false;
+            }
+        }
+
+        if (ctrl.enable_dt_adapt) {
+            double cfl = std::max(0.0, runtime.lastCFL_T);
+            double target = (ctrl.dt_adapt_CFL_target > 0.0) ? ctrl.dt_adapt_CFL_target : ctrl.CFL_T_threshold;
+            double hyst = std::max(0.0, ctrl.dt_adapt_CFL_hysteresis);
+            double lower = target * std::max(0.0, 1.0 - hyst);
+            double upper = target * (1.0 + hyst);
+            double newDt = dt_this;
+            bool changed = false;
+
+            if (cfl > upper && ctrl.dt_adapt_shrink > 0.0 && ctrl.dt_adapt_shrink < 1.0) {
+                newDt = dt_this * ctrl.dt_adapt_shrink;
+                changed = true;
+            }
+            else if (cfl > 0.0 && cfl < lower && ctrl.dt_adapt_grow > 1.0) {
+                newDt = dt_this * ctrl.dt_adapt_grow;
+                changed = true;
+            }
+
+            newDt = std::min(std::max(newDt, ctrl.dt_min), ctrl.dt_max);
+            dt_step = newDt;
+
+            if (ctrl.reportPerIter && changed) {
+                std::cout << "[dt-adapt] step " << step1
+                    << "  maxCFL_T=" << cfl
+                    << "  dt: " << dt_this << " -> " << dt_step << "\n";
             }
         }
     }

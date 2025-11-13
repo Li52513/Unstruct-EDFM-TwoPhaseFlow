@@ -180,6 +180,14 @@ struct SolverControls
 	double CFL_T_threshold = 0.7;
 	double CFL_dt_scale_min = 0.2;
 
+	// 时间步自适应 (基于 CFL)
+	bool   enable_dt_adapt = true;
+	double dt_adapt_CFL_target = 0.6;
+	double dt_adapt_CFL_hysteresis = 0.3;
+	double dt_adapt_grow = 1;
+	double dt_adapt_shrink = 0.5;
+	double dt_min = 1e-3;
+	double dt_max = 1e6;
 };
 
 

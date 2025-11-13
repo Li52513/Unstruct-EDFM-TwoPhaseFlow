@@ -16,8 +16,8 @@ struct VGParams  //VG模型参数 Se=(1+（alpha*P）^n)^(-m) 表征毛细压力
 	double alpha = 1.0 / 5e4;  // [1/Pa] 例：5e4 Pa 尺度
 	double n = 2.0;            // 无量纲
 	double m() const { return 1.0 - 1.0 / n; }
-	double Swr = 0.2;       // 残余水
-	double Sgr = 0.0;       // 残余气（CO2）
+	double Swr = 0.25;       // 残余水
+	double Sgr = 0.05;       // 残余气（CO2）
 
 };
 
@@ -41,17 +41,17 @@ struct RockDefaults  //当前已经进行了分区处理
 struct InitFields
 {
 	//基础场：uniform+线性梯度（可都为0）
-	double p0 = 6e6; //基岩内部初始水相压力，单位 Pa
-	double dpdx = 0.0; //基岩压力梯度，单位 Pa/m
-	double dpdy = 0.0; //基岩压力梯度，单位 Pa/m
-	double dpdz = 0.0; //基岩压力梯度，单位 Pa/m
+	double p_w0 = 6e6; //基岩内部初始水相压力，单位 Pa
+	double dp_wdx = 0.0; //基岩压力梯度，单位 Pa/m
+	double dp_wdy = 0.0; //基岩压力梯度，单位 Pa/m
+	double dp_wdz = 0.0; //基岩压力梯度，单位 Pa/m
 
 	double T0 = 573.15; //基岩初始温度，单位 K
 	double dTdx = 0.0; //基岩温度梯度，单位 K/m
 	double dTdy = 0.0; //基岩温度梯度，单位 K/m
 	double dTdz = 0.0; //基岩温度梯度，单位 K/m
 
-	double sw0 = 0.9; //基岩初始水相饱和度 (最好等于1-Sgr)
+	double s_w = 0.9; //基岩初始水相饱和度 (最好等于1-Sgr)
 
 };
 

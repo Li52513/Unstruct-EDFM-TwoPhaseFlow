@@ -90,20 +90,6 @@ namespace TemperatureBC
 		reg.addBoundaryCoefficientValue(G.z0, front);
 		reg.addBoundaryCoefficientValue(G.zL, back);
 	}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
 
 

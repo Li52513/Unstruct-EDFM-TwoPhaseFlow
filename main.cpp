@@ -22,6 +22,7 @@
 #include "FVM_WellDOF.h"
 #include "FVM_Peaceman.h"
 #include "WellConfig.h"
+#include "MultiPhaseProperties.h"
 
 
 //int main1()
@@ -682,7 +683,7 @@
 //}
 
 //实现CO2单相-常物性-渗流传热控制方程的离散与求解
-int main()
+int main000000000000()
 {
     
     //定义几何区域参数
@@ -795,13 +796,13 @@ int main()
 
 }
 
-//实现CO2单相-常物性-渗流传热带井源控制方程的离散与求解
-int main00000000000000()
+//实现CO2单相-常物性-渗流传热带井源控制方程的离散与求解 不带裂缝
+int main00000000000()
 {
     //定义几何区域参数
     double lengthX = 1, lengthY = 1, lengthZ = 0;
     //确定网格划分策略及参数
-    int sectionNumX = 30, sectionNumY = 30, sectionNumZ = 0;
+    int sectionNumX = 20, sectionNumY = 20, sectionNumZ = 0;
     bool usePrism = true;       ///  3D情况usePrism=true 进行“扫掠 ”；
     bool useQuadBase = false;    /// 在 2D 情况：false 为非结构化三角, true  为非结构化四边形； 在 3D 扫掠模式：仅用来选择底面网格类型
 
@@ -841,7 +842,7 @@ int main00000000000000()
     PressureBC::BoundaryCoefficient P_Right{ 0.0,1.0,0.0 };
     PressureBC::BoundaryCoefficient P_Down{ 0.0,1.0,0.0 };
     PressureBC::BoundaryCoefficient P_Up{ 0.0,1.0,0.0 };
-    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);   //按照左 右 下 上 的顺序赋值
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);   //按照左 右 下 上 的顺序赋值，3D是按照左右 下上 前后的顺序
     pbc_pw.printInformationofBoundarySetting(mgr);
     PressureBCAdapter PbcA{ pbc_pw };
 
@@ -917,8 +918,6 @@ int main00000000000000()
     prod1.derive_names_if_empty();             // mask_prod_1 / PI_prod_1 / p_w_prod_1
     wellsCfg.push_back(prod1);
 
-
-
     // —— 生成掩码与 PI（每井一组字段） —— //
     build_masks_and_PI_for_all(mgr, reg, wellsCfg);
 
@@ -927,42 +926,82 @@ int main00000000000000()
     std::vector<WellDOF> wells;
     const int Ntot = register_well_dofs_for_all(Nc, wellsCfg, wells);
 
-     // 6) 求解器与时间推进设置
+    // 6) 求解器与时间推进设置
     Vector g = { 0.0, 0.0, 0.0 };
 
     SolverControls sc;
-    sc.maxOuter = 300;
-
-    // 压力
-    sc.tol_p_abs = 1e-6;     // 绝对容差（Pa）
-    sc.tol_p_rel = 1e-6;     // 相对容差
-    sc.urf_p = 0.20;     // 欠松弛
-    sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB;
-    sc.lin_p.maxIters = 5000;
-    sc.lin_p.tol = sc.tol_p_abs;
-    sc.lin_p.iluFill = 10;
-    sc.lin_p.iluDrop = 1e-4;
-
-    // 温度
-    sc.tol_T_abs = 1e-10;
-    sc.tol_T_rel = 1e-6;
-    sc.urf_T = 0.25;
-    sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
-    sc.lin_T.maxIters = 5000;
-    sc.lin_T.tol = sc.tol_T_abs;
-    sc.lin_T.iluFill = 10;
-    sc.lin_T.iluDrop = 1e-4;
-
+    sc.maxOuter = 200;              // 允许的最大外迭代
     sc.useJacobi = false;
 
+    // —— 压力收敛与线性求解 —— //
+    sc.tol_p_abs = 1e-6;
+    sc.tol_p_rel = 1e-6;
+    sc.urf_p = 0.35;
 
-    // 时间步
-    int    nSteps = 10;
-    double dt = 1000 / nSteps;
+    sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB;
+    sc.lin_p.maxIters = 4000;
+    sc.lin_p.tol = sc.tol_p_abs;
+    sc.lin_p.iluFill = 15;
+    sc.lin_p.iluDrop = 5e-5;
+
+    // —— 温度收敛与线性求解 —— //
+    sc.tol_T_abs = 1e-8;
+    sc.tol_T_rel = 1e-6;
+    sc.urf_T = 1;
+
+    sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
+    sc.lin_T.maxIters = 4000;
+    sc.lin_T.tol = sc.tol_T_abs;
+    sc.lin_T.iluFill = 25;
+    sc.lin_T.iluDrop = 1e-5;
+
+    // —— Step 1/3: 压力子循环与增量通量控制 —— //
+    sc.NsweepP_max = 3;       // 每次外迭代内的压力子扫上限
+    sc.tol_p_inner = 2e-7;    // 子扫提前退出阈值
+    sc.enable_incremental_convection = false;
+    sc.kappa_p_for_flux_update = 0.5;   // 压力进度阈值
+    sc.incremental_flip_ratio = 0.02;    // 面符号翻转占比阈值
+    sc.flux_sign_epsilon = 1e-14;
+
+    // —— Step 4: Aitken 加速 —— //
+    sc.enable_Aitken_p = true;
+    sc.enable_Aitken_T = true;
+    sc.aitken_omega_min = 0.05;
+    sc.aitken_omega_max = 1.10;
+
+    // —— Step 5: 线性求解器复用 —— //
+    sc.reuse_linear_pattern = true;
+    sc.rebuild_precond_every = 3;    // 每 3 次子扫刷新一次 ILUT 预条件器
+
+    // —— Step 6: CFL Guard —— //
+    sc.enable_CFL_guard = true;
+    sc.CFL_T_threshold = 0.8;      // 若 maxCFL_T > 0.8 即触发子步
+    sc.CFL_dt_scale_min = 0.25;     // 子步时间不得小于 0.25*dt
+
+    // —— 时间步 —— //
+    const int    nSteps = 100;
+    const double dt = 1000.0 / nSteps;
 
     bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell(mgr, reg, freg, ppm, TbcA, PbcA, g, nSteps, dt, sc, wellsCfg, 1, 1, "./Postprocess_Data/P_CO2_withWell_rate/p", "./Postprocess_Data/T_CO2_withWell_rate/T");
+    // —— 调用加速版时间推进 —— //
+    //bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell_accel(
+    //    mgr, reg, freg, ppm,
+    //    TbcA, PbcA, g,
+    //    nSteps, dt,
+    //    sc, wellsCfg,
+    //    /*writeEveryP*/ 1,
+    //    /*writeEveryT*/ 1,
+    //    "./Postprocess_Data/P_CO2_accel/p",
+    //    "./Postprocess_Data/T_CO2_accel/T",
+    //    /*runtimeIn*/ nullptr   // 若想跨步复用，可传入持久化的 OuterIterRuntime
+    //);
 
+    if (!ok) {
+        std::cerr << "[MAIN] Accelerated transient run failed.\n";
+        return 1;
+    }
 
+    std::cout << "[MAIN] Accelerated run finished.\n";
     return 0;
 }
 
@@ -970,6 +1009,205 @@ int main00000000000000()
 
 
 
+/// <summary>
+/// /2D_TwoPhase_TH_constProperties_FVM test
+/// </summary>
+/// <returns></returns>
+
+int main()
+{
+    //定义几何区域参数
+    double lengthX = 100, lengthY = 100, lengthZ = 0;
+    //确定网格划分策略及参数
+    int sectionNumX = 5, sectionNumY = 5, sectionNumZ = 0;
+    bool usePrism = true;       ///  3D情况usePrism=true 进行“扫掠 ”；
+    bool useQuadBase = false;    /// 在 2D 情况：false 为非结构化三角, true  为非结构化四边形； 在 3D 扫掠模式：仅用来选择底面网格类型
+
+    // 1) 构造并预处理网格
+    cout << "--- Step 1: Building and Pre-processing Mesh ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ, sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection); //这里输入面法矢量修正方法；其中MinimumCorrection-最小修正值法；OrthogonalCorrection-正交修正法；OverRelaxed-超松弛修正法  当前三维几何还不能计算几何和非正交性
+
+    // 2) 网格单元场和网格面场注册
+    cout << "--- Step 2: Registering Field Registries ---\n";
+    FieldRegistry reg;
+    FaceFieldRegistry freg;
+
+    //3) 给定地层初始参数
+    cout << "--- Step 3: Setting Initial Conditions ---\n";
+    InitFields ic;
+    {
+        //==压力==//
+        ic.p_w0 = 1e7;
+        ic.dp_wdx = 0;
+        ic.dp_wdy = 0;
+        ic.dp_wdz = 0;
+
+        //==温度==//
+        ic.T0 = 593.15;
+        ic.dTdx = 0;
+        ic.dTdy = 0;
+        ic.dTdz = 0;
+
+        //==初始水相饱和度==//
+        ic.s_w = 0.8;   //水相初始饱和度
+    }
+
+    //4.1) 基岩主变量场注册名称
+    {
+        cout << "--- Step 4.1: Creating and Initializing Primary Variable Fields ---\n";
+        Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg,"p_w","s_w","T");
+        Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+    }
+
+    //4.2) 时层拷贝
+    cout << "--- Step 4.2: Ensuring Transient Fields (old, prev) ---\n";
+    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+  
+
+    // 5) 物性参数设置
+    PhysicalPropertiesManager ppm;
+    {
+        // 5.1) 基岩区域划分及基岩物性参数初始化，定物性参数工况
+        cout << "  - Updating Matrix Rock Properties...\n";
+        {
+            ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+            ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+        }
+
+        // 5.2)裂缝区域划分及裂缝物性参数初始化,函数已给出，这里先不调用，因为还没有裂缝 的主变量场
+        {
+
+        }
+
+        //5.3) 基岩内流体物性参数初始化
+        cout << "  - Updating Fluid Properties in Rock...\n";
+        {
+            // 在计算流体物性前，需要有 p_g 场。p_g 是由 updateRockTwoPhaseProperties_IMPES 计算的
+            // 因此，我们先进行一次初步的两相属性计算，以获得初始的 p_g 场
+            VGParams temp_vg_params; // 临时参数，仅为获得p_g
+            temp_vg_params.Swr = 0.25; temp_vg_params.Sgr = 0.05;
+            temp_vg_params.alpha = 2.0e-6; temp_vg_params.n = 2.5;
+            RelPermParams temp_rp_params; temp_rp_params.L = 0.5;
+            multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, temp_vg_params, temp_rp_params);
+           
+            //CO2
+            ppm.UpdateCO2inRockAt(mgr, reg, "p_w", "T");
+
+            //water
+            ppm.UpdateWaterinRockAt(mgr, reg, "p_w", "T");
+        }
+
+
+        //5.4) 裂缝内流体物性参数初始化
+        {
+            //CO2 函数已内置，由于还没有裂缝 的主变量场这里不计算
+
+            //water 函数已内置，由于还没有裂缝 的主变量场这里不计算
+        }
+    }
+        
+
+    // 6) 两相参数计算及有效热物性参数计算
+    cout << "\n--- Step 6: Two-Phase & Effective Property Calculation ---\n";
+    {
+        // 6.1) 定义两相流模型参数 (VG & Mualem)
+        // 这些参数通常与岩石类型相关，后续可以扩展为按区域赋值
+        VGParams vg_rock_params;
+        vg_rock_params.Swr = 0.25;      // 水相残余饱和度
+        vg_rock_params.Sgr = 0.05;      // 气相残余饱和度
+        vg_rock_params.alpha = 2.0e-6;  // Van Genuchten alpha (进气压力相关), [1/Pa]
+        vg_rock_params.n = 2.5;         // Van Genuchten n (孔隙尺寸分布指数)
+        
+        RelPermParams rp_rock_params;
+        rp_rock_params.L = 0.5;         // Mualem 模型孔隙连通性参数
+
+        // 6.2) 计算基岩的派生两相属性
+        // 这个函数会根据主变量 s_w 和 p_w，以及基础物性，计算出基岩内的 Pc, p_g, k_r, lambda 等场
+
+        bool ok = multiPhase::updateRockTwoPhaseProperties_IMPES( mgr,reg,vg_rock_params,rp_rock_params);
+
+        if (ok)
+        {
+            auto pc_field = reg.get<volScalarField>("Pc");
+            auto pg_field = reg.get<volScalarField>("p_g");
+            auto krw_field = reg.get<volScalarField>("k_rw");
+
+            if (pc_field && pg_field && krw_field && mgr.mesh().getCells().size() > 5)
+            {
+                cout << "==========================================================================" << endl;
+                cout << "  - Check cell 5: Pc = " << (*pc_field)[5] << " Pa, p_g = " << (*pg_field)[5] << " Pa, k_rw = " << (*krw_field)[5] << std::endl;
+                cout << "  - Check cell 10: Pc = " << (*pc_field)[10] << " Pa, p_g = " << (*pg_field)[10] << " Pa, k_rw = " << (*krw_field)[10] << std::endl;
+                cout << "  - Check cell 15: Pc = " << (*pc_field)[15] << " Pa, p_g = " << (*pg_field)[15] << " Pa, k_rw = " << (*krw_field)[15] << std::endl;
+                cout << "==========================================================================" << endl;
+            }
+        }
+        else
+        {
+            cerr << "ERROR: Failed to update two-phase properties for the rock matrix. Aborting.\n";
+            return -1; // 返回错误码
+        }
+        // 6.3) 裂缝的两相属性计算 (当前未激活)
+        {
+            // VGParams vg_frac_params = ... ;
+            // RelPermParams rp_frac_params = ... ;
+            // multiPhase::updateFractureTwoPhaseProperties_IMPES(mgr, reg_fr, vg_frac_params, rp_frac_params);
+        }
+    }
+
+    // 7) 边界条件设置
+    cout << "\n--- Step 7: Setting Boundary Conditions and Source Terms ---\n";
+    {
+        // 7.1) 获取边界面的分组信息
+        const auto& bfaces = mgr.boundaryFaces();
+
+        // 7.2) 压力边界条件 (p_w)
+        PressureBC::Registry pbc_pw;
+        PressureBC::BoundaryCoefficient P_Left{ 0.0,1.0,0.0 };
+        PressureBC::BoundaryCoefficient P_Right{ 0.0,1.0,0.0 };
+        PressureBC::BoundaryCoefficient P_Down{ 0.0,1.0,0.0 };
+        PressureBC::BoundaryCoefficient P_Up{ 0.0,1.0,0.0 };
+        PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);   //按照左 右 下 上 的顺序赋值，3D是按照左右 下上 前后的顺序
+        pbc_pw.printInformationofBoundarySetting(mgr);
+        
+        pbc_pw.printInformationofBoundarySetting(mgr);
+
+        // 创建压力边界条件适配器，供求解器使用
+        PressureBCAdapter PbcA{ pbc_pw };
+
+        // /  温度边界条件设置
+        TemperatureBC::Registry tbc;
+        TemperatureBC::BoundaryCoefficient T_Left{ 0.0,1.0,0.0 };
+        TemperatureBC::BoundaryCoefficient T_Right{ 0.0,1.0,0.0 };
+        TemperatureBC::BoundaryCoefficient T_Down{ 0.0,1.0,0.0 };
+        TemperatureBC::BoundaryCoefficient T_Up{ 0.0,1.0,0.0 };
+        TemperatureBC::setBoxBCs2D(tbc, bfaces, T_Left, T_Right, T_Down, T_Up);
+        tbc.printInformationofBoundarySetting(mgr);
+        
+        tbc.printInformationofBoundarySetting(mgr);
+        
+        // 创建温度边界条件适配器，供求解器使用
+        TemperatureBCAdapter TbcA{ tbc };
+
+    }
+
+    // 8）注入井和采出井设置
+
+     
+
+    
+
+
+
+
+
+
+
+    return 0;
+
+}
 
 
 
