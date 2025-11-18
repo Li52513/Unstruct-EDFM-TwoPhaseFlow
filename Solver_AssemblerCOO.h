@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <cctype>
 #include <algorithm>
+
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
@@ -26,12 +27,20 @@ struct SparseSystemCOO
         if (reserveA) A.reserve(reserveA);
     }
 
+    void expandTo(int new_n)
+    {
+        if (new_n <= n) return;
+        b.resize(new_n, 0.0);
+        n = new_n;
+    }
+
     inline void addA(int r, int c, double v) 
     {
         if (v == 0.0) return;
         assert(r >= 0 && r < n && c >= 0 && c < n);
         A.push_back({ r,c,v });
     }
+
     inline void addb(int r, double v) 
     {
         if (v == 0.0) return;
@@ -103,6 +112,8 @@ inline std::vector<int> buildUnknownMap(Mesh& mesh, int& nUnknowns)
 		lid_of_cell[i] = nUnknowns++;
 		//cout << "  方程自由度编号: " << lid_of_cell[i] << endl;
 	}
+
+
 	return lid_of_cell;
 }
 
@@ -154,12 +165,12 @@ inline OperatorFieldNames makeNames(const std::string& tag)
 // —— 常用别名 —— 
 inline OperatorFieldNames makeNames_pCO2() { return makeNames("p_g"); }
 inline OperatorFieldNames makeNames_pH2O() { return makeNames("p_w"); }
-inline OperatorFieldNames makeNames_Sw() { return makeNames("Sw"); }
+inline OperatorFieldNames makeNames_Sw() { return makeNames("s_w"); }
 inline OperatorFieldNames makeNames_T() { return makeNames("T"); }
 inline OperatorFieldNames makeNames_pfCO2() { return makeNames("pf_g"); }
 inline OperatorFieldNames makeNames_pfH2O() { return makeNames("pf_w"); }
 inline OperatorFieldNames makeNames_Tf() { return makeNames("Tf"); }
-inline OperatorFieldNames makeNames_Swf() { return makeNames("Swf"); }
+inline OperatorFieldNames makeNames_Swf() { return makeNames("s_w_f"); }
 
 
 // ===== 把字符串表达式解析成位掩码 =====

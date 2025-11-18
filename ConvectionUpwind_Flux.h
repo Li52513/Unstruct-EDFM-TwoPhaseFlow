@@ -96,9 +96,6 @@ namespace FVM {
             const std::string& Qf_name = "Qf",
             const std::string& ufn_name = "ufn",
             const PressureBCAdapter * bc = nullptr);
-
-
-
     }
 
 }

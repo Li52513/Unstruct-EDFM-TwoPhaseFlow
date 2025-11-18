@@ -32,6 +32,14 @@ struct WellDOF_TwoPhase {
                                                 // s_w_bh = 0.0 for pure CO2 injection
                                                 // 0 < s_w_bh < 1 for mixed-phase injection
 
+     // --- Fluid properties of the injected fluid ---
+    double mu_w_inj = 3e-4;                   // Viscosity of injected water at wellbore conditions [Pa，s]
+    double mu_g_inj = 1.5e-5;                 // Viscosity of injected CO2 at wellbore conditions [Pa，s]
+    double rho_w_inj = 980.0;                 // Density of injected water [kg/m^3]
+    double rho_g_inj = 700.0;                 // Density of injected CO2 [kg/m^3]
+    double cp_w_inj = 4200.0;                 // Heat capacity of injected water [J/(kg，K)]
+    double cp_g_inj = 1200.0;                 // Heat capacity of injected CO2 [J/(kg，K)]
+
     // --- Internal fields for solver linkage ---
     std::string mask_field;                   // Field name for the well's perforation mask (e.g., "mask_INJ1")
     std::string PI_field_w;                   // Field name for the WATER phase productivity index (e.g., "PI_w_INJ1")

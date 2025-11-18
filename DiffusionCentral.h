@@ -14,7 +14,8 @@
 #include "Diff_TPFA_PermeabilityOperation.h"
 #include "Diff_TPFA_GradientsOperation.h"
 
-namespace FVM {
+namespace FVM 
+{
     namespace Diffusion 
     {
 
@@ -36,7 +37,8 @@ namespace FVM {
         }
         // ---------------------------------------------------------------------------
 
-        struct ParsedMobility {
+        struct ParsedMobility 
+        {
             std::string iso;                    // 各向同性迁移率参数
             std::string kxx, kyy, kzz;          // 各向异性迁移率参数（x,y,z方向）
             std::vector<std::string> mul, div;  // 乘法（除法）因子列表
@@ -89,7 +91,7 @@ namespace FVM {
             RhoFaceMethod rho_method,
             const Vector& g,
             const BCProvider& bc,
-            bool enable_buoy = true,
+            bool enable_buoy =false,
             int  gradSmoothIters = 0)
         {
             Mesh& mesh = const_cast<Mesh&>(mgr.mesh());

@@ -50,9 +50,5 @@ struct FieldRegistry
         fields[name] = f;
         return f;
     }
-
-
-
-
 };
 

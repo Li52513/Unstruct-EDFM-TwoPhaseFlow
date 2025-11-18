@@ -601,53 +601,53 @@ inline void buildEvalFields(
     }
 }
 
-
-inline void build_dirichlet_T_targets(
-    MeshManager& mgr,
-    const TemperatureBCAdapter& Tbc,
-    std::vector<char>& mask_dirichlet_cell,   // out: 1 表示该 cell 需要强制钉扎
-    std::vector<double>& T_target_cell        // out: 目标温度 T_b（面积加权）
-) {
-    auto& mesh = mgr.mesh();
-    const auto& faces = mesh.getFaces();
-    const auto& id2idx = mesh.getCellId2Index();
-    const auto& cells = mesh.getCells();
-
-    mask_dirichlet_cell.assign(cells.size(), 0);
-    T_target_cell.assign(cells.size(), 0.0);
-
-    // 面积加权
-    std::vector<double> sumA(cells.size(), 0.0), sumAT(cells.size(), 0.0);
-
-    for (const auto& F : faces) {
-        if (!F.isBoundary()) continue;
-
-        double a = 0, b = 0, c = 0;
-        if (!Tbc.getABC(F.id, a, b, c)) continue;
-        if (std::abs(a) <= 1e-30) continue;            // 非 Dirichlet/Robin
-
-        const double Tb = c / a;                       // 面上温度
-        Vector A; double Aabs;
-        A = F.vectorE + F.vectorT;
-        Aabs = A.Mag(); if (Aabs <= 0) Aabs = 0.0;
-
-        const int P = F.ownerCell;
-        if (P < 0) continue;
-        const size_t iP = id2idx.at(P);
-
-        sumA[iP] += Aabs;
-        sumAT[iP] += Aabs * Tb;
-    }
-
-    for (const auto& c : cells) {
-        if (c.id < 0) continue;
-        const size_t i = id2idx.at(c.id);
-        if (sumA[i] > 0.0) {
-            mask_dirichlet_cell[i] = 1;
-            T_target_cell[i] = sumAT[i] / sumA[i];     // 面积加权平均 Tb
-        }
-    }
-}
+//
+//inline void build_dirichlet_T_targets(
+//    MeshManager& mgr,
+//    const TemperatureBCAdapter& Tbc,
+//    std::vector<char>& mask_dirichlet_cell,   // out: 1 表示该 cell 需要强制钉扎
+//    std::vector<double>& T_target_cell        // out: 目标温度 T_b（面积加权）
+//) {
+//    auto& mesh = mgr.mesh();
+//    const auto& faces = mesh.getFaces();
+//    const auto& id2idx = mesh.getCellId2Index();
+//    const auto& cells = mesh.getCells();
+//
+//    mask_dirichlet_cell.assign(cells.size(), 0);
+//    T_target_cell.assign(cells.size(), 0.0);
+//
+//    // 面积加权
+//    std::vector<double> sumA(cells.size(), 0.0), sumAT(cells.size(), 0.0);
+//
+//    for (const auto& F : faces) {
+//        if (!F.isBoundary()) continue;
+//
+//        double a = 0, b = 0, c = 0;
+//        if (!Tbc.getABC(F.id, a, b, c)) continue;
+//        if (std::abs(a) <= 1e-30) continue;            // 非 Dirichlet/Robin
+//
+//        const double Tb = c / a;                       // 面上温度
+//        Vector A; double Aabs;
+//        A = F.vectorE + F.vectorT;
+//        Aabs = A.Mag(); if (Aabs <= 0) Aabs = 0.0;
+//
+//        const int P = F.ownerCell;
+//        if (P < 0) continue;
+//        const size_t iP = id2idx.at(P);
+//
+//        sumA[iP] += Aabs;
+//        sumAT[iP] += Aabs * Tb;
+//    }
+//
+//    for (const auto& c : cells) {
+//        if (c.id < 0) continue;
+//        const size_t i = id2idx.at(c.id);
+//        if (sumA[i] > 0.0) {
+//            mask_dirichlet_cell[i] = 1;
+//            T_target_cell[i] = sumAT[i] / sumA[i];     // 面积加权平均 Tb
+//        }
+//    }
+//}
 
 
 

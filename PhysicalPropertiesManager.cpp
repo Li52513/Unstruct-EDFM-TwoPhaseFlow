@@ -844,7 +844,7 @@ void PhysicalPropertiesManager::ComputeMatrixEffectiveThermalsAt( MeshManager& m
 	const size_t n = cells.size();
 
 	// 岩石参数（必须存在）
-	auto phiF = reg.get<volScalarField>("phi");
+	auto phiF = reg.get<volScalarField>("phi_r");
 	auto rrF = reg.get<volScalarField>("rho_r");
 	auto cprF = reg.get<volScalarField>("cp_r");
 	auto lamrF = reg.get<volScalarField>("lambda_r");

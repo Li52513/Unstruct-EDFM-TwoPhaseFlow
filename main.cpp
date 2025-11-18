@@ -1,4 +1,7 @@
-﻿#include <chrono>
+#include <chrono>
+#include <algorithm>
+#include <string>
+#include <vector>
 #include <iostream>
 #include "Mesh.h"
 #include "FractureNetwork.h"
@@ -12,16 +15,24 @@
 #include "Diff_TPFA_Operators.h"
 #include "TemperatureBC.h"
 #include "TemperatureBCAdapter.h"
+#include "BCAdapter.h"
 #include "Conv_FirstOrder_Operators.h"
 #include "TimeIterm_Euler_SinglePhase_PressureEq.h"
 #include "TimeIterm_Euler_SinglePhase_TemperatureEq.h"
 #include "Solver_TimeLoopDriver.h"
+#include "Solver_TimeLoopDriver_IMPES.h"
 #include "Solver_TimeLoopUtils.h" 
-#include "FVM_SourceTerm_InjectionMask.h"
-#include "FVM_SourceTerm_PeacemanModel.h"
+
+//#include "FVM_SourceTerm_InjectionMask.h"
+//#include "FVM_SourceTerm_PeacemanModel.h"
+
 #include "FVM_WellDOF.h"
 #include "FVM_Peaceman.h"
 #include "WellConfig.h"
+
+#include "WellConfig_TwoPhase.h"
+
+
 #include "MultiPhaseProperties.h"
 
 
@@ -251,7 +262,7 @@
 //        ensureFracCouplingFields(reg_fr, Nseg); // 创建 CIw / CIg
 //    }
 //    
-//    // 2) 计算 CI（矩阵↔裂缝）
+//    // 2) 计算 CI（矩阵?裂缝）
 //    {
 //        bool upwind = true;            // 采用迎风（按相位势比较）
 //        bool include_gravity = false;  // 2D 平面暂不考虑重力项；需要的话置 true
@@ -259,7 +270,7 @@
 //        updateMatrixFractureCI(mgr, reg, reg_fr, vg, upwind, include_gravity, g);
 //    }
 //
-//    // 3) 计算 TI（裂缝↔裂缝，多臂交点 Star–Delta）
+//    // 3) 计算 TI（裂缝?裂缝，多臂交点 Star–Delta）
 //    {
 //        bool include_gravity = false;
 //        double g = 9.80665;
@@ -1014,7 +1025,7 @@ int main00000000000()
 /// </summary>
 /// <returns></returns>
 
-int main()
+int legacy_singlePhase_main()
 {
     //定义几何区域参数
     double lengthX = 100, lengthY = 100, lengthZ = 0;
@@ -1194,10 +1205,115 @@ int main()
     }
 
     // 8）注入井和采出井设置
+  
+    cout << "\n--- Step 8: Setting up Two-Phase Well Configurations ---\n";
 
-     
+    // Create a vector to hold all two-phase well configurations
+    std::vector<WellConfig_TwoPhase> wells_cfg_2p;
+    wells_cfg_2p.reserve(2);
 
-    
+    // --- Configure Injection Well INJ1 ---
+    {
+        WellConfig_TwoPhase inj1;
+        inj1.name = "INJ1_2P";
+        inj1.role = WellDOF_TwoPhase::Role::Injector;
+
+        // Geometry
+        inj1.geom.pos = Vector(25.0, 25.0, 0.0);
+        inj1.geom.rw = 0.1;
+        inj1.geom.H = (lengthZ > 0) ? lengthZ : 1.0;
+        inj1.geom.maxHitCells = 1;
+
+        // Peaceman parameters (can be default)
+        // inj1.pm_2p.reFactor = 0.28;
+
+         // Operational control
+        inj1.mode = WellDOF_TwoPhase::Mode::Pressure;
+        inj1.target = 1.2e7; // 12 MPa
+
+        // Two-phase injection parameters
+        inj1.Tin = 373.15;   // 100 C
+        inj1.s_w_bh = 1.0;     // Initial injection is pure water
+        inj1.mu_w_inj = 2.82e-4;  // Viscosity of water
+        inj1.rho_w_inj = 958.4;    // Density of water
+        inj1.cp_w_inj = 4216.0;   // Heat capacity of water
+        // Set CO2 properties to zero or default, as they are not used for pure water injection
+        inj1.mu_g_inj = 0.0;
+        inj1.rho_g_inj = 0.0;
+        inj1.cp_g_inj = 0.0;
+
+        wells_cfg_2p.push_back(inj1);
+    }
+
+    // --- Configure Production Well PROD1 ---
+    {
+        WellConfig_TwoPhase prod1;
+        prod1.name = "PROD1_2P";
+        prod1.role = WellDOF_TwoPhase::Role::Producer;
+
+        // Geometry
+        prod1.geom.pos = Vector(75.0, 75.0, 0.0);
+        prod1.geom.rw = 0.1;
+        prod1.geom.H = (lengthZ > 0) ? lengthZ : 1.0;
+
+        // Operational control
+        prod1.mode = WellDOF_TwoPhase::Mode::Pressure;
+        prod1.target = 0.9e7; // 9 MPa
+
+        wells_cfg_2p.push_back(prod1);
+    }
+    // --- Pre-process all wells with a single function call ---
+    build_masks_and_WI_for_all(mgr, reg, wells_cfg_2p);
+
+    // --- Register all well DOFs with a single function call ---
+    const int Nc = (int)mgr.mesh().getCells().size();
+    cout << "Mesh Size: " << Nc << endl;
+
+    std::vector<WellDOF_TwoPhase> wells_dof_2p; // This vector will be used by the solver
+    const int N_total = register_well_dofs_for_all_TwoPhase(Nc, wells_cfg_2p, wells_dof_2p);
+
+    cout << "Total unknowns registered: " << N_total << endl;
+
+    cout << "\n============================================\n";
+    cout << "=== Step 0 (Initialization) Fully Complete ===\n";
+    cout << "============================================\n";
+
+    // --- Time Loop Example ---
+    double current_time = 0.0;
+    double end_time = 100.0;
+    double dt = 10.0;
+
+    while (current_time < end_time) {
+        // ...
+
+        // Find the injection well config and update its s_w_bh for phase switching
+        for (auto& cfg : wells_cfg_2p) {
+            if (cfg.name == "INJ1_2P") {
+                if (current_time + dt <= 60.0) {
+                    cfg.s_w_bh = 1.0; // Water
+                }
+                else {
+                    cfg.s_w_bh = 0.0; // CO2
+                }
+                cout << "  - Well " << cfg.name << " injecting with s_w_bh = " << cfg.s_w_bh << endl;
+
+                // CRITICAL: Update the corresponding DOF object for the solver
+                for (auto& dof : wells_dof_2p) {
+                    if (dof.name == cfg.pw_name) { // Match using the unique pw_name
+                        dof.s_w_bh = cfg.s_w_bh;
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+
+        // Now, call your solvers. The solver will use the `wells_dof_2p` vector
+        // which contains the up-to-date s_w_bh for the current time step.
+        // ...
+
+        current_time += dt;
+    }
 
 
 
@@ -1209,6 +1325,476 @@ int main()
 
 }
 
+int runFullIMPESCase()
+{
+    using std::cout;
+    using std::endl;
+
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int sectionNumX = 30;
+    const int sectionNumY = 30;
+    const int sectionNumZ = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    cout << "--- IMPES: building mesh ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ, sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    FieldRegistry reg;
+    FaceFieldRegistry freg;
+
+    cout << "--- IMPES: initializing primary fields ---\n";
+    InitFields ic;
+    ic.p_w0 = 6.5e6;
+    ic.T0 = 560.0;
+    ic.s_w = 1;
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, "p_w", "s_w", "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
 
 
+
+    cout << "--- IMPES: updating rock/fluid properties ---\n";
+    PhysicalPropertiesManager ppm;
+    ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+
+    VGParams vg_params;
+    vg_params.Swr = 0.00;
+    vg_params.Sgr = 0.00;
+    vg_params.alpha = 2.0e-6;
+    vg_params.n = 2.5;
+    RelPermParams rp_params;
+    rp_params.L = 0.5;
+
+    ppm.UpdateCO2inRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateWaterinRockAt(mgr, reg, "p_w", "T");
+    if (!multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, vg_params, rp_params))
+    {
+        std::cerr << "[MAIN] failed to build two-phase rock properties (lambda_t, etc.).\n";
+        return 1;
+    }
+   // ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_w", "T", "both");
+
+    const auto& bfaces = mgr.boundaryFaces();
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Down{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Up{ 1.0, 0.0, 6.5e6 };
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    TemperatureBC::Registry tbc;
+    TemperatureBC::BoundaryCoefficient T_Left{ 1.0, 0.0, 680 };
+    TemperatureBC::BoundaryCoefficient T_Right{ 0.0, 1.0, 0.0 };
+    TemperatureBC::BoundaryCoefficient T_Down{ 0.0, 1.0, 0.0 };
+    TemperatureBC::BoundaryCoefficient T_Up{ 0.0, 1.0, 0.0 };
+    TemperatureBC::setBoxBCs2D(tbc, bfaces, T_Left, T_Right, T_Down, T_Up);
+    TemperatureBCAdapter TbcA{ tbc };
+
+    cout << "--- IMPES: configuring wells ---\n";
+    std::vector<WellConfig_TwoPhase> wells_cfg;
+    /*{
+        WellConfig_TwoPhase inj;
+        inj.name = "INJ1_2P";
+        inj.role = WellDOF_TwoPhase::Role::Injector;
+        inj.geom.pos = Vector(25.0, 50.0, 0.0);
+        inj.geom.rw = 0.1;
+        inj.geom.H = (lengthZ > 0.0) ? lengthZ : 1.0;
+        inj.geom.maxHitCells = 1;
+        inj.mode = WellDOF_TwoPhase::Mode::Pressure;
+        inj.target = 1.2e7;
+        inj.Tin = 380.0;
+        inj.s_w_bh = 1.0;
+        inj.mu_w_inj = 2.8e-4;
+        inj.mu_g_inj = 1.5e-5;
+        inj.rho_w_inj = 960.0;
+        inj.rho_g_inj = 720.0;
+        inj.cp_w_inj = 4200.0;
+        inj.cp_g_inj = 1200.0;
+        wells_cfg.push_back(inj);
+    }
+    {
+        WellConfig_TwoPhase prod;
+        prod.name = "PROD1_2P";
+        prod.role = WellDOF_TwoPhase::Role::Producer;
+        prod.geom.pos = Vector(75.0, 50.0, 0.0);
+        prod.geom.rw = 0.1;
+        prod.geom.H = (lengthZ > 0.0) ? lengthZ : 1.0;
+        prod.geom.maxHitCells = 1;
+        prod.mode = WellDOF_TwoPhase::Mode::Pressure;
+        prod.target = 9.0e6;
+        wells_cfg.push_back(prod);
+    }*/
+
+    build_masks_and_WI_for_all(mgr, reg, wells_cfg);
+    const int Nc = static_cast<int>(mgr.mesh().getCells().size());
+    std::vector<WellDOF_TwoPhase> wells_dof;
+    register_well_dofs_for_all_TwoPhase(Nc, wells_cfg, wells_dof);
+
+    Solver::IMPES::PressureSolveControls pressureCtrl;
+    pressureCtrl.assembly.pressure_field = "p_w";
+    pressureCtrl.assembly.pressure_old_field = "p_w_old";
+    pressureCtrl.assembly.pressure_prev_field = "p_w_prev";
+    pressureCtrl.assembly.phi_field = "phi_r";
+    pressureCtrl.assembly.lambda_total_field = "lambda_t";
+    pressureCtrl.assembly.kxx_field = "kxx";
+    pressureCtrl.assembly.kyy_field = "kyy";
+    pressureCtrl.assembly.kzz_field = "kzz";
+    pressureCtrl.linear.type = LinearSolverOptions::Type::BiCGSTAB;
+    pressureCtrl.linear.maxIters = 2000;
+    pressureCtrl.linear.tol = 1e-8;
+    pressureCtrl.linear.iluFill = 10;
+    pressureCtrl.linear.iluDrop = 1e-4;
+    pressureCtrl.under_relax = 0.5;
+    pressureCtrl.max_outer_iterations = 80;
+    pressureCtrl.assembly.use_constant_phase_density = true;
+	pressureCtrl.report_outer_iterations = true;
+
+    Solver::IMPES::FluxSplitConfig fluxCfg;
+    fluxCfg.lambda_water = "lambda_w";
+    fluxCfg.lambda_gas = "lambda_g";
+    fluxCfg.rho_water = "rho_w";
+    fluxCfg.rho_gas = "rho_g";
+
+    Solver::IMPES::SaturationTransportConfig satCfg;
+    satCfg.saturation = "s_w";
+    satCfg.saturation_old = "s_w_old";
+    satCfg.saturation_prev = "s_w_prev";
+    satCfg.water_flux = fluxCfg.water_mass_flux;
+    satCfg.porosity = "phi_r";
+    satCfg.rho_water = "rho_w";
+    satCfg.pressure = pressureCtrl.assembly.pressure_field;
+    satCfg.thickness = (lengthZ > 0.0) ? lengthZ : 1.0;
+    satCfg.vg_params = vg_params;
+    satCfg.rp_params = rp_params;
+
+    Solver::IMPES::TemperatureSolveControls tempCtrl;
+    tempCtrl.assembly.temperature_field = "T";
+    tempCtrl.assembly.temperature_old_field = "T_old";
+    tempCtrl.assembly.temperature_prev_field = "T_prev";
+    tempCtrl.assembly.C_eff_field = "C_eff";
+    tempCtrl.assembly.lambda_eff_field = "lambda_eff";
+    tempCtrl.assembly.mass_flux_water = fluxCfg.water_mass_flux;
+    tempCtrl.assembly.mass_flux_gas = fluxCfg.gas_mass_flux;
+    tempCtrl.assembly.cp_water_field = "cp_w";
+    tempCtrl.assembly.cp_gas_field = "cp_g";
+    tempCtrl.assembly.lambda_water_field = "lambda_w";
+    tempCtrl.assembly.lambda_gas_field = "lambda_g";
+    tempCtrl.assembly.rho_water_field = "rho_w";
+    tempCtrl.assembly.rho_gas_field = "rho_g";
+    tempCtrl.assembly.pressure_field = pressureCtrl.assembly.pressure_field;
+    tempCtrl.linear.type = LinearSolverOptions::Type::BiCGSTAB;
+    tempCtrl.linear.maxIters = 2000;
+    tempCtrl.linear.tol = 1e-8;
+    tempCtrl.linear.iluFill = 10;
+    tempCtrl.linear.iluDrop = 1e-4;
+    tempCtrl.under_relax = 0.2;
+    tempCtrl.max_outer_iterations = 100;
+    tempCtrl.urf_step = 0.2;
+	tempCtrl.report_outer_iterations = true;
+
+    /*const int nSteps = 100000000;
+    const double totalDays = 6.0;
+    const double dt = (totalDays * 24.0 * 3600.0) / static_cast<double>(nSteps);
+    const int dumpFrequency = std::max(1, nSteps / 100);*/
+
+    const int    nSteps = 10000000;
+    const double dt = 1000.0 / nSteps;
+    //const double dt = (totalDays * 24.0 * 3600.0) / static_cast<double>(nSteps);
+    //const int dumpFrequency = std::max(1, nSteps / 100);
+
+    cout << "--- IMPES: running transient simulation ---\n";
+    //const bool ok = Solver::IMPES::runTransient_IMPES(
+    //    mgr, reg, freg,
+    //    PbcA, TbcA,
+    //    wells_dof,
+    //    nSteps,
+    //    dt,
+    //    pressureCtrl,
+    //    fluxCfg,
+    //    satCfg,
+    //    tempCtrl,
+    //    dumpFrequency,
+    //    dumpFrequency,
+    //    dumpFrequency,
+    //    "./Postprocess_Data/p_impes/p",
+    //    "./Postprocess_Data/T_impes/t",
+    //    "./Postprocess_Data/sw_impes/sw");
+
+    const bool ok = Solver::IMPES::runTransient_IMPES(
+        mgr, reg, freg,
+        PbcA, TbcA,
+        wells_dof,
+        nSteps,
+        dt,
+        pressureCtrl,
+        fluxCfg,
+        satCfg,
+        tempCtrl,
+        10,
+        10,
+        10,
+        "./Postprocess_Data/p_impes/p2",
+        "./Postprocess_Data/T_impes/t2",
+        "./Postprocess_Data/sw_impes/sw2",
+        "./Postprocess_Data/time_series/impes_stats.csv",
+        10,
+        "./Postprocess_Data/csv_snapshots/state",
+        std::vector<std::string>{
+            pressureCtrl.assembly.pressure_field,
+            tempCtrl.assembly.temperature_field,
+            satCfg.saturation });
+
+    if (!ok)
+    {
+        std::cerr << "[MAIN] IMPES transient run failed.\n";
+        return 1;
+    }
+
+    cout << "[MAIN] IMPES transient run completed successfully.\n";
+    return 0;
+}
+
+
+int runCO2Displacement_IMPES_Ps()
+{
+    using std::cout;
+    using std::endl;
+
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int sectionNumX = 30;
+    const int sectionNumY = 30;
+    const int sectionNumZ = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    cout << "--- IMPES: building mesh (CO2 displacement) ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ, sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    FieldRegistry reg;
+    FaceFieldRegistry freg;
+
+    cout << "--- IMPES: initializing primary fields ---\n";
+    InitFields ic;
+    ic.p_w0 = 6.5e6;
+    ic.T0 = 373.15;
+    ic.s_w = 1.0;
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, "p_w", "s_w", "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
+
+    {
+        const double co2StripeWidth = std::max(5.0, 0.1 * lengthX);
+        auto sw = reg.get<volScalarField>("s_w");
+        auto sw_old = reg.get<volScalarField>("s_w_old");
+        auto sw_prev = reg.get<volScalarField>("s_w_prev");
+        if (sw && sw_old && sw_prev)
+        {
+            const auto& cells = mgr.mesh().getCells();
+            const auto& id2idx = mgr.mesh().getCellId2Index();
+            for (const auto& c : cells)
+            {
+                if (c.id < 0) continue;
+                if (c.center.m_x <= co2StripeWidth)
+                {
+                    const size_t idx = id2idx.at(c.id);
+                    (*sw)[idx] = 0.0;
+                    (*sw_old)[idx] = 0.0;
+                    (*sw_prev)[idx] = 0.0;
+                }
+            }
+        }
+    }
+
+    cout << "--- IMPES: updating rock/fluid properties ---\n";
+    PhysicalPropertiesManager ppm;
+    ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+
+    VGParams vg_params;
+    vg_params.Swr = 0.20;
+    vg_params.Sgr = 0.00;
+    vg_params.alpha = 2.0e-6;
+    vg_params.n = 2.5;
+    RelPermParams rp_params;
+    rp_params.L = 0.5;
+
+    ppm.UpdateCO2inRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateWaterinRockAt(mgr, reg, "p_w", "T");
+
+    if (!multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, vg_params, rp_params))
+    {
+        std::cerr << "[MAIN][P-s case] failed to build two-phase rock properties.\n";
+        return 1;
+    }
+
+    const size_t Nc = mgr.mesh().getCells().size();
+    auto fillConstField = [&](const std::string& name, double value)
+    {
+        auto field = reg.getOrCreate<volScalarField>(name, Nc, value);
+        std::fill(field->data.begin(), field->data.end(), value);
+    };
+
+    fillConstField("rho_w", 1000.0);
+    fillConstField("mu_w", 5.0e-4);
+    fillConstField("cp_w", 4200.0);
+    fillConstField("k_w", 0.6);
+    fillConstField("Drho_Dp_w", 0.0);
+    fillConstField("rho_g", 650.0);
+    fillConstField("mu_g", 1.5e-5);
+    fillConstField("cp_g", 1000.0);
+    fillConstField("k_g", 0.08);
+    fillConstField("Drho_Dp_g", 0.0);
+
+    if (!multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, vg_params, rp_params))
+    {
+        std::cerr << "[MAIN][P-s case] failed to rebuild two-phase properties after applying constants.\n";
+        return 1;
+    }
+
+    const auto& bfaces = mgr.boundaryFaces();
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 8.0e6 };
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    std::vector<WellConfig_TwoPhase> wells_cfg;
+    /*{
+        WellConfig_TwoPhase inj;
+        inj.name = "CO2_INJ";
+        inj.role = WellDOF_TwoPhase::Role::Injector;
+        inj.geom.pos = Vector(10.0, 50.0, 0.0);
+        inj.geom.rw = 0.1;
+        inj.geom.H = (lengthZ > 0.0) ? lengthZ : 1.0;
+        inj.geom.maxHitCells = 1;
+        inj.mode = WellDOF_TwoPhase::Mode::Pressure;
+        inj.target = 8.0e6;
+        inj.Tin = 373.15;
+        inj.s_w_bh = 0.0;
+        inj.mu_w_inj = 5.0e-4;
+        inj.mu_g_inj = 1.5e-5;
+        inj.rho_w_inj = 1000.0;
+        inj.rho_g_inj = 650.0;
+        inj.cp_w_inj = 4200.0;
+        inj.cp_g_inj = 1000.0;
+        wells_cfg.push_back(inj);
+    }
+    {
+        WellConfig_TwoPhase prod;
+        prod.name = "PROD";
+        prod.role = WellDOF_TwoPhase::Role::Producer;
+        prod.geom.pos = Vector(90.0, 50.0, 0.0);
+        prod.geom.rw = 0.1;
+        prod.geom.H = (lengthZ > 0.0) ? lengthZ : 1.0;
+        prod.geom.maxHitCells = 1;
+        prod.mode = WellDOF_TwoPhase::Mode::Pressure;
+        prod.target = 6.3e6;
+        wells_cfg.push_back(prod);
+    }*/
+
+    build_masks_and_WI_for_all(mgr, reg, wells_cfg);
+    const int Ncells = static_cast<int>(mgr.mesh().getCells().size());
+    std::vector<WellDOF_TwoPhase> wells_dof;
+    register_well_dofs_for_all_TwoPhase(Ncells, wells_cfg, wells_dof);
+
+    Solver::IMPES::PressureSolveControls pressureCtrl;
+    pressureCtrl.assembly.pressure_field = "p_w";
+    pressureCtrl.assembly.pressure_old_field = "p_w_old";
+    pressureCtrl.assembly.pressure_prev_field = "p_w_prev";
+    pressureCtrl.assembly.phi_field = "phi_r";
+    pressureCtrl.assembly.lambda_total_field = "lambda_t";
+    pressureCtrl.assembly.kxx_field = "kxx";
+    pressureCtrl.assembly.kyy_field = "kyy";
+    pressureCtrl.assembly.kzz_field = "kzz";
+    pressureCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
+    pressureCtrl.assembly.enable_buoyancy = false;
+    pressureCtrl.assembly.use_constant_phase_density = true;
+    pressureCtrl.linear.type = LinearSolverOptions::Type::BiCGSTAB;
+    pressureCtrl.linear.maxIters = 1500;
+    pressureCtrl.linear.tol = 1e-10;
+    pressureCtrl.linear.iluFill = 5;
+    pressureCtrl.linear.iluDrop = 1e-4;
+    pressureCtrl.under_relax = 0.5;
+    pressureCtrl.max_outer_iterations = 300;
+    pressureCtrl.report_outer_iterations = true;
+    pressureCtrl.tol_abs = 1e-7;        // 或更严格
+    pressureCtrl.tol_rel = 1e-10;        // 相当于把允许的相对残差降到 0.008 Pa
+
+    Solver::IMPES::FluxSplitConfig fluxCfg;
+    fluxCfg.lambda_water = "lambda_w";
+    fluxCfg.lambda_gas = "lambda_g";
+    fluxCfg.rho_water = "rho_w";
+    fluxCfg.rho_gas = "rho_g";
+
+    Solver::IMPES::SaturationTransportConfig satCfg;
+    satCfg.saturation = "s_w";
+    satCfg.saturation_old = "s_w_old";
+    satCfg.saturation_prev = "s_w_prev";
+    satCfg.water_flux = fluxCfg.water_mass_flux;
+    satCfg.porosity = "phi_r";
+    satCfg.rho_water = "rho_w";
+    satCfg.pressure = pressureCtrl.assembly.pressure_field;
+    satCfg.thickness = (lengthZ > 0.0) ? lengthZ : 1.0;
+    satCfg.vg_params = vg_params;
+    satCfg.rp_params = rp_params;
+    satCfg.include_well_sources = true;
+
+    const int nSteps = 500;
+    const double dt = 3600.0;
+
+    cout << "--- IMPES: running P-s transient simulation ---\n";
+    const bool ok = Solver::IMPES::runTransient_IMPES_P_s(
+        mgr, reg, freg,
+        PbcA,
+        wells_dof,
+        nSteps,
+        dt,
+        pressureCtrl,
+        fluxCfg,
+        satCfg,
+        [&]() -> bool {
+            return multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, vg_params, rp_params);
+        },
+        25,
+        25,
+        "./Postprocess_Data/p_impes_ps/p_ps",
+        "./Postprocess_Data/sw_impes_ps/sw_ps",
+        "./Postprocess_Data/time_series/impes_ps_stats.csv",
+        25,
+        "./Postprocess_Data/csv_snapshots/ps_state",
+        std::vector<std::string>{
+            pressureCtrl.assembly.pressure_field,
+            satCfg.saturation });
+
+    if (!ok)
+    {
+        std::cerr << "[MAIN][P-s case] IMPES transient run failed.\n";
+        return 1;
+    }
+
+    cout << "[MAIN][P-s case] IMPES transient run completed successfully.\n";
+    return 0;
+}
+
+int main()
+{
+    return runCO2Displacement_IMPES_Ps();
+}
 

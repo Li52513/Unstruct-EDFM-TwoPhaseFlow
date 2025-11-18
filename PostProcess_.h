@@ -104,7 +104,15 @@ bool getFaceValueFromCellValue_P(
     const std::vector<Vector>* gradp
 );
 
-// ------------------ 3) face → node 声明（定义在 .cpp） ------------------
+// ------------------ 3) 无 BC 情况：直接依据单元值插值得到面值 ------------------
+bool getFaceValueFromCellValue_plain(
+    MeshManager& mgr,
+    const FieldRegistry& reg,
+    FaceFieldRegistry& freg,
+    const std::string& cellFieldName,
+    const std::string& faceOutName);
+
+// ------------------ 4) face → node 声明（定义在 .cpp） ------------------
 bool getNodeValueFromFaceValue(
     MeshManager& mgr,
     FaceFieldRegistry& freg,

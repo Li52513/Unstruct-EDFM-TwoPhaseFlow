@@ -1,0 +1,220 @@
+            {
+                if (c.id < 0) continue;
+                const size_t i = id2idx.at(c.id);
+                if ((*mask)[i] <= 0.0) continue;
+
+                const double WI_i = (*WI)[i];
+                const double pw = pressure[i];
+                const double p_bh = well.target; // pressure-controlled assumption
+                double Qw_mass = 0.0;
+                double Qg_mass = 0.0;
+
+                if (well.role == WellDOF_TwoPhase::Role::Injector)
+                {
+                    double sw = clampValue(well.s_w_bh, 0.0, 1.0);
+                    double krw, krg;
+                    kr_Mualem_vG(sw, cfg.vg_params, cfg.rp_params, krw, krg);
+                    const double lam_w = krw / std::max(well.mu_w_inj, 1e-12);
+                    const double lam_g = krg / std::max(well.mu_g_inj, 1e-12);
+                    const double lam_t = lam_w + lam_g;
+                    if (lam_t > 0.0)
+                    {
+                        const double Q_total = WI_i * lam_t * (p_bh - pw);
+                        if (Q_total > 0.0)
+                        {
+                            const double fw = lam_w / lam_t;
+                            const double fg = lam_g / lam_t;
+                            Qw_mass = Q_total * fw * well.rho_w_inj;
+                            Qg_mass = Q_total * fg * well.rho_g_inj;
+                        }
+                    }
+                }
+                else
+                {
+                    const double lam_w_res = std::max((*lambda_w)[i], 0.0);
+                    const double lam_g_res = std::max((*lambda_g)[i], 0.0);
+                    const double lam_t = lam_w_res + lam_g_res;
+                    if (lam_t > 0.0)
+                    {
+                        const double Q_total = WI_i * lam_t * (pw - p_bh);
+                        if (Q_total > 0.0)
+                        {
+                            const double fw = lam_w_res / lam_t;
+                            const double fg = lam_g_res / lam_t;
+                            Qw_mass = -Q_total * fw * std::max((*rho_w)[i], 0.0);
+                            Qg_mass = -Q_total * fg * std::max((*rho_g)[i], 0.0);
+                        }
+                    }
+                }
+
+                Qw[i] = Qw_mass;
+                Qg[i] = Qg_mass;
+            }
+        }
+
+        inline void applyWellHeatSources(
+            SparseSystemCOO& sys,
+            MeshManager& mgr,
+            FieldRegistry& reg,
+            const TemperatureAssemblyConfig& cfg,
+            const std::vector<WellDOF_TwoPhase>& wells,
+            const volScalarField& pressure)
+        {
+            if (wells.empty()) return;
+            const int Nc = static_cast<int>(mgr.mesh().getCells().size());
+
+            for (const auto& well : wells)
+            {
+                volScalarField Qw_tmp("Qw_tmp", Nc, 0.0);
+                volScalarField Qg_tmp("Qg_tmp", Nc, 0.0);
+                computeWellPhaseRates(mgr, reg, cfg, well, pressure, Qw_tmp, Qg_tmp);
+                FVM::TwoPhaseWellCoupling::couple_well_to_temperature_equation(
+                    sys, mgr, reg, well, Qw_tmp, Qg_tmp);
+            }
+        }
+    } // namespace detail
+
+    inline bool assembleAndSolveTemperature_IMPES(
+        MeshManager& mgr,
+        FieldRegistry& reg,
+        FaceFieldRegistry& freg,
+        const TemperatureBCAdapter& Tbc,
+        const std::vector<WellDOF_TwoPhase>& wells,
+        double dt,
+        const TemperatureSolveControls& ctrl,
+        TemperatureSolveReport* report = nullptr)
+    {
+        const auto& cfg = ctrl.assembly;
+        if (!(dt > 0.0))
+        {
+            std::cerr << "[IMPES][Temp] invalid dt.\n";
+            return false;
+        }
+
+        if (!reg.has(cfg.temperature_field) || !reg.has(cfg.temperature_old_field) || !reg.has(cfg.C_eff_field))
+        {
+            std::cerr << "[IMPES][Temp] missing required temperature fields.\n";
+            return false;
+        }
+
+        const OperatorFieldNames nm = makeNames(cfg.operator_tag);
+
+        if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Temperature(
+                mgr, reg, dt,
+                cfg.C_eff_field,
+                cfg.temperature_old_field,
+                nm.a_time, nm.b_time))
+        {
+            std::cerr << "[IMPES][Temp] time term failed.\n";
+            return false;
+        }
+
+        if (cfg.enable_diffusion)
+        {
+            if (!FVM::Diffusion::build_FaceCoeffs_Central(
+                    mgr, reg, freg,
+                    nm.a_f_diff, nm.s_f_diff,
+                    cfg.temperature_field,
+                    { "iso:" + cfg.lambda_eff_field },
+                    "",
+                    FVM::Diffusion::RhoFaceMethod::Linear,
+                    cfg.gravity,
+                    Tbc,
+                    false,
+                    0))
+            {
+                std::cerr << "[IMPES][Temp] diffusion build failed.\n";
+                return false;
+            }
+        }
+
+        const auto& faces = mgr.mesh().getFaces();
+        std::vector<double> acc_aPP(faces.size(), 0.0);
+        std::vector<double> acc_aPN(faces.size(), 0.0);
+        std::vector<double> acc_bP(faces.size(), 0.0);
+
+        if (cfg.enable_convection)
+        {
+            if (!detail::buildConvectionContribution(
+                    mgr, reg, freg, Tbc,
+                    cfg.temperature_field,
+                    cfg.mass_flux_water,
+                    { cfg.cp_water_field },
+                    acc_aPP, acc_aPN, acc_bP))
+            {
+                std::cerr << "[IMPES][Temp] convection (water) failed.\n";
+                return false;
+            }
+            if (!detail::buildConvectionContribution(
+                    mgr, reg, freg, Tbc,
+                    cfg.temperature_field,
+                    cfg.mass_flux_gas,
+                    { cfg.cp_gas_field },
+                    acc_aPP, acc_aPN, acc_bP))
+            {
+                std::cerr << "[IMPES][Temp] convection (gas) failed.\n";
+                return false;
+            }
+            detail::storeConvectionFaceCoeffs(freg, nm, acc_aPP, acc_aPN, acc_bP);
+        }
+        else
+        {
+            auto aPP = freg.getOrCreate<faceScalarField>(nm.aPP_conv.c_str(), faces.size(), 0.0);
+            auto aPN = freg.getOrCreate<faceScalarField>(nm.aPN_conv.c_str(), faces.size(), 0.0);
+            auto bP = freg.getOrCreate<faceScalarField>(nm.bP_conv.c_str(), faces.size(), 0.0);
+            std::fill(aPP->data.begin(), aPP->data.end(), 0.0);
+            std::fill(aPN->data.begin(), aPN->data.end(), 0.0);
+            std::fill(bP->data.begin(), bP->data.end(), 0.0);
+        }
+
+        std::string opExpr = "ddt";
+        if (cfg.enable_diffusion) opExpr += "+diffusion";
+        if (cfg.enable_convection) opExpr += "+convection";
+
+        SparseSystemCOO sys;
+        if (!assemble_COO(mgr, reg, freg, opExpr, nm, &sys))
+        {
+            std::cerr << "[IMPES][Temp] assemble_COO failed.\n";
+            return false;
+        }
+
+        auto pressure = reg.get<volScalarField>(cfg.pressure_field.c_str());
+        if (!pressure)
+        {
+            std::cerr << "[IMPES][Temp] missing pressure field '" << cfg.pressure_field << "' for well heat coupling.\n";
+            return false;
+        }
+        if (cfg.include_well_heat)
+        {
+            detail::applyWellHeatSources(sys, mgr, reg, cfg, wells, *pressure);
+        }
+
+        int N = 0;
+        auto lid_of_cell = buildUnknownMap(mgr.mesh(), N);
+        auto Tvec = gatherFieldVector(reg, mgr.mesh(), cfg.temperature_field, lid_of_cell, N);
+
+        double res = 0.0;
+        int it = 0;
+        if (!solveCOO_Eigen(sys, Tvec, ctrl.linear, &it, &res))
+        {
+            return false;
+        }
+
+        scatterVectorToField(reg, mgr.mesh(), cfg.temperature_field, lid_of_cell, Tvec);
+
+        double dT = 0.0;
+        if (!cfg.temperature_prev_field.empty())
+        {
+            const double urf = clampValue(ctrl.under_relax, 0.0, 1.0);
+            if (urf < 1.0)
+            {
+                underRelaxInPlace(reg, cfg.temperature_field, cfg.temperature_prev_field, urf);
+            }
+            dT = maxAbsDiff(reg, cfg.temperature_field, cfg.temperature_prev_field);
+            updatePrevIterates(reg, { { cfg.temperature_field, cfg.temperature_prev_field } });
+        }
+
+        if (report)
+        {
+            report->lin_residual = res;
+            report->lin_iterations = it;

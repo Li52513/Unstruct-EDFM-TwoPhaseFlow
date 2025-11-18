@@ -194,12 +194,10 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
-
 #include <Eigen/Sparse>
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseLU>
 #include <Eigen/SparseCholesky>
-
 #include "Solver_AssemblerCOO.h"
 
 // 线性求解配置：默认 BiCGSTAB + ILUT，可切换 SparseLU/LDLT/CG

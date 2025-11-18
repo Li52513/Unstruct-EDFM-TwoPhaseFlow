@@ -29,7 +29,66 @@ bool getFaceValueFromCellValue_P(
         mgr, reg, freg, Pbc, p_cell, p_face_out, gradp);
 }
 
-// 3) face → node 定义（优先边界面平均）
+// 3) no-BC cell-to-face averaging
+bool getFaceValueFromCellValue_plain(
+    MeshManager& mgr,
+    const FieldRegistry& reg,
+    FaceFieldRegistry& freg,
+    const std::string& cellFieldName,
+    const std::string& faceFieldName)
+{
+    Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
+    const auto& faces = mesh.getFaces();
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
+
+    auto phiC = reg.get<volScalarField>(cellFieldName);
+    if (!phiC)
+    {
+        std::cerr << "[getFaceValueFromCellValue_plain] missing cell field: " << cellFieldName << "\n";
+        return false;
+    }
+    if (phiC->size != cells.size())
+    {
+        std::cerr << "[getFaceValueFromCellValue_plain] size mismatch: " << cellFieldName << " vs cells\n";
+        return false;
+    }
+
+    auto phiF = freg.getOrCreate<faceScalarField>(faceFieldName, faces.size(), 0.0);
+    for (const auto& F : faces)
+    {
+        const int iF = F.id - 1;
+        auto itOwner = id2idx.find(F.ownerCell);
+        if (itOwner == id2idx.end())
+        {
+            std::cerr << "[getFaceValueFromCellValue_plain] missing owner cell id " << F.ownerCell << "\n";
+            return false;
+        }
+
+        const double phiOwner = (*phiC)[itOwner->second];
+        if (!F.isBoundary() && F.neighborCell >= 0)
+        {
+            auto itNei = id2idx.find(F.neighborCell);
+            if (itNei == id2idx.end())
+            {
+                std::cerr << "[getFaceValueFromCellValue_plain] missing neighbor cell id " << F.neighborCell << "\n";
+                return false;
+            }
+            double gamma = F.f_linearInterpolationCoef;
+            if (!(gamma > 0.0 && gamma < 1.0)) gamma = 0.5;
+            const double phiNei = (*phiC)[itNei->second];
+            (*phiF)[iF] = (1.0 - gamma) * phiOwner + gamma * phiNei;
+        }
+        else
+        {
+            (*phiF)[iF] = phiOwner;
+        }
+    }
+
+    return true;
+}
+
+// 4) face → node 定义（优先边界面平均）
 bool getNodeValueFromFaceValue(
     MeshManager& mgr,
     FaceFieldRegistry& freg,
@@ -97,7 +156,7 @@ bool outputTecplot_cellToFaceToNode_BC(
     bool ok = false;
     if (Tbc) ok = getFaceValueFromCellValue_T(mgr, reg, freg, *Tbc, cellFieldName, faceFieldName, gradBuf);
     else if (Pbc) ok = getFaceValueFromCellValue_P(mgr, reg, freg, *Pbc, cellFieldName, faceFieldName, gradBuf);
-    else { std::cerr << "[Tecplot] need a BC adapter (T or P).\n"; return false; }
+    else ok = getFaceValueFromCellValue_plain(mgr, reg, freg, cellFieldName, faceFieldName);
     if (!ok) return false;
 
     // 2) face -> node

@@ -210,7 +210,6 @@ namespace FVM
 						}
 					}
 				}
-
 				(*Qf)[idx] = qface;
 				(*mf)[idx] = mface;
 				(*ufn)[idx] = (Aabs > eps_A) ? (qface / Aabs) : 0.0;
@@ -301,11 +300,8 @@ namespace FVM
 				(*ufn)[idx] = (Aabs > epsA ? qf / Aabs : 0.0); // ufn = Qf / |A|
 
 			}
-
 			return true;
-
 		}
-
 
 	}
 
