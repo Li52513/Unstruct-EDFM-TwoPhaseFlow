@@ -1563,7 +1563,7 @@ int runFullIMPESCase()
     return 0;
 }
 
-
+//可运行，且可看到驱替效果
 int runCO2Displacement_IMPES_Ps()
 {
     using std::cout;
@@ -1793,10 +1793,256 @@ int runCO2Displacement_IMPES_Ps()
     return 0;
 }
 
+int run_IMPES_revised_PS()
+{
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int sectionNumX = 30;
+    const int sectionNumY = 30;
+    const int sectionNumZ = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    std::cout << "--- IMPES: building mesh (CO2 displacement) ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ,
+        sectionNumX, sectionNumY, sectionNumZ,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    FieldRegistry    reg;
+    FaceFieldRegistry freg;
+
+    // ---------- 1. 初始主变量场 ---------- //
+    std::cout << "--- IMPES: initializing primary fields ---\n";
+    InitFields ic;
+    ic.p_w0 = 6.5e6;
+    ic.T0 = 373.15;
+    ic.s_w = 1.0;
+
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
+        mgr.mesh(), reg, "p_w", "s_w", "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(
+        mgr.mesh(), reg, ic);
+
+    // 时间相关辅助场 p_old/prev, s_old/prev, T_old/prev
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
+
+    // 左侧给一条 CO2 条带：将 s_w=0
+    {
+        const double co2StripeWidth = std::max(1.0, 0.1 * lengthX);
+        auto sw = reg.get<volScalarField>("s_w");
+        auto sw_old = reg.get<volScalarField>("s_w_old");
+        auto sw_prev = reg.get<volScalarField>("s_w_prev");
+        if (sw && sw_old && sw_prev)
+        {
+            const auto& cells = mgr.mesh().getCells();
+            const auto& id2idx = mgr.mesh().getCellId2Index();
+            for (const auto& c : cells)
+            {
+                if (c.id < 0) continue;
+                if (c.center.m_x <= co2StripeWidth)
+                {
+                    const size_t idx = id2idx.at(c.id);
+                    (*sw)[idx] = 0.0;
+                    (*sw_old)[idx] = 0.0;
+                    (*sw_prev)[idx] = 0.0;
+                }
+            }
+        }
+    }
+
+    // ---------- 2. 基岩 / 流体物性初始化 ---------- //
+    std::cout << "--- IMPES: updating rock/fluid properties ---\n";
+    PhysicalPropertiesManager ppm;
+
+    // 区域分类（这里只用一个 RegionType::Medium）
+    ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+
+    VGParams vg_params;
+    vg_params.Swr = 0.20;
+    vg_params.Sgr = 0.00;
+    vg_params.alpha = 2.0e-6;
+    vg_params.n = 2.5;
+
+    RelPermParams rp_params;
+    rp_params.L = 0.5;
+
+    // 初始 CO2 / 水物性 + 两相派生量（rho_t, c_t, lambda_w/g 等）
+    ppm.UpdateCO2inRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateWaterinRockAt(mgr, reg, "p_w", "T");
+
+    if (!multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, vg_params, rp_params))
+    {
+        std::cerr << "[MAIN][P-s case] failed to build two-phase rock properties.\n";
+        return 1;
+    }
+
+    // ---------- 3. 压力边界条件 ---------- //
+    const auto& bfaces = mgr.boundaryFaces();
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 8.0e6 };
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    // ---------- 4. 井配置（此例可以先为空，将来可 push_back 注采井） ---------- //
+    std::vector<WellConfig_TwoPhase> wells_cfg;
+    // TODO: 这里填入严格定流量井： wells_cfg.push_back(...);
+
+    build_masks_and_WI_for_all(mgr, reg, wells_cfg);
+    const int Ncells = static_cast<int>(mgr.mesh().getCells().size());
+    std::vector<WellDOF_TwoPhase> wells_dof;
+    register_well_dofs_for_all_TwoPhase(Ncells, wells_cfg, wells_dof);
+
+    // ---------- 5. 压力求解控制参数 ---------- //
+    IMPES_revised::PressureSolveControls pCtrl;
+
+    // PressureAssemblyConfig 中字段名与当前字段保持一致即可，默认值已对齐
+    // 这里只做少量明确设置（重力关掉 -> 纯水平驱动；若要浮力就改成 true）
+    pCtrl.assembly.vg_params = vg_params;
+    pCtrl.assembly.relperm_params = rp_params;
+    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
+    pCtrl.assembly.enable_buoyancy = false;
+
+    // 外迭代控制
+    pCtrl.under_relax = 0.7;
+    pCtrl.urf_min = 0.3;
+    pCtrl.urf_max = 0.9;
+    pCtrl.urf_step = 0.05;
+    pCtrl.max_outer_iterations =300;
+    pCtrl.tol_abs = 1e-5;
+    pCtrl.tol_rel = 1e-5;
+    pCtrl.report_outer_iterations = true;
+
+    // 线性求解器参数用缺省初始化即可（LinearSolverOptions 有默认值）
+
+    // ---------- 6. 饱和度输运配置（revised 包装版） ---------- //
+    IMPES_revised::SaturationTransportConfig satCfg;
+    satCfg.saturation = "s_w";
+    satCfg.saturation_old = "s_w_old";
+    satCfg.saturation_prev = "s_w_prev";
+    satCfg.porosity = "phi_r";
+    satCfg.rho_water = "rho_w";
+    satCfg.rho_gas = "rho_g";
+    satCfg.pressure = "p_w";
+    satCfg.thickness = 1.0;      // 2D 模型厚度（和你岩石厚度一致）
+    satCfg.Sw_min = 0.0;
+    satCfg.Sw_max = 1.0;
+    satCfg.CFL_limit = 0.5;
+    satCfg.track_cfl = true;
+    satCfg.vg_params = vg_params;
+    satCfg.rp_params = rp_params;
+    satCfg.include_well_sources = true;
+
+    // 相通量拆分相关字段：与压力装配中的名字对齐
+    satCfg.recompute_phase_flux = true;
+    satCfg.total_mass_flux = pCtrl.assembly.total_mass_flux_name;      // "mf_total"
+    satCfg.water_mass_flux = "mf_w";
+    satCfg.gas_mass_flux = "mf_g";
+    satCfg.fractional_flow_face = "fw_face";
+    satCfg.lambda_water = pCtrl.assembly.lambda_w_field;           // "lambda_w"
+    satCfg.lambda_gas = pCtrl.assembly.lambda_g_field;           // "lambda_g"
+    satCfg.capillary_correction_flux = pCtrl.assembly.capillary_correction_flux_name; // "mf_capillary_corr"
+    satCfg.gravity_correction_flux = pCtrl.assembly.gravity_correction_flux_name;   // "mf_gravity_corr"
+    satCfg.min_lambda = 1e-30;
+    satCfg.flux_sign_epsilon = 1e-15;
+
+    // ---------- 7. 通量拆分配置（老 IMPES::FluxSplitConfig，runTransient 里现在基本不再用） ---------- //
+    IMPES_revised::FluxSplitConfig fluxCfg;
+    // 与上面 satCfg 中保持一致
+    fluxCfg.total_mass_flux = satCfg.total_mass_flux;
+    fluxCfg.water_mass_flux = satCfg.water_mass_flux;
+    fluxCfg.gas_mass_flux = satCfg.gas_mass_flux;
+    fluxCfg.fractional_flow_face = satCfg.fractional_flow_face;
+    fluxCfg.lambda_water = satCfg.lambda_water;
+    fluxCfg.lambda_gas = satCfg.lambda_gas;
+    fluxCfg.rho_water = satCfg.rho_water;
+    fluxCfg.rho_gas = satCfg.rho_gas;
+    fluxCfg.saturation = satCfg.saturation;
+    fluxCfg.capillary_correction_flux = satCfg.capillary_correction_flux;
+    fluxCfg.gravity_correction_flux = satCfg.gravity_correction_flux;
+    fluxCfg.min_lambda = satCfg.min_lambda;
+    fluxCfg.flux_sign_epsilon = satCfg.flux_sign_epsilon;
+    fluxCfg.pressure_bc = &PbcA;
+
+    // ---------- 8. 物性冻结更新回调：时间步开始调用一次 ---------- //
+    auto updateMobility = [&]() -> bool
+        {
+            // 1) CO2 / 水物性随着当前 (p_w, T) 更新
+            ppm.UpdateCO2inRockAt(mgr, reg, "p_w", "T");
+            ppm.UpdateWaterinRockAt(mgr, reg, "p_w", "T");
+
+            // 2) 两相派生量：ct, rho_t, lambda_w/g, Pc(Sw) 等
+            if (!multiPhase::updateRockTwoPhaseProperties_IMPES(mgr, reg, vg_params, rp_params))
+            {
+                std::cerr << "[MAIN][P-s case] updateRockTwoPhaseProperties_IMPES failed in updateMobility.\n";
+                return false;
+            }
+            return true;
+        };
+
+    // ---------- 9. 调用总的 IMPES 时间推进 ---------- //
+    const int    nSteps = 2000;   // 例子：200 步
+    const double dt0 = 1E-15;  // 初始时间步 [s]，后续你可根据 CFL 报告调整
+
+    const int writeEveryP = 5;
+    const int writeEverySw = 5;
+
+    const std::string outPrefixP = "./Postprocess_Data/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/s_impes_ps_revised/s_ps";
+    const std::string timeSeriesFn = "./Postprocess_Data/time_series/impes_ps_revised_stats.csv";  // 如需写出时间序列可填路径
+
+    const int snapshotEveryCsv = 5;   // 若需 CSV 快照可改成 >0
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/ps_state_reviesed";
+    std::vector<std::string> snapshotFields; // 留空 -> runTransient_IMPES 内部默认只导出 p & s_w
+
+    std::cout << "--- IMPES: starting transient run (revised P-S) ---\n";
+
+    bool ok = IMPES_revised::runTransient_IMPES(
+        mgr,
+        reg,
+        freg,
+        PbcA,
+        wells_dof,
+        nSteps,
+        dt0,
+        pCtrl,
+        fluxCfg,
+        satCfg,
+        updateMobility,
+        writeEveryP,
+        writeEverySw,
+        outPrefixP,
+        outPrefixSw,
+        timeSeriesFn,
+        snapshotEveryCsv,
+        snapshotPrefix,
+        snapshotFields);
+
+    if (!ok)
+    {
+        std::cerr << "[MAIN][P-s case] runTransient_IMPES failed.\n";
+        return 1;
+    }
+
+    std::cout << "--- IMPES: simulation finished successfully ---\n";
+    return 0;
+}
+
+
+
+
+
 int main()
 {
     //return runCO2Displacement_IMPES_Ps();
 
-    return SinglePhase_CO2_TH_withoutWell();
+    return run_IMPES_revised_PS();
 }
 

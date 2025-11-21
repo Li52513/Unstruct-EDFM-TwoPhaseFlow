@@ -10,7 +10,7 @@ namespace Water_in_rock
 	static constexpr double BASE_k_w = 0.05;
 	static constexpr double BASE_mu_w = 3e-54;
 	static constexpr double BASE_Drho_Dp_w = 0;
-	static constexpr double BASE_c_w = 1; //压缩系数
+	static constexpr double BASE_c_w = 4.5e-10; //压缩系数
 
 	inline bool computeWATERinROCKProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_field, const std::string& T_field)  //这里传入基岩的压力和温度 但是对于IMPES来说，不会更新这里的参数
 	{

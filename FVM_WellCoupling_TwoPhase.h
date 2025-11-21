@@ -65,9 +65,9 @@ namespace FVM {
             // --- Part 2: Modify perforated cell rows and assemble the rate constraint if needed ---
             auto mask_field = reg.get<volScalarField>(well.mask_field);
             auto WI_field = reg.get<volScalarField>(well.PI_field_w); // WI_name is passed here
-            auto lambda_t_field = reg.get<volScalarField>("lambda_t"); // Total mobility at time 'n'
+            auto lambda_mass_field = reg.get<volScalarField>("lambda_mass_total");
 
-            if (!mask_field || !WI_field || !lambda_t_field) {
+            if (!mask_field || !WI_field || !lambda_mass_field) {
                 std::cerr << "ERROR [2P-PressureCoupling]: Missing required fields for well " << well.name << std::endl;
                 return;
             }
@@ -78,11 +78,11 @@ namespace FVM {
                 if ((*mask_field)[cidx] <= 0.0) continue;
 
                 const double WI_i = (*WI_field)[cidx];
-                const double lambda_t_i = (*lambda_t_field)[cidx];
+                const double lambda_mass_i = (*lambda_mass_field)[cidx]; // ¦Ë_w ¦Ñ_w + ¦Ë_g ¦Ñ_g
 
-                if (WI_i <= 0.0 || lambda_t_i <= 0.0) continue;
+                if (WI_i <= 0.0 || lambda_mass_i <= 0.0) continue;
 
-                const double PI_total_i = WI_i * lambda_t_i;
+                const double PI_total_i = WI_i * lambda_mass_i;
                 const int cell_lid = lid_of_cell[cidx];
                 if (cell_lid < 0) continue;
 

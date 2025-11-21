@@ -133,102 +133,190 @@ namespace IMPES_revised
      *    - c_w: Water compressibility (often assumed constant)
      *    - c_g: Gas compressibility (a strong function of pressure, e.g., c_g ≈ 1/p)
      */
-    inline bool TimeTerm_IMPES_Pressure(
-        MeshManager& mgr,
-        FieldRegistry& reg,
-        double dt,
-        const std::string& phi_name,
-        const std::string& p_old_name,
-        const std::string& p_name, // Note: This is unused in this specific formulation but kept for signature consistency.
-        const std::string& rho_t_name,
-        const std::string& s_w_name,
-        const std::string& rho_w_name,
-        const std::string& rho_g_name,
-        const std::string& c_r_name,
-        const std::string& c_w_name,
-        const std::string& c_g_name,
-        const std::string& aC_name,
-        const std::string& bC_name)
+  //  inline bool TimeTerm_IMPES_Pressure(
+  //      MeshManager& mgr,
+  //      FieldRegistry& reg,
+  //      double dt,
+  //      const std::string& phi_name,
+  //      const std::string& p_old_name,
+  //      const std::string& p_name, // Note: This is unused in this specific formulation but kept for signature consistency.
+  //      const std::string& rho_t_name,
+  //      const std::string& s_w_name,
+  //      const std::string& rho_w_name,
+  //      const std::string& rho_g_name,
+		//const std::string& c_t_name,
+  //      const std::string& aC_name,
+  //      const std::string& bC_name)
+  //  {
+  //      // --- 1. Basic Validation ---
+  //      if (dt <= 0.0)
+  //      {
+  //          std::cerr << "[IMPES_revised][TimeTerm] Error: Invalid dt provided.\n";
+  //          return false;
+  //      }
+
+  //      // --- 2. Get Mesh and Fields ---
+  //      auto& mesh = mgr.mesh();
+  //      const auto& cells = mesh.getCells();
+  //      const auto& id2idx = mesh.getCellId2Index();
+
+  //      // Retrieve all required fields from the registry
+  //      auto phi = reg.get<volScalarField>(phi_name);
+  //      auto p_old = reg.get<volScalarField>(p_old_name);
+  //      auto rho_t = reg.get<volScalarField>(rho_t_name);
+  //      auto s_w = reg.get<volScalarField>(s_w_name);
+  //      auto rho_w = reg.get<volScalarField>(rho_w_name);
+  //      auto rho_g = reg.get<volScalarField>(rho_g_name);
+  //      auto c_t = reg.get<volScalarField>(c_t_name);
+
+  //      // Robust check to ensure all fields exist
+  //      if (!phi || !p_old || !rho_t || !s_w || !rho_w || !rho_g || !c_t )
+  //      {
+  //          std::cerr << "[IMPES_revised][TimeTerm] Error: One or more required fields are missing from the registry.\n";
+  //          return false;
+  //      }
+
+  //      // --- 3. Initialize Output Fields ---
+  //      auto aC = reg.getOrCreate<volScalarField>(aC_name, cells.size(), 0.0);
+  //      auto bC = reg.getOrCreate<volScalarField>(bC_name, cells.size(), 0.0);
+  //      std::fill(aC->data.begin(), aC->data.end(), 0.0);
+  //      std::fill(bC->data.begin(), bC->data.end(), 0.0);
+
+  //      const double inv_dt = 1.0 / dt;
+
+  //      // --- 4. Loop Over Cells and Assemble Coefficients ---
+  //      for (const auto& c : cells)
+  //      {
+  //          if (c.id < 0) continue; // Skip inactive cells
+  //          const size_t i = id2idx.at(c.id);
+
+  //          // --- Get local cell properties with physical clamping for robustness ---
+  //          const double V = std::max(0.0, c.volume);
+  //          const double phi_i = std::max(0.0, std::min(1.0, (*phi)[i]));
+
+  //          // Per the note, s_w is already clipped for residuals, but we re-clip to [0,1] for safety.
+  //          const double sw_i = std::max(0.0, std::min(1.0, (*s_w)[i]));
+  //          const double sg_i = 1.0 - sw_i;
+
+  //          const double rho_w_i = std::max(0.0, (*rho_w)[i]);
+  //          const double rho_g_i = std::max(0.0, (*rho_g)[i]);
+
+  //          /// calculated by Multiphase::updateRockTwoPhaseProperties_IMPES
+  //          const double ct_i = std::max(0.0, (*c_t)[i]);
+  //          const double rho_t_i = std::max(1e-9, (*rho_t)[i]);
+
+  //          // --- Discretize the Time Term: V * [φ * ρ_t * c_t] * (p_new - p_old) / dt ---
+  //          // The coefficient multiplying p_new goes into the matrix diagonal (aC).
+  //          // The rest goes into the source vector (bC).
+
+  //          const double accum_coeff = V * phi_i * rho_t_i * ct_i * inv_dt;
+
+  //          const double a = accum_coeff;
+  //          const double b = accum_coeff * (*p_old)[i];
+
+  //          (*aC)[i] = a;
+  //          (*bC)[i] = b;
+  //      }
+
+  //      return true;
+  //  }
+
+
+
+        /**
+     * @brief Assemble IMPES pressure accumulation term for two-phase flow
+     *        using total density ρ_t and total compressibility c_t.
+     *
+     * Discrete form mimics the single-phase TimeTerm_IMPES_Pressure in
+     * 《时间项参考.md》, but with:
+     *   ρ -> ρ_t = Sw ρ_w + Sg ρ_g
+     *   dρ/dp -> dρ_t/dp = ρ_t (c_t - c_r)
+     *
+     * For each cell i:
+     *   aC[i] = V_i / dt * φ_i * ( dρ_t/dp |_⋆ + ρ_t,⋆ * c_r,i )
+     *   bC[i] = V_i / dt * ( φ_i ρ_t^n
+     *                      - φ_i ρ_t,⋆
+     *                      + φ_i dρ_t/dp |_⋆ p_w,⋆
+     *                      + φ_i ρ_t,⋆ c_r,i p_w^n )
+     *
+     * where:
+     *   - ⋆ denotes evaluation at current outer iteration (rho_eval, p_eval)
+     *   - n denotes previous time level (rho_old, p_old).
+     */
+inline bool TimeTerm_IMPES_Pressure(
+    MeshManager& mgr,
+    FieldRegistry& reg,
+    double dt,
+    const std::string& phi_name,          ///< porosity φ_r
+    const std::string& p_old_name,        ///< previous time p_w^n
+    const std::string& p_eval_name,       ///< current evaluated p_w
+    const std::string& rho_old_name,      ///< previous time ρ_t^n
+    const std::string& rho_eval_name,     ///< current evaluated ρ_t
+    const std::string& c_t_name,          ///< total compressibility c_t
+    const std::string& c_r_name,          ///< rock compressibility c_r
+    const std::string& aC_name,           ///< output: diagonal coefficients
+    const std::string& bC_name,           ///< output: RHS contributions
+    const std::vector<char>* strong_mask = nullptr)
     {
-        // --- 1. Basic Validation ---
-        if (dt <= 0.0)
-        {
-            std::cerr << "[IMPES_revised][TimeTerm] Error: Invalid dt provided.\n";
-            return false;
-        }
+    if (dt <= 0.0) {
+        std::cerr << "[IMPES_revised][TimeTerm] invalid dt.\n";
+        return false;
+    }
 
-        // --- 2. Get Mesh and Fields ---
-        auto& mesh = mgr.mesh();
-        const auto& cells = mesh.getCells();
-        const auto& id2idx = mesh.getCellId2Index();
+    Mesh& mesh = mgr.mesh();
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
 
-        // Retrieve all required fields from the registry
-        auto phi = reg.get<volScalarField>(phi_name);
-        auto p_old = reg.get<volScalarField>(p_old_name);
-        auto rho_t = reg.get<volScalarField>(rho_t_name);
-        auto s_w = reg.get<volScalarField>(s_w_name);
-        auto rho_w = reg.get<volScalarField>(rho_w_name);
-        auto rho_g = reg.get<volScalarField>(rho_g_name);
-        auto c_r = reg.get<volScalarField>(c_r_name);
-        auto c_w = reg.get<volScalarField>(c_w_name);
-        auto c_g = reg.get<volScalarField>(c_g_name);
+    auto phi = reg.get<volScalarField>(phi_name);
+    auto p_old = reg.get<volScalarField>(p_old_name);
+    auto p_eval = reg.get<volScalarField>(p_eval_name);
+    auto rho_old = reg.get<volScalarField>(rho_old_name);
+    auto rho_eval = reg.get<volScalarField>(rho_eval_name);
+    auto c_t = reg.get<volScalarField>(c_t_name);
+    auto c_r = reg.get<volScalarField>(c_r_name);
 
-        // Robust check to ensure all fields exist
-        if (!phi || !p_old || !rho_t || !s_w || !rho_w || !rho_g || !c_r || !c_w || !c_g)
-        {
-            std::cerr << "[IMPES_revised][TimeTerm] Error: One or more required fields are missing from the registry.\n";
-            return false;
-        }
+    if (!phi || !p_old || !p_eval || !rho_old || !rho_eval || !c_t || !c_r) {
+        std::cerr << "[IMPES_revised][TimeTerm] missing fields for pressure accumulation.\n";
+        return false;
+    }
 
-        // --- 3. Initialize Output Fields ---
-        auto aC = reg.getOrCreate<volScalarField>(aC_name, cells.size(), 0.0);
-        auto bC = reg.getOrCreate<volScalarField>(bC_name, cells.size(), 0.0);
-        std::fill(aC->data.begin(), aC->data.end(), 0.0);
-        std::fill(bC->data.begin(), bC->data.end(), 0.0);
+    auto aC = reg.getOrCreate<volScalarField>(aC_name.c_str(), cells.size(), 0.0);
+    auto bC = reg.getOrCreate<volScalarField>(bC_name.c_str(), cells.size(), 0.0);
+    std::fill(aC->data.begin(), aC->data.end(), 0.0);
+    std::fill(bC->data.begin(), bC->data.end(), 0.0);
 
-        const double inv_dt = 1.0 / dt;
+    const double inv_dt = 1.0 / dt;
 
-        // --- 4. Loop Over Cells and Assemble Coefficients ---
-        for (const auto& c : cells)
-        {
-            if (c.id < 0) continue; // Skip inactive cells
-            const size_t i = id2idx.at(c.id);
+    for (const auto& c : cells) {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        if (strong_mask && (*strong_mask)[i]) continue; // strong Dirichlet cell
 
-            // --- Get local cell properties with physical clamping for robustness ---
-            const double V = std::max(0.0, c.volume);
-            const double phi_i = std::max(0.0, std::min(1.0, (*phi)[i]));
+        const double V = std::max(0.0, c.volume);
+        const double phi_i = std::max(0.0, std::min(1.0, (*phi)[i]));
+        const double rho_n = std::max(0.0, (*rho_old)[i]);
+        const double rho_st = std::max(0.0, (*rho_eval)[i]);
+        const double ct_i = std::max(0.0, (*c_t)[i]);
+        const double cr_i = std::max(0.0, (*c_r)[i]);
+        const double p_n = (*p_old)[i];
+        const double p_st = (*p_eval)[i];
 
-            // Per the note, s_w is already clipped for residuals, but we re-clip to [0,1] for safety.
-            const double sw_i = std::max(0.0, std::min(1.0, (*s_w)[i]));
-            const double sg_i = 1.0 - sw_i;
+        // total density derivative: dρ_t/dp = ρ_t (c_t - c_r)
+        const double ct_minus_cr = std::max(ct_i - cr_i, 0.0);
+        const double drho_dp_tot = rho_st * ct_minus_cr;
 
-            const double rho_w_i = std::max(0.0, (*rho_w)[i]);
-            const double rho_g_i = std::max(0.0, (*rho_g)[i]);
+        const double a = V * inv_dt * phi_i * (drho_dp_tot + rho_st * cr_i);
+        const double b = V * inv_dt * (
+            phi_i * rho_n
+            - phi_i * rho_st
+            + phi_i * drho_dp_tot * p_st
+            + phi_i * rho_st * cr_i * p_n
+            );
 
-            const double cr_i = std::max(0.0, (*c_r)[i]);
-            const double cw_i = std::max(0.0, (*c_w)[i]);
-            const double cg_i = std::max(0.0, (*c_g)[i]);
+        (*aC)[i] = a;
+        (*bC)[i] = b;
+    }
 
-            // Retrieve total density, ensuring it's not zero to prevent division errors.
-            const double rho_t_i = std::max(1e-9, (*rho_t)[i]);
-
-            // --- Calculate Total Compressibility (c_t) ---
-            const double fluid_comp_numerator = sw_i * rho_w_i * cw_i + sg_i * rho_g_i * cg_i;
-            const double ct_i = cr_i + fluid_comp_numerator / rho_t_i;
-
-            // --- Discretize the Time Term: V * [φ * ρ_t * c_t] * (p_new - p_old) / dt ---
-            // The coefficient multiplying p_new goes into the matrix diagonal (aC).
-            // The rest goes into the source vector (bC).
-
-            const double accum_coeff = V * phi_i * rho_t_i * ct_i * inv_dt;
-
-            const double a = accum_coeff;
-            const double b = accum_coeff * (*p_old)[i];
-
-            (*aC)[i] = a;
-            (*bC)[i] = b;
-        }
-
-        return true;
+    return true;
     }
 } // namespace IMPES_revised

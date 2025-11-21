@@ -31,6 +31,7 @@ struct WellDOF_TwoPhase {
                                                 // s_w_bh = 1.0 for pure water injection
                                                 // s_w_bh = 0.0 for pure CO2 injection
                                                 // 0 < s_w_bh < 1 for mixed-phase injection
+	
 
      // --- Fluid properties of the injected fluid ---
     double mu_w_inj = 3e-4;                   // Viscosity of injected water at wellbore conditions [Pa¡¤s]
@@ -45,6 +46,7 @@ struct WellDOF_TwoPhase {
     std::string PI_field_w;                   // Field name for the WATER phase productivity index (e.g., "PI_w_INJ1")
     std::string PI_field_g;                   // Field name for the GAS (CO2) phase productivity index (e.g., "PI_g_INJ1")
     int    lid = -1;                          // Index in the global unknown vector if solved simultaneously
+    double p_bh = 0.0;                           // Bottom-hole pressure at the wellbore [Pa]
 };
 
 /**

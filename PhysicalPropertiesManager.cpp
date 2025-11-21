@@ -352,7 +352,8 @@ static inline void ensureRockFields(FieldRegistry& reg, size_t n)
 	reg.getOrCreate<volScalarField>("rho_r", n, 2650.0);
 	reg.getOrCreate<volScalarField>("cp_r", n, 1000.0);
 	reg.getOrCreate<volScalarField>("lambda_r", n, 2.5);
-	reg.getOrCreate<volScalarField>("c_phi", n, 1e-12); //孔隙度可压缩性
+	reg.getOrCreate<volScalarField>("c_phi", n, 1e-12); //孔隙度可压缩性 被c_r替代
+	reg.getOrCreate<volScalarField>("c_r", n, 1e-11); //基岩压缩系数
 
 }
  
@@ -398,7 +399,7 @@ void PhysicalPropertiesManager::UpdateMatrixRockAt(MeshManager& mgr, FieldRegist
 	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
 	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
 	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
-	auto c_phi = reg.get<volScalarField>("c_phi"); // 基岩可压缩系数
+	auto c_r = reg.get<volScalarField>("c_r"); // 基岩压缩系数
 
 
 	for (int ic = 0; ic < cells.size(); ++ic) 
@@ -415,18 +416,18 @@ void PhysicalPropertiesManager::UpdateMatrixRockAt(MeshManager& mgr, FieldRegist
 		(*rho_r)[i] = sp.rho_r;
 		(*cp_r)[i] = sp.cp_r;
 		(*lam_r)[i] = sp.k_r;
-		(*c_phi)[i] = sp.compressibility;
+		(*c_r)[i] = sp.compressibility;
 
 		//check
-		if (ic == 5 || ic == 10 || ic == 15)
-		{
-			cout << "============================" << endl;
-			cout << "孔隙率= " << (*phi_r)[i] << endl;
-			cout << "x方向渗透率=" << (*kxx_r)[i] << endl;
-			cout << "密度 = " << (*rho_r)[i] << endl;
-			cout << "导热系数 = " << (*lam_r)[i] << endl;
-			cout << "============================" << endl;
-		}
+		//if (ic == 5 || ic == 10 || ic == 15)
+		//{
+		//	cout << "============================" << endl;
+		//	cout << "孔隙率= " << (*phi_r)[i] << endl;
+		//	cout << "x方向渗透率=" << (*kxx_r)[i] << endl;
+		//	cout << "密度 = " << (*rho_r)[i] << endl;
+		//	cout << "导热系数 = " << (*lam_r)[i] << endl;
+		//	cout << "============================" << endl;
+		//}
 
 
 	}
@@ -572,19 +573,19 @@ void PhysicalPropertiesManager::UpdateCO2inRockAt(MeshManager& mgr, FieldRegistr
 		auto Drho_Dp_gF = reg.get<volScalarField>("Drho_Dp_g");
 		auto c_gF = reg.get<volScalarField>("c_g");
 
-		for (size_t ic = 0; ic < cells.size(); ++ic)
-		{
-			//check
-			if (ic == 5 || ic == 10 || ic == 15)
-			{
-				cout << "============================" << endl;
-				cout << "CO2密度=" << (*rho_gF)[ic] << endl;
-				cout << "CO2黏度=" << (*mu_gF)[ic] << endl;
-				cout << "密度压缩系数" << (*Drho_Dp_gF)[ic] << endl;
-				cout << "CO2可压缩系数" << (*c_gF)[ic] << endl;
-				cout << "============================" << endl;
-			}
-		}
+		//for (size_t ic = 0; ic < cells.size(); ++ic)
+		//{
+		//	//check
+		//	if (ic == 5 || ic == 10 || ic == 15)
+		//	{
+		//		cout << "============================" << endl;
+		//		cout << "CO2密度=" << (*rho_gF)[ic] << endl;
+		//		cout << "CO2黏度=" << (*mu_gF)[ic] << endl;
+		//		cout << "密度压缩系数" << (*Drho_Dp_gF)[ic] << endl;
+		//		cout << "CO2可压缩系数" << (*c_gF)[ic] << endl;
+		//		cout << "============================" << endl;
+		//	}
+		//}
 	}
 	else
 	{
@@ -623,18 +624,18 @@ void PhysicalPropertiesManager::UpdateWaterinRockAt(MeshManager& mgr, FieldRegis
 		auto k_wF = reg.get<volScalarField>("k_w");
 		auto Drho_Dp_wF = reg.get<volScalarField>("Drho_Dp_w");
 
-		for (size_t ic = 0; ic < cells.size(); ++ic)
-		{
-			//check
-			if (ic == 5 || ic == 10 || ic == 15)
-			{
-				cout << "============================" << endl;
-				cout << "水的密度=" << (*rho_wF)[ic] << endl;
-				cout << "水的黏度=" << (*mu_wF)[ic] << endl;
-				cout << "水的压缩系数" << (*Drho_Dp_wF)[ic] << endl;
-				cout << "============================" << endl;
-			}
-		}
+		//for (size_t ic = 0; ic < cells.size(); ++ic)
+		//{
+		//	////check
+		//	//if (ic == 5 || ic == 10 || ic == 15)
+		//	//{
+		//	//	cout << "============================" << endl;
+		//	//	cout << "水的密度=" << (*rho_wF)[ic] << endl;
+		//	//	cout << "水的黏度=" << (*mu_wF)[ic] << endl;
+		//	//	cout << "水的压缩系数" << (*Drho_Dp_wF)[ic] << endl;
+		//	//	cout << "============================" << endl;
+		//	//}
+		//}
 	}
 	else
 	{
@@ -674,16 +675,16 @@ void PhysicalPropertiesManager::UpdateCO2inFractureAt(MeshManager& mgr, FieldReg
 		auto k_gF = reg.get<volScalarField>("fr_k_g");
 		auto Drho_Dp_gF = reg.get<volScalarField>("fr_Drho_Dp_g");
 
-		for (size_t ic = 0; ic < Nseg; ++ic)
-		{
-			//check
-			if (ic == 5 || ic == 10 || ic == 15)
-			{
-				cout << "CO2的密度=" << (*rho_gF)[ic] << endl;
-				cout << "CO2的黏度=" << (*mu_gF)[ic] << endl;
-				cout << "CO2的压缩系数" << (*Drho_Dp_gF)[ic] << endl;
-			}
-		}
+		//for (size_t ic = 0; ic < Nseg; ++ic)
+		//{
+		//	//check
+		//	//if (ic == 5 || ic == 10 || ic == 15)
+		//	//{
+		//	//	cout << "CO2的密度=" << (*rho_gF)[ic] << endl;
+		//	//	cout << "CO2的黏度=" << (*mu_gF)[ic] << endl;
+		//	//	cout << "CO2的压缩系数" << (*Drho_Dp_gF)[ic] << endl;
+		//	//}
+		//}
 	}
 	else
 	{
@@ -720,16 +721,16 @@ void PhysicalPropertiesManager::UpdateWaterinFractureAt(MeshManager& mgr, FieldR
 		auto k_wF = reg.get<volScalarField>("fr_k_w");
 		auto Drho_Dp_wF = reg.get<volScalarField>("fr_Drho_Dp_w");
 
-		for (size_t ic = 0; ic < Nseg; ++ic)
-		{
-			//check
-			if (ic == 5 || ic == 10 || ic == 15)
-			{
-				cout << "水的密度=" << (*rho_wF)[ic] << endl;
-				cout << "水的黏度=" << (*mu_wF)[ic] << endl;
-				cout << "水的压缩系数" << (*Drho_Dp_wF)[ic] << endl;
-			}
-		}
+		//for (size_t ic = 0; ic < Nseg; ++ic)
+		//{
+		//	//check
+		//	//if (ic == 5 || ic == 10 || ic == 15)
+		//	//{
+		//	//	cout << "水的密度=" << (*rho_wF)[ic] << endl;
+		//	//	cout << "水的黏度=" << (*mu_wF)[ic] << endl;
+		//	//	cout << "水的压缩系数" << (*Drho_Dp_wF)[ic] << endl;
+		//	//}
+		//}
 	}
 	else
 	{

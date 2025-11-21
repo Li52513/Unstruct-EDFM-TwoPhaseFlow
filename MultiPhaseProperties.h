@@ -132,7 +132,6 @@ namespace multiPhase {
 
 			// --- 4.5. Calculate Effective Thermal Properties ---
 			const double phi_val = (*phi_r)[i];
-			const double sg_val = 1.0 - sw_val;
 
 			// Effective volumetric heat capacity
 			(*C_eff)[i] = (1.0 - phi_val) * (*rho_r)[i] * (*cp_r)[i] +

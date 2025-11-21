@@ -41,7 +41,8 @@ namespace CO2_in_rock
 			(*k_gF)[i]   = BASE_k_g;
 			(*mu_gF)[i]  = BASE_mu_g;
 			(*Drho_Dp_gF)[i] = BASE_Drho_Dp_g;
-			(*c_gF)[i] = 1 / p_g; //假设可压缩系数为1/p
+			//(*c_gF)[i] = 1 / p_g; //假设可压缩系数为1/p
+			(*c_gF)[i] = 1e-5; //假设可压缩系数为1/p
 		}
 
 		return true;
