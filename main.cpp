@@ -694,7 +694,7 @@
 //}
 
 //实现CO2单相-常物性-渗流传热控制方程的离散与求解
-int main000000000000()
+int SinglePhase_CO2_TH_withoutWell()
 {
     
     //定义几何区域参数
@@ -793,8 +793,8 @@ int main000000000000()
         TbcA, PbcA, g,
         nSteps, dt, sc,
         /*writeEveryP*/ 10, /*writeEveryT*/ 10,
-        /*outPrefixP*/ "./Postprocess_Data/P_CO2_BDF2/p",
-        /*outPrefixT*/ "./Postprocess_Data/T_CO2_BDF2/T"
+        /*outPrefixP*/ "./Postprocess_Data/SinglePhase/P_CO2/p",
+        /*outPrefixT*/ "./Postprocess_Data/SinglePhase/T_CO2/T"
     );
 
     if (!ok) {
@@ -808,7 +808,7 @@ int main000000000000()
 }
 
 //实现CO2单相-常物性-渗流传热带井源控制方程的离散与求解 不带裂缝
-int main00000000000()
+int SinglePhase_CO2_TH_withWell()
 {
     //定义几何区域参数
     double lengthX = 1, lengthY = 1, lengthZ = 0;
@@ -1795,6 +1795,8 @@ int runCO2Displacement_IMPES_Ps()
 
 int main()
 {
-    return runCO2Displacement_IMPES_Ps();
+    //return runCO2Displacement_IMPES_Ps();
+
+    return SinglePhase_CO2_TH_withoutWell();
 }
 

@@ -160,7 +160,7 @@ void PhysicalPropertiesManager::ComputeEffectiveThermalProperties_constPropertie
 	//ensureRockFields(reg, n);
 
 	// 岩石参数（必须存在）
-	auto phiF = reg.get<volScalarField>("phi");
+	auto phiF = reg.get<volScalarField>("phi_r");
 	auto rrF = reg.get<volScalarField>("rho_r");
 	auto cprF = reg.get<volScalarField>("cp_r");
 	auto lamrF = reg.get<volScalarField>("lambda_r");
@@ -229,7 +229,7 @@ void PhysicalPropertiesManager::ComputeEffectiveThermalProperties_test_varProper
 	//ensureRockFields(reg, n);
 
 	// 岩石参数（必须存在）
-	auto phiF = reg.get<volScalarField>("phi");
+	auto phiF = reg.get<volScalarField>("phi_r");
 	auto rrF = reg.get<volScalarField>("rho_r");
 	auto cprF = reg.get<volScalarField>("cp_r");
 	auto lamrF = reg.get<volScalarField>("lambda_r");
@@ -552,6 +552,7 @@ static inline void ensureCO2inRockFields(FieldRegistry& reg, std::size_t n)
 	reg.getOrCreate<volScalarField>("cp_g", n, 846.0);		//二氧化碳的比热容，J/(kg·K)
 	reg.getOrCreate<volScalarField>("k_g", n, 0.0146);		//二氧化碳的导热系数，W/(m·K)
 	reg.getOrCreate<volScalarField>("Drho_Dp_g", n, 0.0);	//二氧化碳的密度对压力的导数，kg/(m³·Pa)
+	reg.getOrCreate <volScalarField>("c_g", n, 0.0);      //二氧化碳的可压缩系数，1/Pa
 }
 
 //基岩中CO2的物性参数注册与计算更新
@@ -569,6 +570,7 @@ void PhysicalPropertiesManager::UpdateCO2inRockAt(MeshManager& mgr, FieldRegistr
 		auto cp_gF = reg.get<volScalarField>("cp_g");
 		auto k_gF = reg.get<volScalarField>("k_g");
 		auto Drho_Dp_gF = reg.get<volScalarField>("Drho_Dp_g");
+		auto c_gF = reg.get<volScalarField>("c_g");
 
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
@@ -579,6 +581,7 @@ void PhysicalPropertiesManager::UpdateCO2inRockAt(MeshManager& mgr, FieldRegistr
 				cout << "CO2密度=" << (*rho_gF)[ic] << endl;
 				cout << "CO2黏度=" << (*mu_gF)[ic] << endl;
 				cout << "密度压缩系数" << (*Drho_Dp_gF)[ic] << endl;
+				cout << "CO2可压缩系数" << (*c_gF)[ic] << endl;
 				cout << "============================" << endl;
 			}
 		}
@@ -599,6 +602,7 @@ static inline void ensureWaterinRockFields(FieldRegistry& reg, std::size_t n)
 	reg.getOrCreate<volScalarField>("cp_w", n, 846.0);		//二氧化碳的比热容，J/(kg·K)
 	reg.getOrCreate<volScalarField>("k_w", n, 0.0146);		//二氧化碳的导热系数，W/(m·K)
 	reg.getOrCreate<volScalarField>("Drho_Dp_w", n, 0.0);	//二氧化碳的密度对压力的导数，kg/(m³·Pa)
+	reg.getOrCreate <volScalarField>("c_w", n, 0.0);		//水的可压缩系数，1/Pa
 }
 
 
@@ -650,6 +654,7 @@ static inline void ensureCO2inFractureFields(FieldRegistry& reg_fr, std::size_t 
 	reg_fr.getOrCreate<volScalarField>("fr_cp_g", ne, 846.0);
 	reg_fr.getOrCreate<volScalarField>("fr_k_g", ne, 0.0146);
 	reg_fr.getOrCreate<volScalarField>("fr_Drho_Dp_g", ne, 0.0);	//二氧化碳的密度对压力的导数，kg/(m³·Pa)
+	reg_fr.getOrCreate <volScalarField>("fr_c_g", ne, 0.0);      //二氧化碳的可压缩系数，1/Pa
 }
 
 //赋值
@@ -695,6 +700,7 @@ static inline void ensureWaterinFractureFields(FieldRegistry& reg_fr, std::size_
 	reg_fr.getOrCreate<volScalarField>("fr_cp_w", ne, 846.0);
 	reg_fr.getOrCreate<volScalarField>("fr_k_w", ne, 0.0146);
 	reg_fr.getOrCreate<volScalarField>("fr_Drho_Dp_w", ne, 0.0);	//二氧化碳的密度对压力的导数，kg/(m³·Pa)
+	reg_fr.getOrCreate <volScalarField>("fr_c_w", ne, 0.0);		//水的可压缩系数，1/Pa
 }
 
 //赋值
@@ -1363,7 +1369,7 @@ void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_
 	const size_t n = cells.size();
 	ensureRockFields(reg, n);
 
-	auto phi_r = reg.get<volScalarField>("phi"); //孔隙度
+	auto phi_r = reg.get<volScalarField>("phi_r"); //孔隙度
 	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
 	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
 	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
@@ -1388,14 +1394,14 @@ void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_
 	const size_t n = cells.size();
 	ensureRockFields(reg, n);
 
-	auto phi_r = reg.get<volScalarField>("phi"); //孔隙度
+	auto phi_r = reg.get<volScalarField>("phi_r"); //孔隙度
 	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
 	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
-	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
+	auto lambda_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
 	auto c_phi = reg.get<volScalarField>("c_phi"); //孔隙度可压缩性，1/Pa
-	auto k_xx = reg.get<volScalarField>("kxx"); //基岩渗透率，m²
-	auto k_yy = reg.get<volScalarField>("kyy");
-	auto k_zz = reg.get<volScalarField>("kzz");
+	auto kxx = reg.get<volScalarField>("kxx"); //基岩渗透率，m²
+	auto kyy = reg.get<volScalarField>("kyy");
+	auto kzz = reg.get<volScalarField>("kzz");
 
 	for (size_t ic = 0; ic < cells.size(); ++ic)
 	{
@@ -1405,10 +1411,10 @@ void PhysicalPropertiesManager::RockProperties_test_constProperties_singlePhase_
 		(*phi_r)[i] = 0.15;
 		(*rho_r)[i] = 2650.0;
 		(*cp_r)[i] = 1000.0;
-		(*lam_r)[i] = 3;
+		(*lambda_r)[i] = 3;
 		(*c_phi)[i] = 0;
-		(*k_xx)[i] = 1e-14;
-		(*k_yy)[i] = 1e-14;
-		(*k_zz)[i] = 1e-14;
+		(*kxx)[i] = 1e-14;
+		(*kyy)[i] = 1e-14;
+		(*kzz)[i] = 1e-14;
 	}
 }

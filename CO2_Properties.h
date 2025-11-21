@@ -24,6 +24,8 @@ namespace CO2_in_rock
 		auto k_gF = reg.get<volScalarField>("k_g");
 		auto mu_gF = reg.get<volScalarField>("mu_g");
 		auto Drho_Dp_gF = reg.get<volScalarField>("Drho_Dp_g");
+		auto c_gF = reg.get<volScalarField>("c_g");
+
 
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
@@ -39,6 +41,7 @@ namespace CO2_in_rock
 			(*k_gF)[i]   = BASE_k_g;
 			(*mu_gF)[i]  = BASE_mu_g;
 			(*Drho_Dp_gF)[i] = BASE_Drho_Dp_g;
+			(*c_gF)[i] = 1 / p_g; //假设可压缩系数为1/p
 		}
 
 		return true;
@@ -69,6 +72,7 @@ namespace CO2_in_fracture
 		auto fr_cp_g = reg_fr.get<volScalarField>("fr_cp_g");
 		auto fr_k_g = reg_fr.get<volScalarField>("fr_k_g");
 		auto fr_Drho_Dp_g = reg_fr.get<volScalarField>("fr_Drho_Dp_g");
+		auto fr_c_w_g = reg_fr.get<volScalarField>("fr_c_g"); // CO2 可压缩系数
 
 		size_t gid = 0;
 		for (auto& F : mgr.fracture_network().fractures) 
@@ -80,6 +84,8 @@ namespace CO2_in_fracture
 				(*fr_cp_g)[gid] = BASE_cp_g;
 				(*fr_k_g)[gid] = BASE_k_g;
 				(*fr_Drho_Dp_g)[gid] = BASE_Drho_Dp_g;
+				double p_g = (*pF)[gid];
+				(*fr_c_w_g)[gid] = 1 / p_g; //假设可压缩系数为1/p
 				++gid;
 			}
 		}

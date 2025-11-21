@@ -58,16 +58,18 @@ namespace multiPhase {
 		auto mu_w = reg.get<volScalarField>("mu_w");
 		auto cp_w = reg.get<volScalarField>("cp_w");
 		auto k_w = reg.get<volScalarField>("k_w");
+		auto c_w = reg.get<volScalarField>("c_w"); //水的压缩系数
 		// CO2 properties:
 		auto rho_g = reg.get<volScalarField>("rho_g");
 		auto mu_g = reg.get<volScalarField>("mu_g");
 		auto cp_g = reg.get<volScalarField>("cp_g");
 		auto k_g = reg.get<volScalarField>("k_g");
+		auto c_g = reg.get<volScalarField>("c_g"); //气体的压缩系数
 
 		// Check if any pointer is null. This is a critical safety check.
 		if (!s_w || !p_w || !phi_r || !rho_r || !cp_r || !lambda_r ||
 			!rho_w || !mu_w || !cp_w || !k_w ||
-			!rho_g || !mu_g || !cp_g || !k_g) {
+			!rho_g || !mu_g || !cp_g || !k_g||!c_g||!c_w) {
 			std::cerr << "ERROR [multiPhase::Rock]: Missing one or more required fields for property update." << std::endl;
 			return false;
 		}
@@ -82,6 +84,11 @@ namespace multiPhase {
 		auto lambda_w = reg.getOrCreate<volScalarField>("lambda_w", n, 0.0);
 		auto lambda_g = reg.getOrCreate<volScalarField>("lambda_g", n, 0.0);
 		auto lambda_t = reg.getOrCreate<volScalarField>("lambda_t", n, 0.0);
+		//Time term  Total density: ρ_t = S_w * ρ_w + S_g * ρ_g and Total Compressibility (c_t):c_t = c_r + (S_w * ρ_w * c_w + S_g * ρ_g * c_g) / (S_w * ρ_w + S_g * ρ_g)
+		auto rho_t = reg.getOrCreate<volScalarField>("rho_t", n, 0.0);
+		auto c_t = reg.getOrCreate<volScalarField>("c_t", n, 0.0);
+		auto c_r = reg.get<volScalarField>("c_r"); // Rock compressibility
+
 		// Effective thermal properties
 		auto C_eff = reg.getOrCreate<volScalarField>("C_eff", n, 0.0);
 		auto lambda_eff = reg.getOrCreate<volScalarField>("lambda_eff", n, 0.0);
@@ -111,6 +118,17 @@ namespace multiPhase {
 			(*lambda_w)[i] = (*k_rw)[i] / std::max((*mu_w)[i], kTiny);
 			(*lambda_g)[i] = (*k_rg)[i] / std::max((*mu_g)[i], kTiny);
 			(*lambda_t)[i] = (*lambda_w)[i] + (*lambda_g)[i];
+
+			// --- 4.4. Calculate Total Density and Total Compressibility ---
+			const double sg_val = 1.0 - sw_val;
+			const double rho_w_val = (*rho_w)[i];
+			const double rho_g_val = (*rho_g)[i];
+			const double c_w_val = (*c_w)[i];
+			const double c_g_val = (*c_g)[i];
+			// Total density
+			(*rho_t)[i] = sw_val * rho_w_val + sg_val * rho_g_val;
+			// Total compressibility
+			(*c_t)[i] = (*c_r)[i] + (sw_val * rho_w_val * c_w_val + sg_val * rho_g_val * c_g_val) / std::max((*rho_t)[i], kTiny);
 
 			// --- 4.5. Calculate Effective Thermal Properties ---
 			const double phi_val = (*phi_r)[i];

@@ -582,7 +582,7 @@ inline void applyAitkenToField(
 
     if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
         mgr, reg, dt,
-        "c_phi", "phi",
+        "c_phi", "phi_r",
         "p_g_old", "rho_g",
         "p_g_prev", "rho_g",
         "Drho_Dp_g",

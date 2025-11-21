@@ -10,6 +10,7 @@ namespace Water_in_rock
 	static constexpr double BASE_k_w = 0.05;
 	static constexpr double BASE_mu_w = 3e-54;
 	static constexpr double BASE_Drho_Dp_w = 0;
+	static constexpr double BASE_c_w = 1; //压缩系数
 
 	inline bool computeWATERinROCKProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_field, const std::string& T_field)  //这里传入基岩的压力和温度 但是对于IMPES来说，不会更新这里的参数
 	{
@@ -25,6 +26,8 @@ namespace Water_in_rock
 		auto mu_wF = reg.get<volScalarField>("mu_w");
 		auto Drho_Dp_wF = reg.get<volScalarField>("Drho_Dp_w");
 
+		auto c_wF = reg.get<volScalarField>("c_w"); //压缩系数
+
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
 			const auto& c = cells[ic];
@@ -39,6 +42,7 @@ namespace Water_in_rock
 			(*k_wF)[i] = BASE_k_w;
 			(*mu_wF)[i] = BASE_mu_w;
 			(*Drho_Dp_wF)[i] = BASE_Drho_Dp_w;
+			(*c_wF)[i] = BASE_c_w;
 		}
 		return true;
 	}
@@ -51,6 +55,7 @@ namespace Water_in_fracture
 	static constexpr double BASE_k_w = 0.05;
 	static constexpr double BASE_mu_w = 3e-4;
 	static constexpr double BASE_Drho_Dp_w = 0;
+	static constexpr double BASE_c_w = 1; //压缩系数
 
 	inline bool computerWaterinFractureProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& p_field_fr, const std::string& T_field_fr)
 	{
@@ -68,6 +73,7 @@ namespace Water_in_fracture
 		auto fr_cp_w = reg_fr.get<volScalarField>("fr_cp_w");
 		auto fr_k_w = reg_fr.get<volScalarField>("fr_k_w");
 		auto fr_Drho_Dp_w = reg_fr.get<volScalarField>("fr_Drho_Dp_w");
+		auto fr_c_w = reg_fr.get<volScalarField>("fr_c_w"); //压缩系数
 
 		size_t gid = 0;
 		for (auto& F : mgr.fracture_network().fractures)
@@ -79,6 +85,7 @@ namespace Water_in_fracture
 				(*fr_cp_w)[gid] = BASE_cp_w;
 				(*fr_k_w)[gid] = BASE_k_w;
 				(*fr_Drho_Dp_w)[gid] = BASE_Drho_Dp_w;
+				(*fr_c_w)[gid] = BASE_c_w;
 				++gid;
 			}
 		}
