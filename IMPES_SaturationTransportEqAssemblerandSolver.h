@@ -414,3 +414,15 @@ namespace IMPES_revised
     }
 
 } // namespace IMPES_revised
+
+namespace IMPES_Iteration
+{
+    struct SaturationTransportConfig
+    {
+        std::string saturation = "s_w";
+        std::string saturation_old = "s_w_old";
+        std::string saturation_prev = "s_w_prev";
+        VGParams vg_params;                        
+        RelPermParams rp_params;
+    };
+}

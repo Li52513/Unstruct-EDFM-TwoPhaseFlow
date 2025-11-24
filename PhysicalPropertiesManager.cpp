@@ -548,6 +548,7 @@ void PhysicalPropertiesManager::UpdateFractureRockAt(MeshManager& mgr, FieldRegi
 //注册
 static inline void ensureCO2inRockFields(FieldRegistry& reg, std::size_t n)
 {
+
 	reg.getOrCreate<volScalarField>("rho_g", n, 1.98);		//二氧化碳的密度，kg/m³
 	reg.getOrCreate<volScalarField>("mu_g", n, 1.48e-5);	//二氧化碳的粘度，Pa·s
 	reg.getOrCreate<volScalarField>("cp_g", n, 846.0);		//二氧化碳的比热容，J/(kg·K)

@@ -34,6 +34,7 @@
 
 
 #include "MultiPhaseProperties.h"
+#include"0_PhysicalParametesCalculateandUpdata.h"
 
 
 //int main1()
@@ -2035,14 +2036,361 @@ int run_IMPES_revised_PS()
     return 0;
 }
 
+/// \brief 简单测试：两相物性 + 基本物性更新 + IMPES 时间项装配
+///
+/// 场景：
+/// - 100m x 100m，30x30 剖分，2D 网格；
+/// - 初始：全场 p_w = 6.5 MPa，T = 373.15 K；
+/// - 左侧一条 CO2 条带：S_w = 0，其余区域 S_w = 1；
+/// - 使用 VG-Mualem 计算 Pc, krw, krg；
+/// - 常物性：rho_w=1000, rho_g=800, drho/dp=0（在 TwoPhase 里已写死为常数）；
+/// - 只组装时间项，不求解线性系统。
+int run_IMPES_TwoPhase_TimeTerm_Test()
+{
+    // ---------------- 0. 网格与场注册 ----------------
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int sectionNumX = 20;
+    const int sectionNumY = 20;
+    const int sectionNumZ = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    std::cout << "\n===== [TEST] IMPES two-phase time-term assembly =====\n";
+
+    std::cout << "--- IMPES: building mesh (CO2 displacement) ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ,
+        sectionNumX, sectionNumY, sectionNumZ,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    FieldRegistry     reg;
+    FaceFieldRegistry freg;
+
+    // ---------- 1. 初始主变量场 ----------
+    std::cout << "--- IMPES: initializing primary fields ---\n";
+    InitFields ic;
+    ic.p_w0 = 6.5e6;
+    ic.dp_wdx = 1e6;
+    ic.T0 = 373.15;
+    ic.s_w = 1.0;
+
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
+        mgr.mesh(), reg, "p_w", "s_w", "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(
+        mgr.mesh(), reg, ic);
+
+    // 时间相关辅助场 p_old/prev, s_old/prev, T_old/prev
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
+
+    // 把当前初场拷贝到 *_old / *_prev，确保时间层一致
+    copyField(reg, "p_w", "p_w_old");
+    copyField(reg, "p_w", "p_w_prev");
+    copyField(reg, "s_w", "s_w_old");
+    copyField(reg, "s_w", "s_w_prev");
+    copyField(reg, "T", "T_old");
+    copyField(reg, "T", "T_prev");
+
+    // 左侧给一条 CO2 条带：将 s_w=0
+    {
+        const double co2StripeWidth = std::max(1.0, 0.1 * lengthX);
+        auto sw = reg.get<volScalarField>("s_w");
+        auto sw_old = reg.get<volScalarField>("s_w_old");
+        auto sw_prev = reg.get<volScalarField>("s_w_prev");
+        if (sw && sw_old && sw_prev)
+        {
+            const auto& cells = mgr.mesh().getCells();
+            const auto& id2idx = mgr.mesh().getCellId2Index();
+            for (const auto& c : cells)
+            {
+                if (c.id < 0) continue;
+                if (c.center.m_x <= co2StripeWidth)
+                {
+                    const size_t idx = id2idx.at(c.id);
+                    (*sw)[idx] = 0.0;
+                    (*sw_old)[idx] = 0.0;
+                    (*sw_prev)[idx] = 0.0;
+                }
+            }
+        }
+    }
+
+    // ---------- 2. 基岩 / 流体物性初始化 ----------
+    std::cout << "--- IMPES: updating rock/fluid properties (matrix only) ---\n";
+    PhysicalPropertiesManager ppm;
+
+    // 区域分类（这里只用一个 RegionType::Medium）
+    ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+
+    // 确保 IMPES 时间项需要的岩石孔隙度/压缩性场存在（phi_r, c_r）
+    {
+        const std::size_t nCells = mgr.mesh().getCells().size();
+        TwoPhase::ensureRockFields(reg, nCells);
+    }
+
+    // VG / 相对渗透率参数
+    VGParams vg_params;
+    vg_params.Swr = 0.20;
+    vg_params.Sgr = 0.00;
+    vg_params.alpha = 2.0e-6;
+    vg_params.n = 2.5;
+
+    RelPermParams rp_params;
+    rp_params.L = 0.5;
+
+    // 在时间步开始时：基于 Sw 更新 Pc, krw, krg, dPc_dSw
+    TwoPhase::updateTwoPhasePropertiesAtTimeStep(
+        mgr, reg, "s_w", vg_params, rp_params);
+
+    // ---------- 3. 压力边界条件（其实对时间项没影响，这里只是保持完整性） ----------
+    const auto& bfaces = mgr.boundaryFaces();
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    // ---------- 4. 井配置（此例为空） ----------
+    std::vector<WellConfig_TwoPhase> wells_cfg;
+    build_masks_and_WI_for_all(mgr, reg, wells_cfg);
+    const int Ncells = static_cast<int>(mgr.mesh().getCells().size());
+    std::vector<WellDOF_TwoPhase> wells_dof;
+    register_well_dofs_for_all_TwoPhase(Ncells, wells_cfg, wells_dof);
+
+    // ---------- 5. 基本物性更新 & old 层备份 ----------
+    std::cout << "--- IMPES: update water/CO2 basic properties at step ---\n";
+    // 这里用 p_w 作为“当前迭代的压力评估点”，T 为温度场
+    TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, "p_w", "T");
+    TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, "p_w", "T");
+
+    // 把当前步的物性复制到 *_old，供时间项使用
+    if (!TwoPhase::copyBasicPropertiesToOldLayer(reg))
+    {
+        std::cerr << "[TEST] copyBasicPropertiesToOldLayer failed.\n";
+        return 1;
+    }
+
+    // ---------- 6. 时间项装配测试 ----------
+    std::cout << "--- IMPES: assemble time term (ITERATIVE formulation) ---\n";
+
+    const double dt = 1.0;   // 测试用时间步长 [s]，只影响 aC, bC 的量级
+    const std::string aC_name = "aC_time";
+    const std::string bC_name = "bC_time";
+
+    if (!IMPES_Iteration::TimeTerm_IMPES_Pressure(
+        mgr, reg, dt,
+        /*p_old_name=*/"p_w_old",
+        /*p_eval_name=*/"p_w",      // 当前迭代猜测压力，这里用初始 p_w 测一遍
+        aC_name,
+        bC_name))
+    {
+        std::cerr << "[TEST] TimeTerm_IMPES_Pressure failed.\n";
+        return 1;
+    }
+
+    auto aC = reg.get<volScalarField>(aC_name);
+    auto bC = reg.get<volScalarField>(bC_name);
+    if (!aC || !bC)
+    {
+        std::cerr << "[TEST] Missing aC or bC field after time-term assembly.\n";
+        return 1;
+    }
+
+    // ---------- 7. 结果诊断打印 ----------
+    double aC_min = 1e300, aC_max = -1e300;
+    double bC_min = 1e300, bC_max = -1e300;
+
+    const auto& cells = mgr.mesh().getCells();
+    const auto& id2idx = mgr.mesh().getCellId2Index();
+
+    for (const auto& c : cells)
+    {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+
+        const double ai = (*aC)[i];
+        const double bi = (*bC)[i];
+
+        aC_min = std::min(aC_min, ai);
+        aC_max = std::max(aC_max, ai);
+        bC_min = std::min(bC_min, bi);
+        bC_max = std::max(bC_max, bi);
+    }
+
+    std::cout << std::scientific;
+    std::cout << "[TEST] aC_time range: [" << aC_min << ", " << aC_max << "]\n";
+    std::cout << "[TEST] bC_time range: [" << bC_min << ", " << bC_max << "]\n";
+
+    // 额外打印几格诊断（左侧 CO2 区 vs 右侧水区）
+    auto p_w = reg.get<volScalarField>("p_w");
+    auto s_w = reg.get<volScalarField>("s_w");
+    auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
+    auto rho_g = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
+
+    if (p_w && s_w && rho_w && rho_g)
+    {
+        std::cout << "\n[TEST] sample cells:\n";
+        const double x_mid = 0.5 * lengthX;
+        const double x_co2 = 0.05 * lengthX;
+
+        int co2_sample = -1;
+        int water_sample = -1;
+
+        for (const auto& c : cells)
+        {
+            if (c.id < 0) continue;
+            const size_t i = id2idx.at(c.id);
+
+            if (co2_sample < 0 && c.center.m_x < x_co2)
+            {
+                co2_sample = static_cast<int>(i);
+            }
+            if (water_sample < 0 && c.center.m_x > x_mid)
+            {
+                water_sample = static_cast<int>(i);
+            }
+            if (co2_sample >= 0 && water_sample >= 0) break;
+        }
+
+        auto print_cell = [&](const char* tag, int idx)
+            {
+                if (idx < 0) return;
+                std::cout << "  [" << tag << "] i=" << idx
+                    << "  p_w=" << (*p_w)[idx]
+                    << "  s_w=" << (*s_w)[idx]
+                    << "  rho_w=" << (*rho_w)[idx]
+                    << "  rho_g=" << (*rho_g)[idx]
+                    << "  aC=" << (*aC)[idx]
+                    << "  bC=" << (*bC)[idx]
+                    << "\n";
+            };
+
+        print_cell("CO2-zone", co2_sample);
+        print_cell("water-zone", water_sample);
+    }
+
+    std::cout << "===== [TEST] IMPES two-phase time-term assembly done. =====\n";
+    return 0;
+}
+
+
+int run_IMPES_Iteration_TimeTerm_AnalyticalTest()
+{
+    // ---------------- 0. 网格与场注册 ----------------
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int sectionNumX = 50;
+    const int sectionNumY = 50;
+    const int sectionNumZ = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    std::cout << "\n===== [TEST] IMPES two-phase time-term assembly =====\n";
+
+    std::cout << "--- IMPES: building mesh (CO2 displacement) ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ,
+        sectionNumX, sectionNumY, sectionNumZ,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    FieldRegistry     reg;
+    FaceFieldRegistry freg;
+
+    // ---------- 1. 初始主变量场 ----------
+    std::cout << "--- IMPES: initializing primary fields ---\n";
+    InitFields ic;
+    ic.p_w0 = 6.5e6;
+    ic.dp_wdx =0.0;
+    ic.T0 = 373.15;
+    ic.s_w = 1.0;
+
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
+        mgr.mesh(), reg, "p_w", "s_w", "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(
+        mgr.mesh(), reg, ic);
+
+    // 时间相关辅助场 p_old/prev, s_old/prev, T_old/prev
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
+
+    // 区域分类（这里只用一个 RegionType::Medium）
+    PhysicalPropertiesManager ppm;
+    ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+
+    // VG / 相对渗透率参数
+    VGParams vg_params;
+    vg_params.Swr = 0.20;
+    vg_params.Sgr = 0.00;
+    vg_params.alpha = 2.0e-6;
+    vg_params.n = 2.5;
+
+    RelPermParams rp_params;
+    rp_params.L = 0.5;
+
+    const auto& bfaces = mgr.boundaryFaces();
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 6.5e6 };
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+	// ---------- 6. 时间项装配测试 ----------
+
+    const int    nSteps = 1000;
+	const double totalTime = 1000.0;
+    const double dt = totalTime / nSteps;
+
+	IMPES_Iteration::PressureSolveControls pCtrl;
+	pCtrl.assembly.pressure_field = "p_w";
+	pCtrl.assembly.pressure_old_field = "p_w_old";
+	pCtrl.assembly.pressure_prev_field = "p_w_prev";
+  
+
+	IMPES_Iteration::SaturationTransportConfig satCfg;
+	satCfg.saturation = "s_w";
+	satCfg.saturation_old = "s_w_old";
+	satCfg.saturation_prev = "s_w_prev";
+	satCfg.vg_params = vg_params;
+	satCfg.rp_params = rp_params;
+
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case3/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case3/s_impes_ps_revised/s_ps";
+    const std::string timeSeriesFn = "./Postprocess_Data/IMPES_Iteration_Test/Case3/time_series/impes_ps_revised_stats.csv";  // 如需写出时间序列可填路径
+
+    if (!IMPES_Iteration::runTransient_IMPES_AnalyticTest(
+        mgr, reg, freg, PbcA,
+        nSteps, dt,
+        pCtrl, satCfg,
+        10, 10,
+        outPrefixP, outPrefixSw,
+        10, timeSeriesFn))
+    {
+        std::cerr << "[TEST] runTransient_IMPES_AnalyticTest failed.\n";
+        return 1;
+    }
+
+    std::cout << "===== [TEST] IMPES two-phase time-term assembly done. =====\n";
+    return 0;
+}
 
 
 
 
 int main()
 {
-    //return runCO2Displacement_IMPES_Ps();
+   
 
-    return run_IMPES_revised_PS();
+    return run_IMPES_Iteration_TimeTerm_AnalyticalTest();
 }
 
