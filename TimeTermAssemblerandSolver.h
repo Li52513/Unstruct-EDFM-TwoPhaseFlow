@@ -6,6 +6,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "0_PhysicalParametesCalculateandUpdata.h"
+#include    "SaturationTransportEqAssemblerandSolver.h"
 
 namespace IMPES_Iteration
 {

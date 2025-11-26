@@ -23,6 +23,7 @@
 #include "Solver_TimeLoopDriver_IMPES.h"
 #include "Solver_TimeLoopUtils.h" 
 
+
 //#include "FVM_SourceTerm_InjectionMask.h"
 //#include "FVM_SourceTerm_PeacemanModel.h"
 
@@ -33,8 +34,9 @@
 #include "WellConfig_TwoPhase.h"
 
 
-#include "MultiPhaseProperties.h"
-#include"0_PhysicalParametesCalculateandUpdata.h"
+#include    "MultiPhaseProperties.h"
+#include    "0_PhysicalParametesCalculateandUpdata.h"
+#include    "TimeLoopDriver.h"
 
 
 //int main1()
@@ -2384,6 +2386,542 @@ int run_IMPES_Iteration_TimeTerm_AnalyticalTest()
     return 0;
 }
 
+/// \brief 测试重力项 + 扩散算子在静水压场下的一致性
+/// \details
+/// 1) 搭建一个简单 2D 竖直网格；
+/// 2) 填充常物性水相/气相 mobility 与密度、渗透率；
+/// 3) 调用 IMPES_Iteration::runHydrostaticGravityOperatorTest 生成静水压场 p_w，
+///    并用扩散+重力算子 L[p_w] 检查其残差；
+/// 4) 返回 0 表示流程执行成功（是否“物理正确”看输出残差大小）。
+int TestGravityTerm()
+{
+    // ---------------- 0. 网格与场注册 ----------------
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int    sectionNumX = 50;
+    const int    sectionNumY = 50;
+    const int    sectionNumZ = 0;
+    const bool   usePrism = true;
+    const bool   useQuadBase = false;
+
+    std::cout << "\n===== [TEST] Gravity + Diffusion operator (hydrostatic column) =====\n";
+
+    std::cout << "--- building solid matrix mesh ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ,
+        sectionNumX, sectionNumY, sectionNumZ,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    Mesh& mesh = mgr.mesh();
+    FieldRegistry     reg;
+    FaceFieldRegistry freg;
+
+    // 压力瞬态场（IMPES 用的那套）
+    ensureTransientFields_scalar(mesh, reg, "p_w", "p_w_old", "p_w_prev");
+
+    const auto& cells = mesh.getCells();
+    const size_t nCell = cells.size();
+
+    if (nCell == 0) {
+        std::cerr << "[TestGravityTerm] mesh has no cells.\n";
+        return 1;
+    }
+
+    // ---------------- 1. 常物性两相场 & 渗透率 ----------------
+    // 这里直接用 TwoPhase 命名空间里的 tag，避免手写字符串
+    const auto water = TwoPhase::Water();
+    const auto co2 = TwoPhase::CO2();
+    const auto aux = TwoPhase::Auxiliaryparameters();
+
+    // 简单常数：单相水主导，气相 mobility 设 0
+    const double rho_w_const = 1000.0;   // kg/m3
+    const double rho_g_const = 1.0;      // kg/m3 (几乎不参与)
+    const double mu_w_const = 1.0e-3;   // Pa·s
+    const double mu_g_const = 1.0e-5;   // Pa·s (无所谓)
+    const double kr_w_const = 1.0;
+    const double kr_g_const = 0.0;
+    const double lambda_w_const = kr_w_const / mu_w_const;
+    const double lambda_g_const = kr_g_const / mu_g_const;
+
+    const double k_const = 1.0e-14; // m^2，各向同性
+
+    // 渗透率张量
+    auto kxx = reg.getOrCreate<volScalarField>("kxx", nCell, k_const);
+    auto kyy = reg.getOrCreate<volScalarField>("kyy", nCell, k_const);
+    auto kzz = reg.getOrCreate<volScalarField>("kzz", nCell, k_const);
+
+    // 流体密度 & mobility 场
+    auto rho_w = reg.getOrCreate<volScalarField>(water.rho_tag, nCell, rho_w_const);
+    auto rho_g = reg.getOrCreate<volScalarField>(co2.rho_tag, nCell, rho_g_const);
+    auto lam_w = reg.getOrCreate<volScalarField>(water.lambda_w_tag, nCell, lambda_w_const);
+    auto lam_g = reg.getOrCreate<volScalarField>(co2.lambda_g_tag, nCell, lambda_g_const);
+
+    // λ_mass 场：computeDerivedMobilityFields 里用 reg.get() 拿这个场，所以这里先创建
+    reg.getOrCreate<volScalarField>(aux.lambda_mass_tag, nCell, 0.0);
+
+    // （如果想更严谨，也可以逐 cell 填值；目前全场常数就够测算子）
+
+    // ---------------- 2. 压力边界条件（这里全零流 Neumann 较简单） ----------------
+    const auto& bfaces = mgr.boundaryFaces();
+
+    PressureBC::Registry pbc_pw;
+
+    // a p + b ∂p/∂n = c
+    // Neumann: a=0, b=1, c=0 -> zero flux
+    PressureBC::BoundaryCoefficient P_Left{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    // ---------------- 3. PressureAssemblyConfig 配置重力 ----------------
+    IMPES_Iteration::PressureAssemblyConfig cfg;
+    cfg.operator_tag = "hydrostatic_test";
+    cfg.pressure_field = "p_w";
+    cfg.pressure_old_field = "p_w_old";
+    cfg.pressure_prev_field = "p_w_prev";
+    cfg.Pc_field = "Pc";          // 这里不会用到，可以留空或确保存在
+    cfg.gravity = Vector{ 0.0, -9.81, 0.0 }; // y 轴向上，重力向下
+    cfg.enable_buoyancy = true;
+    cfg.gradient_smoothing = 0;             // 先关掉平滑，方便看纯离散误差
+
+    // 这些字段名要和 computeDerivedMobilityFields 中一致
+    cfg.rho_coeff_field = "rho_coeff_mass";
+    cfg.rho_capillary_field = "rho_capillary_mass";
+    cfg.rho_gravity_field = "rho_gravity_mass";
+    cfg.lambda_gravity_field = "lambda_gravity_mass";
+    cfg.gravity_dummy_field = "gravity_dummy_scalar";
+
+    // ---------------- 4. 调用静水算子测试 ----------------
+    bool ok = IMPES_Iteration::runHydrostaticGravityOperatorTest(
+        mgr, reg, freg, PbcA, cfg);
+
+    if (!ok) {
+        std::cerr << "[TestGravityTerm] runHydrostaticGravityOperatorTest failed.\n";
+        return 1;
+    }
+
+    std::cout << "[TestGravityTerm] finished. Check above residuals for consistency.\n";
+    return 0;
+}
+
+/**
+ * @brief 单独测试毛细扩散算子 L[Pc] = ∇·(k λ_g ρ_g ∇Pc)
+ *
+ * 测试设置：
+ * - kxx=kyy=kzz=1，λ_g=1，ρ_g=1，λ_w=0，ρ_w=0 ⇒ L[Pc] = ∇² Pc；
+ * - 构造解析 Pc(x,y) = P0 + α (y - ymin)，满足 ∇²Pc = 0；
+ * - 左右边界：Neumann 零通量；上下边界：解析 Dirichlet；
+ * - 用 TwoPhaseDiffusionTemplate + assemble_COO + applyCOO 得到 y=A*Pc - b，
+ *   检查 max|y|、L2|y| 是否接近 0。
+ *
+ * @return 0 表示流程执行成功（是否“物理上正确”看终端残差大小），非 0 表示流程错误。
+ */
+ /// \brief 独立测试“毛细压扩散算子”的零模（常数 Pc）性质.
+ ///        期望：在均匀 k、均匀 rho_cap、常数 Pc 条件下，
+ ///             离散算子 L[Pc] ≈ 0（只剩机器误差）.
+int TestCapillaryTerm_v2()
+{
+    using namespace IMPES_Iteration;
+
+    // ---------------- 0. 网格与场注册 ----------------
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;   // 2D
+    const int    sectionNumX = 50;
+    const int    sectionNumY = 50;
+    const int    sectionNumZ = 0;
+    const bool   usePrism = true;
+    const bool   useQuadBase = false;
+
+    std::cout << "\n===== [TEST] Capillary diffusion operator (v2, constant Pc) =====\n";
+
+    MeshManager mgr(lengthX, lengthY, lengthZ,
+        sectionNumX, sectionNumY, sectionNumZ,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    Mesh& mesh = mgr.mesh();
+    FieldRegistry     reg;
+    FaceFieldRegistry freg;
+
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
+    const size_t nCells = cells.size();
+
+    // ---------------- 1. 定义压力与系数字段名 ----------------
+    PressureAssemblyConfig cfg;
+    cfg.operator_tag = "Pc_capillary_test";  // 用于 OperatorFieldNames 前缀
+    cfg.Pc_field = "Pc_test";            // 当前测试用的毛细压场
+    cfg.rho_capillary_field = "rho_capillary_mass"; // 可随意命名，和 cfg 一致即可
+    cfg.gravity_dummy_field = "gravity_dummy_scalar"; // 这里不用重力，只做占位
+    cfg.gravity = Vector{ 0.0, 0.0, 0.0 };
+    cfg.enable_buoyancy = false;
+    cfg.gradient_smoothing = 0;
+
+    // ---------------- 2. 构建 Pc 场 & k 场 & rho_cap 场 ----------------
+    // 2.1: 常数 Pc 场
+    auto PcF = reg.getOrCreate<volScalarField>(cfg.Pc_field, nCells, 0.0);
+
+    // 2.2: 渗透率场（各向同性 k = 1.0，实际值只影响尺度）
+    auto kxx = reg.getOrCreate<volScalarField>("kxx", nCells, 1.0);
+    auto kyy = reg.getOrCreate<volScalarField>("kyy", nCells, 1.0);
+    auto kzz = reg.getOrCreate<volScalarField>("kzz", nCells, 1.0);
+
+    // 2.3: “毛细系数” rho_capillary，用来承载 λ_g ρ_g 的等效系数
+    auto rho_cap = reg.getOrCreate<volScalarField>(cfg.rho_capillary_field, nCells, 0.0);
+    auto rho_dummy = reg.getOrCreate<volScalarField>(cfg.gravity_dummy_field, nCells, 0.0);
+
+    const double Pc0 = 2.0e5;  // 任意常数 Pc [Pa]
+    const double rhoCapVal = 1.0;    // 等效 λ_g ρ_g；只要正即可
+    const double kVal = 1.0;    // 等效 k；只要正即可
+
+    for (const auto& c : cells)
+    {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+
+        (*PcF)[i] = Pc0;
+        (*kxx)[i] = kVal;
+        (*kyy)[i] = kVal;
+        (*kzz)[i] = kVal;
+        (*rho_cap)[i] = rhoCapVal;
+        (*rho_dummy)[i] = 0.0;  // 不使用，只是占位
+    }
+
+    // ---------------- 3. 边界条件（毛细项：这里完全不设 BC，相当于自然 Neumann=0） ----------------
+    PressureBC::Registry pbc_pc;  // 空 registry，不添加任何边界
+    PressureBCAdapter    PbcA{ pbc_pc };
+
+    // ---------------- 4. 构建未知量编号映射 ----------------
+    int N = 0;
+    auto lid_of_cell = buildUnknownMap(mesh, N);
+    if (N <= 0)
+    {
+        std::cerr << "[CapillaryTest_v2] buildUnknownMap failed: N=" << N << "\n";
+        return -1;
+    }
+
+    // ---------------- 5. 构造 OperatorFieldNames 和 mobility_tokens ----------------
+    // 只需要 kxx/kyy/kzz 这三个渗透率场；rho 部分由 rho_capillary_field 承载
+    auto nm = makeNames(cfg.operator_tag); // a_f_diff, s_f_diff 等名字
+
+    std::vector<std::string> mobility_tokens{
+        "kxx:kxx",
+        "kyy:kyy",
+        "kzz:kzz"
+    };
+
+    // ---------------- 6. 收集 Pc 场到向量 Pc_vec ----------------
+    std::vector<double> Pc_vec, Lvec;
+    if (!detailed::gatherFieldToVector(mesh, reg, cfg.Pc_field,
+        lid_of_cell, N, Pc_vec))
+    {
+        std::cerr << "[CapillaryTest_v2] gatherFieldToVector failed for Pc.\n";
+        return -2;
+    }
+
+    // ---------------- 7. 构建算子并作用：Lvec = A * Pc_vec - b ----------------
+    if (!detailed::buildAndApplyOperator(
+        mgr, reg, freg,
+        PbcA,
+        nm,
+        mobility_tokens,
+        cfg.rho_capillary_field,  // rho_coeff_field → 用毛细系数场
+        cfg.gravity_dummy_field,  // rho_buoy_field  → 不用
+        cfg.Pc_field,             // x_field → Pc
+        cfg,
+        /*enable_buoyancy=*/false,
+        Pc_vec,
+        Lvec))
+    {
+        std::cerr << "[CapillaryTest_v2] buildAndApplyOperator failed.\n";
+        return -3;
+    }
+
+    // ---------------- 8. 计算残差范数并输出 ----------------
+    double maxAbs = 0.0;
+    double l2sum = 0.0;
+    int    nUsed = 0;
+
+    int    sampleCellId = -1;
+    double samplePc = 0.0;
+    double sampleL = 0.0;
+
+    for (const auto& c : cells)
+    {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        const int    lid = lid_of_cell[i];
+        if (lid < 0) continue;
+
+        const double val = std::fabs(Lvec[lid]);
+        maxAbs = std::max(maxAbs, val);
+        l2sum += val * val;
+        ++nUsed;
+
+        // 记录一个样本单元
+        if (sampleCellId < 0)
+        {
+            sampleCellId = c.id;
+            samplePc = (*PcF)[i];
+            sampleL = Lvec[lid];
+        }
+    }
+
+    const double l2norm = (nUsed > 0) ? std::sqrt(l2sum / nUsed) : 0.0;
+    const double relMax = (std::fabs(Pc0) > 0.0) ? maxAbs / std::fabs(Pc0) : 0.0;
+
+    std::cout << "[CapillaryTest_v2] N = " << nUsed
+        << ", max|L[Pc]| = " << maxAbs
+        << ", L2|L[Pc]| = " << l2norm
+        << ", relMax = " << relMax << "\n";
+
+    if (sampleCellId >= 0)
+    {
+        std::cout << "  sample cell id = " << sampleCellId
+            << ", Pc = " << samplePc
+            << ", L[Pc] = " << sampleL << "\n";
+    }
+
+    std::cout << "[CapillaryTest_v2] finished. "
+        "Expect residuals near machine precision if capillary operator is assembled correctly.\n";
+
+    return 0;
+}
+
+
+/// \brief 测试 assemblePressureTwoPhase：退化两相(单水相)静水平衡 + 重力
+int Test_AssemblePressureTwoPhase_Hydrostatic()
+{
+    using namespace IMPES_Iteration;
+
+    // ---------------- 0. 网格与场注册 ----------------
+    const double Lx = 100.0;
+    const double Ly = 100.0;
+    const double Lz = 0.0;
+    const int nx = 50;
+    const int ny = 50;
+    const int nz = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    std::cout << "\n===== [TEST] assemblePressureTwoPhase: hydrostatic limit =====\n";
+
+    MeshManager mgr(Lx, Ly, Lz,
+        nx, ny, nz,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    Mesh& mesh = mgr.mesh();
+    const auto& cells = mesh.getCells();
+    const auto& id2idx = mesh.getCellId2Index();
+
+    FieldRegistry     reg;
+    FaceFieldRegistry freg;
+
+    // 压力时间场：p_w, p_w_old, p_w_prev
+    ensureTransientFields_scalar(mesh, reg, "p_w", "p_w_old", "p_w_prev");
+
+    // ---------------- 1. 两相相关体场：退化为单水相 ----------------
+    const size_t nCells = cells.size();
+
+    // 饱和度：全水相 Sw = 1
+    auto Sw = reg.getOrCreate<volScalarField>("s_w", nCells, 1.0);
+    std::fill(Sw->data.begin(), Sw->data.end(), 1.0);
+
+    // 常数物性
+    const double rho_w_const = 1000.0;   // [kg/m3]
+    const double rho_g_const = 600.0;    // [kg/m3] 这里不会用到
+    const double mu_w_const = 1.0e-3;   // [Pa·s]
+    const double k_abs = 1.0e-14;  // [m2]
+    const double phi_const = 0.1;      // [-]
+
+    // mobility: λ_w = k_rw / μ_w，这里直接当成常数 1 / μ_w
+    const double lambda_w_const = 1.0 / mu_w_const;
+    const double lambda_g_const = 0.0;   // 退化掉气相
+
+    auto rho_w = reg.getOrCreate<volScalarField>(TwoPhase::Water().rho_tag.c_str(),
+        nCells, rho_w_const);
+    auto rho_g = reg.getOrCreate<volScalarField>(TwoPhase::CO2().rho_tag.c_str(),
+        nCells, rho_g_const);
+    auto lambda_w = reg.getOrCreate<volScalarField>(TwoPhase::Water().lambda_w_tag.c_str(),
+        nCells, lambda_w_const);
+    auto lambda_g = reg.getOrCreate<volScalarField>(TwoPhase::CO2().lambda_g_tag.c_str(),
+        nCells, lambda_g_const);
+
+    // lambda_mass = λ_w ρ_w + λ_g ρ_g，将由 computeDerivedMobilityFields 更新
+    auto lambda_mass = reg.getOrCreate<volScalarField>(
+        TwoPhase::Auxiliaryparameters().lambda_mass_tag.c_str(),
+        nCells, 0.0);
+
+    // 岩石孔隙度和压缩性，用于时间项
+    auto phi_r = reg.getOrCreate<volScalarField>(TwoPhase::Rock().phi_tag, nCells, phi_const);
+    auto c_phi = reg.getOrCreate<volScalarField>(TwoPhase::Rock().c_r_tag, nCells, 0.0); // 不考虑岩石压缩
+
+    // 这里假设 TimeTerm_IMPES_Pressure 需要的 rho_old和 drdp 场：
+    // 简化成常数（并且我们用 p_new = p_old → 时间残差为 0）
+    auto rho_w_old = reg.getOrCreate<volScalarField>(TwoPhase::Water().rho_old_tag, nCells, rho_w_const);
+    auto rho_g_old = reg.getOrCreate<volScalarField>(TwoPhase::CO2().rho_old_tag, nCells, rho_w_const);
+    auto drho_dp_w = reg.getOrCreate<volScalarField>(TwoPhase::Water().drho_w_dp_tag, nCells, 0.0);
+    auto drho_dp_w_old = reg.getOrCreate<volScalarField>(TwoPhase::Water().drho_w_dp_old_tag, nCells, 0.0);
+    auto drho_dp_g = reg.getOrCreate<volScalarField>(TwoPhase::CO2().drho_g_dp_tag, nCells, 0.0);
+    auto drho_dp_g_old = reg.getOrCreate<volScalarField>(TwoPhase::CO2().drho_g_dp_old_tag, nCells, 0.0);
+
+    // 渗透率张量：各向同性
+    auto kxx = reg.getOrCreate<volScalarField>("kxx", nCells, k_abs);
+    auto kyy = reg.getOrCreate<volScalarField>("kyy", nCells, k_abs);
+    auto kzz = reg.getOrCreate<volScalarField>("kzz", nCells, k_abs);
+
+    // 毛细压力场：设为常数 0 → 不产生毛细贡献
+    auto Pc = reg.getOrCreate<volScalarField>("Pc", nCells, 0.0);
+    std::fill(Pc->data.begin(), Pc->data.end(), 0.0);
+
+    // 预留：rho_coeff / rho_capillary / rho_gravity / rho_mix / lambda_gravity / gravity_dummy
+    auto rho_coeff = reg.getOrCreate<volScalarField>("rho_coeff_mass", nCells, 0.0);
+    auto rho_capillary = reg.getOrCreate<volScalarField>("rho_capillary_mass", nCells, 0.0);
+    auto rho_gravity = reg.getOrCreate<volScalarField>("rho_gravity_mass", nCells, 0.0);
+    auto rho_mix = reg.getOrCreate<volScalarField>("rho_mix_mass", nCells, 0.0);
+    auto lambda_gravity = reg.getOrCreate<volScalarField>("lambda_gravity_mass", nCells, 0.0);
+    auto grav_dummy = reg.getOrCreate<volScalarField>("gravity_dummy_scalar", nCells, 0.0);
+
+    // ---------------- 2. 构造静水压力场 p_w, p_w_old ----------------
+    auto p_w = reg.get<volScalarField>("p_w");
+    auto p_w_old = reg.get<volScalarField>("p_w_old");
+
+    const double g = 9.81;
+    const double gy = -g; // y 向上，重力向下
+    const double y_top = Ly;
+    const double p_top = 9.0e6; // 顶部压力
+
+    for (const auto& c : cells)
+    {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        const double y = c.center.m_y;
+
+        const double p_exact = p_top + rho_w_const * gy * (y - y_top);
+        (*p_w)[i] = p_exact;
+        (*p_w_old)[i] = p_exact;  // 保证时间项残差为 0
+  
+    }
+
+    // ---------------- 3. 边界条件：左右无流，上下给定静水压力 ----------------
+    const auto& bfaces = mgr.boundaryFaces();
+
+    // 这里简单做法：左右 Neumann(无流) → a=0,b=1,c=0；上下 Dirichlet
+    // 顶边：p = p_top
+    // 底边：p = p_top + rho_w * g_y * (0 - y_top) = p_top - rho_w*g*Ly
+    const double p_bottom = p_top + rho_w_const * gy * (0.0 - y_top);
+
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 0.0, 1.0, 0.0 };       // no-flow
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };       // no-flow
+    PressureBC::BoundaryCoefficient P_Down{ 1.0, 0.0, p_bottom };  // Dirichlet
+    PressureBC::BoundaryCoefficient P_Up{ 1.0, 0.0, p_top };     // Dirichlet
+
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    pbc_pw.printInformationofBoundarySetting(mgr);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    // ---------------- 4. 组装两相压力方程（退化单相） ----------------
+    PressureAssemblyConfig cfg;
+    cfg.operator_tag = "p_w_IMPES_test";
+    cfg.pressure_field = "p_w";
+    cfg.pressure_old_field = "p_w_old";
+    cfg.pressure_prev_field = "p_w_prev";
+    cfg.Pc_field = "Pc";
+
+    cfg.gravity = Vector{ 0.0, gy, 0.0 };
+    cfg.enable_buoyancy = true;
+    cfg.gradient_smoothing = 0;
+
+    cfg.rho_coeff_field = "rho_coeff_mass";
+    cfg.rho_capillary_field = "rho_capillary_mass";
+    cfg.rho_gravity_field = "rho_gravity_mass";
+    cfg.lambda_gravity_field = "lambda_gravity_mass";
+    cfg.gravity_dummy_field = "gravity_dummy_scalar";
+    cfg.rho_mix_field = "rho_mix_mass";
+
+    // 让 assemblePressureTwoPhase 真的去计算总通量
+    cfg.total_mass_flux_name = "mf_tot";
+    cfg.total_vol_flux_name = "Qf_tot";
+    cfg.total_velocity_name = "ufn_tot";
+
+    // wells: 本测试不含井
+    std::vector<WellDOF_TwoPhase> wells;
+
+    PressureAssemblyResult result;
+    const double dt = 1.0; // 任意正数即可，p_new = p_old → 时间残差为 0
+
+    if (!assemblePressureTwoPhase(mgr, reg, freg, PbcA, wells, dt, cfg, result))
+    {
+        std::cerr << "[Test_AssemblePressureTwoPhase] assemblePressureTwoPhase failed.\n";
+        return -1;
+    }
+
+    // ---------------- 5. 用解析解 p_exact 检查离散残差 L[p] ----------------
+    const int N = result.system.n;
+    std::vector<double> p_vec(N, 0.0), Lvec;
+
+    // cell_lid: 每个 cell 对应的未知量局部编号
+    const auto& lid_of_cell = result.cell_lid;
+
+    for (const auto& c : cells)
+    {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        const int lid = lid_of_cell[i];
+        if (lid < 0 || lid >= N) continue;
+        p_vec[lid] = (*p_w)[i];
+    }
+
+    IMPES_Iteration::detailed::applyCOO(result.system, p_vec, Lvec);
+
+    double maxAbs = 0.0;
+    double sum2 = 0.0;
+    int    cnt = 0;
+    for (int i = 0; i < static_cast<int>(Lvec.size()); ++i)
+    {
+        const double v = std::abs(Lvec[i]);
+        maxAbs = std::max(maxAbs, v);
+        sum2 += v * v;
+        ++cnt;
+    }
+    const double L2 = (cnt > 0) ? std::sqrt(sum2 / cnt) : 0.0;
+    const double relMax = (p_top > 0.0 ? maxAbs / p_top : maxAbs);
+
+    std::cout << "[AssemblePressureTwoPhase-Hydrostatic] N = " << N
+        << ", max|L[p]| = " << maxAbs
+        << ", L2|L[p]| = " << L2
+        << ", relMax = " << relMax << "\n";
+
+    // ---------------- 6. 检查总质量通量是否接近 0 ----------------
+    auto mf_tot = freg.get<faceScalarField>("mf_tot");
+    if (mf_tot)
+    {
+        double maxMf = 0.0;
+        for (double mface : mf_tot->data)
+        {
+            maxMf = std::max(maxMf, std::abs(mface));
+        }
+        std::cout << "  max|mf_tot| = " << maxMf << " [kg/s per face]\n";
+    }
+    else
+    {
+        std::cout << "  [Warn] mf_tot not found, skip flux check.\n";
+    }
+
+    std::cout << "[AssemblePressureTwoPhase-Hydrostatic] finished.\n";
+    return 0;
+}
+
+
+
+
 
 
 
@@ -2391,6 +2929,6 @@ int main()
 {
    
 
-    return run_IMPES_Iteration_TimeTerm_AnalyticalTest();
+    return Test_AssemblePressureTwoPhase_Hydrostatic();
 }
 

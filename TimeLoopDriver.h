@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include <vector>
 #include <string>
 #include <iostream>
@@ -11,7 +11,7 @@
 
 
 #include"PressureEqAssemblerandSolver.h"
-#include "IMPES_SaturationTransportEqAssemblerandSolver.h"
+#include "SaturationTransportEqAssemblerandSolver.h"
 #include "IMPES_PostProcessIO.h"
 #include "TimeTermAssemblerandSolver.h"
 #include "Diff_TPFA_GradientsOperation.h"
@@ -30,10 +30,10 @@ namespace IMPES_Iteration
 
     };
 
-    //=======Ğ¡¹¤¾ßº¯Êı=======//
+    //=======å°å·¥å…·å‡½æ•°=======//
     /**
     *\brief
-    * ¼ÆËãÁ½¸ö cell ±êÁ¿³¡µÄ×î´óÎŞÇî·¶Êı²îÖµ
+    * è®¡ç®—ä¸¤ä¸ª cell æ ‡é‡åœºçš„æœ€å¤§æ— ç©·èŒƒæ•°å·®å€¼
     */
     inline double maxAbsDifference_volField
     (
@@ -61,9 +61,9 @@ namespace IMPES_Iteration
         }
         return m;
     };
-    /// ÈñÀû½×Ô¾Ç°ÑØ£º
-    ///   x <= x_front : S_w = Swr          £¨CO2 Çø£¬Ö»Ê£²ĞÓàË®£©
-    ///   x >  x_front : S_w = s_w_inj      £¨Î´±»É¨µ½µÄË®Çø£¬Í¨³£È¡ 1.0£©
+    /// é”åˆ©é˜¶è·ƒå‰æ²¿ï¼š
+    ///   x <= x_front : S_w = Swr          ï¼ˆCO2 åŒºï¼Œåªå‰©æ®‹ä½™æ°´ï¼‰
+    ///   x >  x_front : S_w = s_w_inj      ï¼ˆæœªè¢«æ‰«åˆ°çš„æ°´åŒºï¼Œé€šå¸¸å– 1.0ï¼‰
     /// x_front = xmin + min(Lx, front_speed * t)
     inline bool applySaturationFrontPattern
     (
@@ -100,23 +100,23 @@ namespace IMPES_Iteration
 
         const double t = stepId * dt;
         const double x_front = xmin + std::min(Lx, front_speed * t);
-        const double Sw_res = satCfg.vg_params.Swr;  // ²ĞÓàË®±¥ºÍ¶È
+        const double Sw_res = satCfg.vg_params.Swr;  // æ®‹ä½™æ°´é¥±å’Œåº¦
 
         for (const auto& c : cells) {
             if (c.id < 0) continue;
             const size_t i = id2idx.at(c.id);
             const double x = c.center.m_x;
 
-            // ±¥ºÍ¶È£ºÇ°ÑØ×ó²à Sw=Swr£¨²ĞÓà±¥ºÍ¶È£©£¬ÓÒ²à Sw=s_w_inj
+            // é¥±å’Œåº¦ï¼šå‰æ²¿å·¦ä¾§ Sw=Swrï¼ˆæ®‹ä½™é¥±å’Œåº¦ï¼‰ï¼Œå³ä¾§ Sw=s_w_inj
             (*s_w)[i] = (x <= x_front) ? Sw_res : s_w_inj;
         }
 
         return true;
     };
-    /// ¹â»¬ tanh ĞÍÇ°ÑØ£º
-    ///   x << x_front : S_w ¡Ö Swr
-    ///   x >> x_front : S_w ¡Ö s_w_inj
-    ///   ¹ı¶ÉÇøºñ¶È w(t) = max(w_min, w0 + k * sqrt(t))
+    /// å…‰æ»‘ tanh å‹å‰æ²¿ï¼š
+    ///   x << x_front : S_w â‰ˆ Swr
+    ///   x >> x_front : S_w â‰ˆ s_w_inj
+    ///   è¿‡æ¸¡åŒºåšåº¦ w(t) = max(w_min, w0 + k * sqrt(t))
     inline bool applySaturationFront_SmoothTanh(
         MeshManager& mgr,
         FieldRegistry& reg,
@@ -127,8 +127,8 @@ namespace IMPES_Iteration
         double dt,
         double front_speed,
         double s_w_inj,
-        double w0 = 1.0,   ///< ³õÊ¼Ç°ÑØ°ëºñ¶È [m]
-        double w_sqrtcoef = 0.0    ///< Ëæ sqrt(t) Ôö³¤µÄÏµÊı [m / sqrt(s)]
+        double w0 = 1.0,   ///< åˆå§‹å‰æ²¿åŠåšåº¦ [m]
+        double w_sqrtcoef = 0.0    ///< éš sqrt(t) å¢é•¿çš„ç³»æ•° [m / sqrt(s)]
     )
     {
         if (dt <= 0.0) {
@@ -156,7 +156,7 @@ namespace IMPES_Iteration
         const double Sw_res = satCfg.vg_params.Swr;
 
         double w = w0 + w_sqrtcoef * std::sqrt(std::max(0.0, t));
-        w = std::max(w, 1e-6); // ÊıÖµ¶µµ×£¬±ÜÃâ³ıÁã
+        w = std::max(w, 1e-6); // æ•°å€¼å…œåº•ï¼Œé¿å…é™¤é›¶
 
         for (const auto& c : cells) {
             if (c.id < 0) continue;
@@ -164,17 +164,17 @@ namespace IMPES_Iteration
             const double x = c.center.m_x;
 
             const double xi = (x - x_front) / w;
-            const double weight = 0.5 * (1.0 + std::tanh(xi)); // ¡Ê(0,1)
+            const double weight = 0.5 * (1.0 + std::tanh(xi)); // âˆˆ(0,1)
             (*s_w)[i] = Sw_res + (s_w_inj - Sw_res) * weight;
         }
 
         return true;
     };
-    /// ÓĞÏŞ³¤¶È CO2 slug£º
+    /// æœ‰é™é•¿åº¦ CO2 slugï¼š
     ///   x < x_tail      : S_w = s_w_inj
-    ///   x_tail ¡Ü x ¡Ü x_head : S_w = Swr (slug Çø, CO2 Ö÷µ¼)
+    ///   x_tail â‰¤ x â‰¤ x_head : S_w = Swr (slug åŒº, CO2 ä¸»å¯¼)
     ///   x > x_head      : S_w = s_w_inj
-    /// slug ÒÔ front_speed Ïò +x ·½ÏòÔË¶¯£¬³¤¶È = slug_length
+    /// slug ä»¥ front_speed å‘ +x æ–¹å‘è¿åŠ¨ï¼Œé•¿åº¦ = slug_length
     inline bool applySaturationFront_Slug(
         MeshManager& mgr,
         FieldRegistry& reg,
@@ -185,7 +185,7 @@ namespace IMPES_Iteration
         double dt,
         double front_speed,
         double s_w_inj,
-        double slug_length   ///< slug µÄÎïÀí³¤¶È [m]
+        double slug_length   ///< slug çš„ç‰©ç†é•¿åº¦ [m]
     )
     {
         if (dt <= 0.0) {
@@ -223,11 +223,11 @@ namespace IMPES_Iteration
             const double x = c.center.m_x;
 
             if (x >= x_tail && x <= x_head) {
-                // slug ÇøÓò£ºCO2 Ö÷µ¼
+                // slug åŒºåŸŸï¼šCO2 ä¸»å¯¼
                 (*s_w)[i] = Sw_res;
             }
             else {
-                // ÆäÓàÇøÓò£ºÈÔÎªË®£¨»ò±³¾°±¥ºÍ¶È£©
+                // å…¶ä½™åŒºåŸŸï¼šä»ä¸ºæ°´ï¼ˆæˆ–èƒŒæ™¯é¥±å’Œåº¦ï¼‰
                 (*s_w)[i] = s_w_inj;
             }
         }
@@ -237,11 +237,11 @@ namespace IMPES_Iteration
 
 //===========================================================================================//
     /*
-    * /brief: ½âÎöÄ£Ê½ÏÂµÄ IMPES Ê±¼ä²½ÍÆ½ø²âÊÔ£º
-    * - ²»Çó½âÑ¹Á¦/±¥ºÍ¶È·½³Ì£»
-    * - Ã¿¸öÊ±¼ä²½Ö±½Ó¸³Öµ  s_w µÄ½âÎöÄ£Ê½£»
-    * - µ÷ÓÃÁ½ÏàÎïĞÔ¸üĞÂÓëÊ±¼äÏî TimeTerm_IMPES_Pressure£»
-    * - ±£Áô Tecplot / CSV µÈºó´¦ÀíÊä³ö¡£
+    * /brief: è§£ææ¨¡å¼ä¸‹çš„ IMPES æ—¶é—´æ­¥æ¨è¿›æµ‹è¯•ï¼š
+    * - ä¸æ±‚è§£å‹åŠ›/é¥±å’Œåº¦æ–¹ç¨‹ï¼›
+    * - æ¯ä¸ªæ—¶é—´æ­¥ç›´æ¥èµ‹å€¼  s_w çš„è§£ææ¨¡å¼ï¼›
+    * - è°ƒç”¨ä¸¤ç›¸ç‰©æ€§æ›´æ–°ä¸æ—¶é—´é¡¹ TimeTerm_IMPES_Pressureï¼›
+    * - ä¿ç•™ Tecplot / CSV ç­‰åå¤„ç†è¾“å‡ºã€‚
     */
     inline bool runTransient_IMPES_AnalyticTest(
         MeshManager& mgr,
@@ -267,7 +267,7 @@ namespace IMPES_Iteration
             return false;
         }
 
-        // ===== 1. Tecplot / CSV Êä³öÄ¿Â¼×¼±¸£¨Ô­Ñù±£Áô£© =====
+        // ===== 1. Tecplot / CSV è¾“å‡ºç›®å½•å‡†å¤‡ï¼ˆåŸæ ·ä¿ç•™ï¼‰ =====
 #if __cplusplus >= 201703L
         try
         {
@@ -301,7 +301,7 @@ namespace IMPES_Iteration
 
 
 
-        // ===== 2. ¿ØÖÆ²ÎÊıÓëÄ¬ÈÏ³¡Ãû =====
+        // ===== 2. æ§åˆ¶å‚æ•°ä¸é»˜è®¤åœºå =====
         const auto& mesh = mgr.mesh();
         const auto& cells = mesh.getCells();
         const auto& id2idx = mesh.getCellId2Index();
@@ -333,12 +333,12 @@ namespace IMPES_Iteration
             snapshotFields = {
                 pressureCtrl.assembly.pressure_field,
                 satCfg.saturation,
-                nm.a_time,                             // Ê±¼äÏî¶Ô½ÇÏµÊı
-                nm.b_time                              // Ê±¼äÏîÔ´Ïî
+                nm.a_time,                             // æ—¶é—´é¡¹å¯¹è§’ç³»æ•°
+                nm.b_time                              // æ—¶é—´é¡¹æºé¡¹
             };
         }
 
-        //===== 3. ½âÎöÄ£Ê½¼¸ºÎĞÅÏ¢£¨x_min, x_max, Lx£© =====
+        //===== 3. è§£ææ¨¡å¼å‡ ä½•ä¿¡æ¯ï¼ˆx_min, x_max, Lxï¼‰ =====
         double xmin = std::numeric_limits<double>::max();
         double xmax = -std::numeric_limits<double>::max();
         for (const auto& c : cells)
@@ -349,11 +349,11 @@ namespace IMPES_Iteration
         }
         const double Lx = std::max(xmax - xmin, 1e-12);
 
-        // ====4. ³õÊ¼»¯ÎïĞÔ£ºÏÈÓÃ t=0, p_w(x), Sw=1.0 ¸üĞÂÒ»´Î£¬²¢°Ñ basic props Ğ´Èë *_old
-        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.vg_params, satCfg.rp_params);  //¼ÆËã¸÷ÏàµÄÓĞĞ§±¥ºÍ¶È¡¢¸÷ÏàÏà¶ÔÉøÍ¸ÂÊ¡¢Ã«Ï¸Ñ¹Á¦
-        TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //»ùÓÚÏà¶ÔÉøÍ¸ÂÊ¸üĞÂÁ÷¶ÈÒÔ¼°ÆäËû»ù±¾ÎïĞÔ²ÎÊı
+        // ====4. åˆå§‹åŒ–ç‰©æ€§ï¼šå…ˆç”¨ t=0, p_w(x), Sw=1.0 æ›´æ–°ä¸€æ¬¡ï¼Œå¹¶æŠŠ basic props å†™å…¥ *_old
+        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.vg_params, satCfg.rp_params);  //è®¡ç®—å„ç›¸çš„æœ‰æ•ˆé¥±å’Œåº¦ã€å„ç›¸ç›¸å¯¹æ¸—é€ç‡ã€æ¯›ç»†å‹åŠ›
+        TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //åŸºäºç›¸å¯¹æ¸—é€ç‡æ›´æ–°æµåº¦ä»¥åŠå…¶ä»–åŸºæœ¬ç‰©æ€§å‚æ•°
 
-        ///¶îÍâ¼ÆËãCO2ÏàµÄÑ¹Á¦
+        ///é¢å¤–è®¡ç®—CO2ç›¸çš„å‹åŠ›
         auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
         auto p_g = reg.getOrCreate<volScalarField>(pressureCtrl.assembly.pressure_g, p_w->data.size(), 0.0);
         for (const auto& c : cells)
@@ -364,41 +364,41 @@ namespace IMPES_Iteration
             (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
         }
 
-        TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_g, "T"); //»ùÓÚÏà¶ÔÉøÍ¸ÂÊ¸üĞÂÁ÷¶ÈÒÔ¼°ÆäËû»ù±¾ÎïĞÔ²ÎÊı
+        TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_g, "T"); //åŸºäºç›¸å¯¹æ¸—é€ç‡æ›´æ–°æµåº¦ä»¥åŠå…¶ä»–åŸºæœ¬ç‰©æ€§å‚æ•°
 
-        TwoPhase::copyBasicPropertiesToOldLayer(reg);  //°Ñ»ù±¾ÎïĞÔ²ÎÊı¿½±´µ½¾ÉÊ±¼ä²ã
+        TwoPhase::copyBasicPropertiesToOldLayer(reg);  //æŠŠåŸºæœ¬ç‰©æ€§å‚æ•°æ‹·è´åˆ°æ—§æ—¶é—´å±‚
 
 
-        // lambda: Ã¿¸öÊ±¼ä²½£¬¸ù¾İ stepId ¸³Öµ t^{n+1} Ê±¿ÌµÄ½âÎö p_w / s_w
+        // lambda: æ¯ä¸ªæ—¶é—´æ­¥ï¼Œæ ¹æ® stepId èµ‹å€¼ t^{n+1} æ—¶åˆ»çš„è§£æ p_w / s_w
 
-        ///½âÎöÄ£ĞÍ²ÎÊıÉèÖÃ¼°Ä£ĞÍ
+        ///è§£ææ¨¡å‹å‚æ•°è®¾ç½®åŠæ¨¡å‹
 
-		////½âÎö½âcase1 £ºÈñÀûÇ°ÑØ
-  //      const double front_speed = 0.1;     ///< ±¥ºÍ¶ÈÇ°ÑØËÙ¶È [m/s]
+		////è§£æè§£case1 ï¼šé”åˆ©å‰æ²¿
+  //      const double front_speed = 0.1;     ///< é¥±å’Œåº¦å‰æ²¿é€Ÿåº¦ [m/s]
   //      const double s_w_inj = 1.0;
 
-        //½âÎö½âcase2:Æ½»¬ tanh Ç°ÑØ°¸Àı£¨applySaturationFront_SmoothTanh£© 
+        //è§£æè§£case2:å¹³æ»‘ tanh å‰æ²¿æ¡ˆä¾‹ï¼ˆapplySaturationFront_SmoothTanhï¼‰ 
         double front_speed = 1.0;      // [m/s]
-        double s_w_inj = 1.0;      // ÓÒ²à´¿Ë®
-        double w0 = 3.0;      // ÆğÊ¼°ëºñ¶È ~ Ò»¸öµ¥Ôª
-        double w_sqrtcoef = 0.5;      // ËæÊ±¼äÂÔÎ¢±ä¿í
+        double s_w_inj = 1.0;      // å³ä¾§çº¯æ°´
+        double w0 = 3.0;      // èµ·å§‹åŠåšåº¦ ~ ä¸€ä¸ªå•å…ƒ
+        double w_sqrtcoef = 0.5;      // éšæ—¶é—´ç•¥å¾®å˜å®½
 
-        ////½âÎö½âcase3 :  Slug °¸Àı£¨applySaturationFront_Slug£©
+        ////è§£æè§£case3 :  Slug æ¡ˆä¾‹ï¼ˆapplySaturationFront_Slugï¼‰
         //double front_speed = 0.5;      // [m/s]
-        //double s_w_inj = 1.0;      // slug Íâ²¿Îª´¿Ë®
-        //double slug_length = 20.0;     // slug ³¤¶È 20 m
+        //double s_w_inj = 1.0;      // slug å¤–éƒ¨ä¸ºçº¯æ°´
+        //double slug_length = 20.0;     // slug é•¿åº¦ 20 m
 
 
-        // ===== 5. Ê±¼ä²½Ñ­»· =====
+        // ===== 5. æ—¶é—´æ­¥å¾ªç¯ =====
         for (int step = 0; step < nSteps; ++step)
         {
             const int    stepId = step + 1;
-            const double simTime = stepId * dt;  //¼ÇÂ¼Ä£ÄâÊ±¼ä
+            const double simTime = stepId * dt;  //è®°å½•æ¨¡æ‹Ÿæ—¶é—´
 
             std::cout << "\n[IMPES][AnalyticTest] Time step " << stepId
                 << " (t = " << simTime << " s, dt = " << dt << " s) =====\n";
 
-            //1£© Ê±¼ä²½Æô¶¯£¬½« t^n µÄ p_w / s_w ¸³Öµµ½ old / prev  ÕâÀïÑ¹Á¦ÊÇ³£ÊıÆäÊµ¶¼Ò»Ñù
+            //1ï¼‰ æ—¶é—´æ­¥å¯åŠ¨ï¼Œå°† t^n çš„ p_w / s_w èµ‹å€¼åˆ° old / prev  è¿™é‡Œå‹åŠ›æ˜¯å¸¸æ•°å…¶å®éƒ½ä¸€æ ·
             if (!startTimeStep_scalar(mgr.mesh(), reg,
                 pressureCtrl.assembly.pressure_field,
                 pressureCtrl.assembly.pressure_old_field,
@@ -412,7 +412,7 @@ namespace IMPES_Iteration
                 return false;
             }
 
-            ////2.1) case 1- ¼â¶ËÇ°ÑØÍÆ½ø
+            ////2.1) case 1- å°–ç«¯å‰æ²¿æ¨è¿›
             //if (!applySaturationFrontPattern(
             //    mgr, reg, satCfg,
             //    xmin, Lx,
@@ -426,7 +426,7 @@ namespace IMPES_Iteration
             //}
 
 
-            // 2-2) case2- ¹â»¬ tanh ĞÍÇ°ÑØ
+            // 2-2) case2- å…‰æ»‘ tanh å‹å‰æ²¿
             if (!applySaturationFront_SmoothTanh(
                 mgr, reg, satCfg,
                 xmin, Lx,
@@ -441,7 +441,7 @@ namespace IMPES_Iteration
                 return false;
             }
 
-			//// 2-3) case3- Slug Ç°ÑØÍÆ½ø
+			//// 2-3) case3- Slug å‰æ²¿æ¨è¿›
    //         if (!applySaturationFront_SmoothTanh(
    //             mgr,
    //             reg,
@@ -451,9 +451,9 @@ namespace IMPES_Iteration
    //             stepId,
    //             dt,
    //             front_speed,  // [m/s]
-   //             s_w_inj,      // ÓÒ²àË®±¥ºÍ¶È£¬Ò»°ã 1.0
-   //             w0,           // ³õÊ¼Ç°ÑØ°ëºñ¶È [m]
-   //             w_sqrtcoef    // Ëæ sqrt(t) Ôö³¤µÄºñ¶ÈÏµÊı [m/sqrt(s)]
+   //             s_w_inj,      // å³ä¾§æ°´é¥±å’Œåº¦ï¼Œä¸€èˆ¬ 1.0
+   //             w0,           // åˆå§‹å‰æ²¿åŠåšåº¦ [m]
+   //             w_sqrtcoef    // éš sqrt(t) å¢é•¿çš„åšåº¦ç³»æ•° [m/sqrt(s)]
    //         ))
    //         {
    //             std::cerr << "[IMPES][AnalyticTest] applySaturationFrontPattern failed at step "
@@ -462,10 +462,10 @@ namespace IMPES_Iteration
    //         }
 
 
-            // 3) µÃµ½ĞÂµÄÁ½ÏàÎïĞÔ²ÎÊı
-            TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.vg_params, satCfg.rp_params);  //¼ÆËã¸÷ÏàµÄÓĞĞ§±¥ºÍ¶È¡¢¸÷ÏàÏà¶ÔÉøÍ¸ÂÊ¡¢Ã«Ï¸Ñ¹Á¦
-            TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //»ùÓÚÏà¶ÔÉøÍ¸ÂÊ¸üĞÂÁ÷¶ÈÒÔ¼°ÆäËû»ù±¾ÎïĞÔ²ÎÊı
-            ///¶îÍâ¼ÆËãCO2ÏàµÄÑ¹Á¦
+            // 3) å¾—åˆ°æ–°çš„ä¸¤ç›¸ç‰©æ€§å‚æ•°
+            TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.vg_params, satCfg.rp_params);  //è®¡ç®—å„ç›¸çš„æœ‰æ•ˆé¥±å’Œåº¦ã€å„ç›¸ç›¸å¯¹æ¸—é€ç‡ã€æ¯›ç»†å‹åŠ›
+            TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //åŸºäºç›¸å¯¹æ¸—é€ç‡æ›´æ–°æµåº¦ä»¥åŠå…¶ä»–åŸºæœ¬ç‰©æ€§å‚æ•°
+            ///é¢å¤–è®¡ç®—CO2ç›¸çš„å‹åŠ›
             auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
             auto p_g = reg.getOrCreate<volScalarField>(pressureCtrl.assembly.pressure_g, p_w->data.size(), 0.0);
             for (const auto& c : cells)
@@ -476,12 +476,12 @@ namespace IMPES_Iteration
                 (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
             }
 
-            TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_g, "T"); //»ùÓÚÏà¶ÔÉøÍ¸ÂÊ¸üĞÂÁ÷¶ÈÒÔ¼°ÆäËû»ù±¾ÎïĞÔ²ÎÊı
+            TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_g, "T"); //åŸºäºç›¸å¯¹æ¸—é€ç‡æ›´æ–°æµåº¦ä»¥åŠå…¶ä»–åŸºæœ¬ç‰©æ€§å‚æ•°
 
 
-            // 4) ¼ÆËãÊ±¼äÏîÏµÊı
+            // 4) è®¡ç®—æ—¶é—´é¡¹ç³»æ•°
 
-            //×é×°Ê±¼äÏî
+            //ç»„è£…æ—¶é—´é¡¹
 
             if (!IMPES_Iteration::TimeTerm_IMPES_Pressure(mgr, reg, dt, pressureCtrl.assembly.pressure_old_field, pressureCtrl.assembly.pressure_field, nm.a_time, nm.b_time))
             {
@@ -490,7 +490,7 @@ namespace IMPES_Iteration
                 return false;
             }
 
-            // ---- 6.6£ºCSV snapshot Êä³ö£¨ÈôÆôÓÃ£© ----
+            // ---- 6.6ï¼šCSV snapshot è¾“å‡ºï¼ˆè‹¥å¯ç”¨ï¼‰ ----
             if (snapshotEveryCsv > 0 && !snapshotPrefix.empty() && (stepId % snapshotEveryCsv == 0))
             {
                 if (!::IMPES::Output::writeFieldSnapshotCSV(
@@ -501,7 +501,7 @@ namespace IMPES_Iteration
                     return false;
                 }
             }
-            // ---- 6.7£ºTecplot Êä³ö (P  / Sw) ----
+            // ---- 6.7ï¼šTecplot è¾“å‡º (P  / Sw) ----
             const bool dumpP = !outPrefixP.empty() &&
                 ((writeEveryP <= 0) || (stepId % writeEveryP == 0));
             const bool dumpSw = !outPrefixSw.empty() &&
@@ -557,10 +557,311 @@ namespace IMPES_Iteration
                     return false;
                 }
             }
-            TwoPhase::copyBasicPropertiesToOldLayer(reg);  //°Ñ»ù±¾ÎïĞÔ²ÎÊı¿½±´µ½¾ÉÊ±¼ä²ã
+            TwoPhase::copyBasicPropertiesToOldLayer(reg);  //æŠŠåŸºæœ¬ç‰©æ€§å‚æ•°æ‹·è´åˆ°æ—§æ—¶é—´å±‚
         }
         std::cout << "===== [IMPES][AnalyticTest] finished " << nSteps
             << " time steps. =====\n";
         return true;
     };
+
+
+	//===================================æµ‹è¯•é‡åŠ›ç¦»æ•£ç³»æ•°çš„å‡†ç¡®æ€§========================================//
+    /**
+     * @brief åœ¨ç»™å®šç½‘æ ¼å’Œç‰©æ€§åœºä¸Šåšâ€œé™æ°´å‹ + é‡åŠ›â€ç®—å­æµ‹è¯•ã€‚
+     *
+     * æµ‹è¯•æ€è·¯ï¼š
+     * - å…ˆè°ƒç”¨ computeDerivedMobilityFields æ„é€  rho_coeff_mass(=Î»_mass) ä¸ rho_gravity_mass(=Ï_buoy)ï¼›
+     * - æ„é€ è§£æé™æ°´å‹åœº p(x) = p_ref + Ï_buoy(x) * (g Â· x)ï¼Œä½¿å¾— âˆ‡p = Ï_buoy gï¼›
+     * - ç”¨ buildAndApplyOperator + assemble_COO å¾—åˆ°ç¦»æ•£ç®—å­ Lï¼›
+     * - è®¡ç®— y = L[p]ï¼Œæ£€æŸ¥ max|y| / max|p| æ˜¯å¦è¶³å¤Ÿå°ã€‚
+     *
+     * @param mgr  ç½‘æ ¼ç®¡ç†å™¨
+     * @param reg  å•å…ƒåœºä»“åº“
+     * @param freg é¢åœºä»“åº“
+     * @param pbc  å‹åŠ›è¾¹ç•Œæ¡ä»¶é€‚é…å™¨ï¼ˆå»ºè®®å·²æŒ‰é™æ°´å‹è§£æè§£è®¾ç½®å¥½ Dirichlet/Neumannï¼‰
+     * @param cfg_in å‹åŠ›è£…é…é…ç½®ï¼ˆé‡åŠ›æ–¹å‘ç­‰å¯åœ¨å¤–éƒ¨è®¾å®šï¼Œè¿™é‡Œä¼šå¤åˆ¶ä¸€ä»½ï¼‰
+     * @return true  æµ‹è¯•æˆåŠŸæ‰§è¡Œï¼ˆä¸ä»£è¡¨æ®‹å·®ä¸ºé›¶ï¼Œåªä»£è¡¨æµç¨‹æ­£ç¡®è·‘å®Œï¼‰
+     * @return false æµç¨‹ä¸­å‡ºç°é”™è¯¯ï¼ˆç¼ºåœºæˆ–è£…é…å¤±è´¥ç­‰ï¼‰
+     */
+    inline bool runHydrostaticGravityOperatorTest(
+        MeshManager& mgr,
+        FieldRegistry& reg,
+        FaceFieldRegistry& freg,
+        const PressureBCAdapter& pbc,
+        const PressureAssemblyConfig& cfg_in)
+    {
+        Mesh& mesh = mgr.mesh();
+        const auto& cells = mesh.getCells();
+        const auto& id2idx = mesh.getCellId2Index();
+
+        // ---- 0) å‡†å¤‡é…ç½®ï¼šå¼€å¯é‡åŠ›ï¼Œè‹¥å¤–éƒ¨æœªç»™é‡åŠ›æ–¹å‘åˆ™é»˜è®¤ç«–ç›´å‘ä¸‹ ----
+        PressureAssemblyConfig cfg = cfg_in;
+        cfg.enable_buoyancy = true;
+        if (cfg.gravity.Mag() <= 0.0) {
+            // è¿™é‡Œå‡å®š y æ–¹å‘ä¸ºç«–ç›´å‘ä¸Šè½´ï¼Œé‡åŠ›å‘ä¸‹
+            cfg.gravity = Vector{ 0.0, -9.81, 0.0 };
+        }
+
+        // ---- 1) è®¡ç®— Î»_mass / Ï_buoy ç­‰æ´¾ç”Ÿåœº ----
+        if (!detailed::computeDerivedMobilityFields(mgr, reg, cfg)) {
+            std::cerr << "[HydrostaticTest] computeDerivedMobilityFields failed.\n";
+            return false;
+        }
+
+        auto rhoBuoyF = reg.get<volScalarField>(cfg.rho_gravity_field); // è¿™é‡Œå­˜çš„æ˜¯ Ï_buoy
+        if (!rhoBuoyF) {
+            std::cerr << "[HydrostaticTest] missing buoyancy field '"
+                << cfg.rho_gravity_field << "'.\n";
+            return false;
+        }
+
+        // ---- 2) æ„é€ è§£æé™æ°´å‹åœº p(x) = p_ref + Ï_buoy(x) * (g Â· x) ----
+        //
+        //     æ¢¯åº¦ï¼šâˆ‡p = Ï_buoy g ï¼ˆg ä¸ºå¸¸å‘é‡ï¼‰ â‡’ (âˆ‡p - Ï_buoy g) = 0
+        //     è¾¾è¥¿è´¨é‡é€šé‡ï¼šq_m = -k Î»_mass (âˆ‡p - Ï_buoy g) = 0
+        //
+        auto pF = reg.getOrCreate<volScalarField>(
+            cfg.pressure_field, cells.size(), 0.0);
+
+        const double p_ref = 1.0e7; // 10 MPaï¼Œä»»æ„å¸¸æ•°ï¼Œåªå½±å“ç»å¯¹æ°´å¹³ä¸å½±å“é€šé‡
+        const Vector& g = cfg.gravity;
+
+        for (const auto& c : cells) {
+            if (c.id < 0) continue; // è·³è¿‡ ghost ç­‰
+            const size_t i = id2idx.at(c.id);
+            const double rhoB = (*rhoBuoyF)[i];  // Ï_buoy(x)
+            const double gx = g * c.center;    // g Â· x  ï¼ˆå‡å®š Vector::operator* ä¸ºç‚¹ç§¯ï¼‰
+            (*pF)[i] = p_ref + rhoB * gx;
+        }
+
+        // ---- 3) æ„é€  unknown æ˜ å°„ï¼Œå¹¶æŠŠå•å…ƒåœº p_w æ”¶é›†åˆ°æœªçŸ¥å‘é‡ p_vec ä¸­ ----
+        int nUnknowns = 0;
+        std::vector<int> lid_of_cell = buildUnknownMap(mesh, nUnknowns);
+        if (nUnknowns <= 0) {
+            std::cerr << "[HydrostaticTest] no unknowns.\n";
+            return false;
+        }
+
+        std::vector<double> p_vec;
+        if (!detailed::gatherFieldToVector(
+            mesh, reg,
+            cfg.pressure_field,
+            lid_of_cell, nUnknowns,
+            p_vec))
+        {
+            std::cerr << "[HydrostaticTest] gatherFieldToVector failed.\n";
+            return false;
+        }
+
+        // ---- 4) ç”¨â€œæ‰©æ•£ + é‡åŠ›â€æ¨¡æ¿æ„å»ºç®—å­ï¼Œå¹¶å¯¹ p_vec åº”ç”¨ ----
+        //
+        // mobility_tokens åªç»™æ¸—é€ç‡å¼ é‡ï¼škxx/kyy/kzz
+        // Î»_mass å®Œå…¨é€šè¿‡ rho_coeff_field (= cfg.rho_coeff_field) è¿›å…¥ï¼Œ
+        // é‡åŠ›é¡¹çš„ Ï_buoy é€šè¿‡ rho_buoy_field (= cfg.rho_gravity_field) è¿›å…¥ï¼Œ
+        // ä¸ computeDerivedMobilityFields çš„å®šä¹‰ä¸¥æ ¼å¯¹åº”ã€‚
+        //
+        OperatorFieldNames nm = makeNames(cfg.operator_tag);
+        std::vector<std::string> mobility_tokens = {
+            "kxx:kxx",
+            "kyy:kyy",
+            "kzz:kzz"
+        };
+
+        std::vector<double> Lp; // å­˜ y = L[p]
+        if (!detailed::buildAndApplyOperator(
+            mgr, reg, freg,
+            pbc,
+            nm,
+            mobility_tokens,
+            cfg.rho_coeff_field,    // Î»_mass åœºå
+            cfg.rho_gravity_field,  // Ï_buoy åœºå
+            cfg.pressure_field,     // è¿™é‡Œå¯¹ p_w åš L[p]
+            cfg,
+            /*enable_buoyancy =*/ true,
+            p_vec,
+            Lp))
+        {
+            std::cerr << "[HydrostaticTest] buildAndApplyOperator failed.\n";
+            return false;
+        }
+
+        // ---- 5) è®¡ç®—æ®‹å·®èŒƒæ•°ï¼Œè¾“å‡ºè¯Šæ–­ä¿¡æ¯ ----
+        double maxRes = 0.0;
+        double l2Res = 0.0;
+        for (int i = 0; i < nUnknowns; ++i) {
+            const double r = std::abs(Lp[i]);
+            maxRes = std::max(maxRes, r);
+            l2Res += Lp[i] * Lp[i];
+        }
+        l2Res = std::sqrt(l2Res / std::max(1, nUnknowns));
+
+        double maxP = 0.0;
+        for (double v : p_vec) {
+            maxP = std::max(maxP, std::abs(v));
+        }
+        const double relMax = (maxP > 0.0) ? (maxRes / maxP) : 0.0;
+
+        std::cout << "[HydrostaticTest] N = " << nUnknowns
+            << ", max|L[p]| = " << maxRes
+            << ", L2|L[p]| = " << l2Res
+            << ", relMax = " << relMax << std::endl;
+
+        // å¯é€‰ï¼šæ‰“å°å‰å‡ ä¸ªæœªçŸ¥çš„ p å’Œ L[p]ï¼Œå¸®åŠ© debug
+        int printed = 0;
+        for (size_t ic = 0; ic < cells.size() && printed < 5; ++ic) {
+            const int lid = lid_of_cell[ic];
+            if (lid < 0) continue;
+            const auto& c = cells[ic];
+            std::cout << "  cell id = " << c.id
+                << ", p = " << p_vec[lid]
+                << ", L[p] = " << Lp[lid]
+                << std::endl;
+            ++printed;
+        }
+
+        return true;
+    }
+
+
+    /// \brief æµ‹è¯•æ¯›ç»†æ‰©æ•£ç®—å­ï¼šè§£ âˆ‡Â·(k Î»_g Ï_g âˆ‡p_c) = 0ï¼Œè§£æè§£ p_c = p0 + Î± y
+    /// æµ‹è¯•æ¯›ç»†æ‰©æ•£ç®—å­ï¼šL[Pc] = âˆ‡Â·(k Î»_g Ï_g âˆ‡Pc)
+/// è¿™é‡Œå– k=1, Î»_g=1, Ï_g=1 => L[Pc] = âˆ‡Â² Pc
+    inline bool runCapillaryOperatorTest
+    (
+        MeshManager& mgr,
+        FieldRegistry& reg,
+        FaceFieldRegistry& freg,
+        const PressureBCAdapter& PbcA,
+        const IMPES_Iteration::PressureAssemblyConfig& cfg
+    )
+    {
+        using namespace IMPES_Iteration::detailed;
+
+        Mesh& mesh = mgr.mesh();
+        const auto& cells = mesh.getCells();
+        const auto& id2idx = mesh.getCellId2Index();
+        const int Nc = static_cast<int>(cells.size());
+
+        // 1) å‡†å¤‡ mobility / Ï_coeff åœº
+        //    è¿™é‡Œå‡å®šä½ å·²ç»æå‰æŠŠ lambda_w, lambda_g, rho_w, rho_g å¡«å¥½äº†
+        //    å¯¹äºæµ‹è¯•ï¼Œå¯ä»¥ç›´æ¥å¡«ï¼šlambda_w=0, lambda_g=1, rho_w=0, rho_g=1, kxx=kyy=1
+        if (!computeDerivedMobilityFields(mgr, reg, cfg)) {
+            std::cerr << "[CapillaryTest] computeDerivedMobilityFields failed.\n";
+            return false;
+        }
+
+        // 2) æ„é€ ä¸€ä¸ªè§£æè§£ï¼šPc(x,y) = P0 + alpha * y
+        const double P0 = 2.0e5;   // åŸºç¡€ capillary å‹åŠ› [Pa]
+        const double alpha = 1.0e3;   // æ¢¯åº¦ [Pa/m]
+
+        auto PcF = reg.getOrCreate<volScalarField>(cfg.Pc_field.c_str(), cells.size(), 0.0);
+        for (const auto& c : cells)
+        {
+            if (c.id < 0) continue;
+            const size_t i = id2idx.at(c.id);
+            const Vector& ctr = c.center;
+            const double y = ctr.m_y;
+            (*PcF)[i] = P0 + alpha * y;
+        }
+
+        // 3) è®¾ç½®ä¸è§£æè§£ä¸€è‡´çš„è¾¹ç•Œæ¡ä»¶ï¼š
+        //    - å·¦/å³ï¼šNeumann (no flux) =>  a=0, b=1, c=0
+        //    - ä¸‹ï¼šDirichlet Pc = P0   =>  a=1, b=0, c=P0
+        //    - ä¸Šï¼šDirichlet Pc = P0 + alpha * Ly  (Ly=domain size in y)
+        //       è¿™é‡Œå‡è®¾ä½ å·²ç»ç”¨åŒæ ·çš„ BoxBCs ç»™ p_w è®¾è¿‡ä¸€æ¬¡ï¼›
+        //       æˆ‘ä»¬åªéœ€ä¿è¯å¯¹äº Pc çš„ BC ä¹Ÿæ˜¯åŒæ ·å½¢å¼å³å¯ã€‚
+        //    å®ç°ä¸Šï¼šä½ å¯ä»¥å•ç‹¬å»ºä¸€ä¸ª PcBC::Registryï¼›ä¸ºäº†ç®€å•æ¼”ç¤ºï¼Œè¿™é‡Œç›´æ¥å‡è®¾
+        //    å½“å‰ PbcA é‡Œå·²ç»æŒ‰ä¸Šè¿°æ–¹å¼é…ç½®å¥½ï¼›å¦åˆ™ä½ éœ€è¦å’Œ HydrostaticTest ä¸€æ ·å†™ä¸€é BC æ³¨å†Œã€‚
+
+        // 4) æ„å»º lid æ˜ å°„ï¼ˆä¸å‹åŠ›/é‡åŠ›æµ‹è¯•ç›¸åŒï¼‰
+        std::vector<int> lid_of_cell(cells.size(), -1);
+        int lid = 0;
+        for (size_t ic = 0; ic < cells.size(); ++ic)
+        {
+            const auto& c = cells[ic];
+            if (c.id < 0) continue;
+            lid_of_cell[ic] = lid++;
+        }
+        const int N = lid;
+
+        // 5) ä» Pc åœºæ”¶é›†æˆå‘é‡ eval_vec
+        std::vector<double> eval_vec, result_vec;
+        if (!gatherFieldToVector(mesh, reg, cfg.Pc_field, lid_of_cell, N, eval_vec)) {
+            std::cerr << "[CapillaryTest] gatherFieldToVector(Pc) failed.\n";
+            return false;
+        }
+
+        // 6) è°ƒç”¨ build + assemble + applyCOOï¼Œæ„å»º L[Pc]
+        OperatorFieldNames nm = makeNames("Pc_capillary_test");
+
+        // mobility_tokens: è¿™é‡Œåªéœ€è¦ kxx,kyy,kzz => å‡ ä½•éƒ¨åˆ† k
+        std::vector<std::string> mobility_tokens = {
+            "kxx:kxx", "kyy:kyy", "kzz:kzz"
+        };
+
+        bool ok = buildAndApplyOperator(
+            mgr, reg, freg,
+            PbcA,
+            nm,
+            mobility_tokens,
+            cfg.rho_capillary_field,   // Ï_coeff_field = Î»_g * Ï_g
+            "",                        // rho_buoy_field (ä¸ç”¨é‡åŠ›ï¼Œç•™ç©º)
+            cfg.Pc_field,              // x_field = Pc
+            cfg,
+            /*enable_buoyancy*/ false,
+            eval_vec,
+            result_vec
+        );
+
+        if (!ok) {
+            std::cerr << "[CapillaryTest] buildAndApplyOperator failed.\n";
+            return false;
+        }
+
+        // 7) ç»Ÿè®¡æ®‹å·®èŒƒæ•°
+        double maxAbs = 0.0;
+        double l2 = 0.0;
+        for (int i = 0; i < N; ++i)
+        {
+            const double v = std::abs(result_vec[i]);
+            maxAbs = std::max(maxAbs, v);
+            l2 += v * v;
+        }
+        l2 = std::sqrt(l2 / std::max(N, 1));
+
+        std::cout << "[CapillaryTest] N = " << N
+            << ", max|L[Pc]| = " << maxAbs
+            << ", L2|L[Pc]| = " << l2 << "\n";
+
+        // å–ä¸€ä¸ªæ ·æœ¬å•å…ƒè¾“å‡º
+        int sample_cell_id = -1;
+        double Pc_sample = 0.0, L_sample = 0.0;
+        for (size_t ic = 0; ic < cells.size(); ++ic)
+        {
+            const auto& c = cells[ic];
+            if (c.id < 0) continue;
+            const int li = lid_of_cell[ic];
+            if (li < 0) continue;
+
+            sample_cell_id = c.id;
+            Pc_sample = (*PcF)[ic];
+            L_sample = result_vec[li];
+            break;
+        }
+
+        std::cout << "  sample cell id = " << sample_cell_id
+            << ", Pc = " << Pc_sample
+            << ", L[Pc] = " << L_sample << "\n";
+
+        // æœŸæœ›ï¼šmax|L[Pc]| åœ¨ 1e-10~1e-12 é‡çº§ï¼ˆå–å†³äºç½‘æ ¼ã€éæ­£äº¤ç­‰ï¼‰
+        std::cout << "[CapillaryTest] finished. Expect residuals near machine precision if capillary operator is assembled correctly.\n";
+        return true;
+    }
+
+
+
+
+
+
+
 }
