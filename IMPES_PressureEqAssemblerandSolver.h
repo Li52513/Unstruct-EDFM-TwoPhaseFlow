@@ -17,6 +17,7 @@
 #include "Solver_AssemblerCOO.h"
 #include "FVM_WellCoupling_TwoPhase.h"
 #include "IMPES_CommonUtils.h"
+#include "PressureAssemblyFieldNames.h"
 #include "TwoPhaseWells_StrictRate.h"
 
 namespace IMPES
@@ -42,9 +43,9 @@ namespace IMPES
         std::string kxx_field = "kxx";
         std::string kyy_field = "kyy";
         std::string kzz_field = "kzz";
-        std::string total_mass_flux_name = "mf_total";
-        std::string total_vol_flux_name = "Qf_total";
-        std::string total_velocity_name = "ufn_total";
+        std::string total_mass_flux_name = PressureAssemblyFieldNames::total_mass_flux();
+        std::string total_vol_flux_name = PressureAssemblyFieldNames::total_vol_flux();
+        std::string total_velocity_name = PressureAssemblyFieldNames::total_velocity();
         double rock_compressibility = 0.0;
         Vector gravity = { 0.0, 0.0, 0.0 };
         bool enable_buoyancy = false;
@@ -397,11 +398,11 @@ namespace IMPES_revised
         std::string rho_buoy_field = "rho_buoy_ratio";
         double      rho_buoy_epsilon = 1e-30;
 
-        std::string total_mass_flux_name = "mf_total";
-        std::string total_vol_flux_name = "Qf_total";
-        std::string total_velocity_name = "ufn_total";
-        std::string capillary_correction_flux_name = "mf_capillary_corr";
-        std::string gravity_correction_flux_name = "mf_gravity_corr";
+        std::string total_mass_flux_name = PressureAssemblyFieldNames::total_mass_flux();
+        std::string total_vol_flux_name = PressureAssemblyFieldNames::total_vol_flux();
+        std::string total_velocity_name = PressureAssemblyFieldNames::total_velocity();
+        std::string capillary_correction_flux_name = PressureAssemblyFieldNames::capillary_correction_flux();
+        std::string gravity_correction_flux_name = PressureAssemblyFieldNames::gravity_correction_flux();
 
         Vector gravity = { 0.0, -9.8, 0.0 };
         bool   enable_buoyancy = true;

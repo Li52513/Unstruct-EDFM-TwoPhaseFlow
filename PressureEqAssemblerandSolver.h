@@ -11,40 +11,40 @@
 #include "DiffusionCentral.h"
 #include "TwoPhaseWells_StrictRate.h"
 #include "FVM_WellCoupling_TwoPhase.h"
-#include"TimeTermAssemblerandSolver.h"
-#include    "SaturationTransportEqAssemblerandSolver.h"
+#include "TimeTermAssemblerandSolver.h"
+
+#include "SolverContrlStrName.h"
 
 namespace IMPES_Iteration
 {
     struct PressureAssemblyConfig
     {
-        std::string operator_tag = "p_w_IMPES"; // pressure operator tag for nm
-        std::string pressure_field = "p_w";    // current eval pressure field
-        std::string pressure_old_field = "p_w_old";
-        std::string pressure_prev_field = "p_w_prev";
-        std::string pressure_g = "p_g";   //current CO2 pressure
-        std::string Pc_field = "Pc";
+        PressureEquation_String             P_Eq_str;
+        std::string operator_tag =          P_Eq_str.operator_tag;                   // pressure operator tag for nm
+        std::string pressure_field =        P_Eq_str.pressure_field;                 // current eval pressure field
+        std::string pressure_old_field =    P_Eq_str.pressure_old_field;
+        std::string pressure_prev_field =   P_Eq_str.pressure_prev_field;
+        std::string pressure_g =            P_Eq_str.pressure_g;                     //current CO2 pressure
+        std::string Pc_field =              P_Eq_str.Pc_field;
         Vector gravity = { 0.0, 0.0, 0.0 };
         bool enable_buoyancy = false;
         int gradient_smoothing = 0;
-		VGParams	  vg_params;
-		RelPermParams relperm_params;
+        TwoPhase_VG_Parameters              VG_Parameter;
 
         //扩散项离散系数临时储存名称
-        std::string rho_coeff_field = "rho_coeff_mass";              ///< ρ_coeff = λ_w ρ_w + λ_g ρ_g
-        std::string rho_capillary_field = "rho_capillary_mass";      ///< ρ_cap = λ_g ρ_g
-        std::string rho_gravity_field = "rho_gravity_mass";          ///< ρ_gra = (λ_w ρ_w² + λ_g ρ_g²)/(λ_w ρ_w + λ_g ρ_g)
-		std::string rho_mix_field = "rho_mix"; 			             ///< ρ_mix = ρ_w s_w + ρ_g s_g
-        std::string lambda_gravity_field = "lambda_gravity_mass";   ///< λ_gra = λ_w ρ_w + λ_g ρ_g
-        std::string gravity_dummy_field = "gravity_dummy_scalar";   /// 用于占位的重力场
+        std::string rho_coeff_field =       P_Eq_str.rho_coeff_field;                  ///< ρ_coeff = λ_w ρ_w + λ_g ρ_g
+        std::string rho_capillary_field =   P_Eq_str.capillary_correction_flux_name;   ///< ρ_cap = λ_g ρ_g
+        std::string rho_gravity_field =     P_Eq_str.rho_gravity_field;                ///< ρ_gra = (λ_w ρ_w² + λ_g ρ_g²)/(λ_w ρ_w + λ_g ρ_g)
+		std::string rho_mix_field =         P_Eq_str.rho_mix_field; 			       ///< ρ_mix = ρ_w s_w + ρ_g s_g
+        std::string lambda_gravity_field =  P_Eq_str.lambda_gravity_field;             ///< λ_gra = λ_w ρ_w + λ_g ρ_g
+        std::string gravity_dummy_field =   P_Eq_str.gravity_dummy_field;              /// 用于占位的重力场
 
         ///储存通量名称的场
-        std::string total_mass_flux_name = "mf_total";
-        std::string total_vol_flux_name = "Qf_total";
-        std::string total_velocity_name = "ufn_total";
-        std::string capillary_correction_flux_name = "mf_capillary_corr";
-        std::string gravity_correction_flux_name = "mf_gravity_corr";
-
+        std::string total_mass_flux_name =  P_Eq_str.total_mass_flux_name;
+        std::string total_vol_flux_name =   P_Eq_str.total_vol_flux_name;
+        std::string total_velocity_name =   P_Eq_str.total_velocity_name;
+        std::string capillary_correction_flux_name = P_Eq_str.capillary_correction_flux_name;
+        std::string gravity_correction_flux_name = P_Eq_str.gravity_correction_flux_name;
     };
 
     struct PressureAssemblyResult
@@ -140,7 +140,7 @@ namespace IMPES_Iteration
             auto kxx = reg.get<volScalarField>("kxx");
             auto kyy = reg.get<volScalarField>("kyy");
             auto kzz = reg.get<volScalarField>("kzz");
-            auto s_w = reg.get<volScalarField>(SaturationTransportConfig().saturation);
+            auto s_w = reg.get<volScalarField>(SaturationEquation_String().saturation);
 
             if (!lambda_g || !lambda_w || !rho_g || !rho_w
                 || !kxx || !kyy || !kzz || !lambda_mass || !s_w)
@@ -468,8 +468,8 @@ namespace IMPES_Iteration
                 reg,
                 well,
                 result.cell_lid,
-                cfg.vg_params,        // 或 cfg.vg / cfg.vg_matrix，看你 InitConfig 怎么命名
-                cfg.relperm_params    // 同上，对应 RelPermParams
+                cfg.VG_Parameter.vg_params,        // 或 cfg.vg / cfg.vg_matrix，看你 InitConfig 怎么命名
+                cfg.VG_Parameter.relperm_params    // 同上，对应 RelPermParams
             );
         }
         if (!cfg.total_mass_flux_name.empty())

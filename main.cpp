@@ -2363,8 +2363,8 @@ int run_IMPES_Iteration_TimeTerm_AnalyticalTest()
 	satCfg.saturation = "s_w";
 	satCfg.saturation_old = "s_w_old";
 	satCfg.saturation_prev = "s_w_prev";
-	satCfg.vg_params = vg_params;
-	satCfg.rp_params = rp_params;
+	satCfg.VG_Parameter.vg_params = vg_params;
+	satCfg.VG_Parameter.relperm_params = rp_params;
 
     const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case3/p_impes_ps_revised/p_ps";
     const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case3/s_impes_ps_revised/s_ps";
@@ -2920,15 +2920,10 @@ int Test_AssemblePressureTwoPhase_Hydrostatic()
 }
 
 
-
-
-
-
-
 int main()
 {
    
 
-    return Test_AssemblePressureTwoPhase_Hydrostatic();
+    //return test_saturation_explicit_exchange();
 }
 

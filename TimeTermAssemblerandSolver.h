@@ -6,7 +6,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "0_PhysicalParametesCalculateandUpdata.h"
-#include    "SaturationTransportEqAssemblerandSolver.h"
+#include "SolverContrlStrName.h"
 
 namespace IMPES_Iteration
 {
@@ -39,7 +39,7 @@ namespace IMPES_Iteration
         auto p_old = reg.get<volScalarField>(p_old_name);
         auto p_eval = reg.get<volScalarField>(p_eval_name);
         auto phi = reg.get<volScalarField>(TwoPhase::Rock().phi_tag);
-        auto s_w = reg.get<volScalarField>(SaturationTransportConfig().saturation);
+        auto s_w = reg.get<volScalarField>(SaturationEquation_String().saturation);
 
         auto rho_w_eval = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
         auto rho_w_old = reg.get<volScalarField>(TwoPhase::Water().rho_old_tag);

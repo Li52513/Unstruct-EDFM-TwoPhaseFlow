@@ -100,7 +100,7 @@ namespace IMPES_Iteration
 
         const double t = stepId * dt;
         const double x_front = xmin + std::min(Lx, front_speed * t);
-        const double Sw_res = satCfg.vg_params.Swr;  // 残余水饱和度
+        const double Sw_res = satCfg.VG_Parameter.vg_params.Swr;  // 残余水饱和度
 
         for (const auto& c : cells) {
             if (c.id < 0) continue;
@@ -153,7 +153,7 @@ namespace IMPES_Iteration
 
         const double t = stepId * dt;
         const double x_front = xmin + std::min(Lx, front_speed * t);
-        const double Sw_res = satCfg.vg_params.Swr;
+        const double Sw_res = satCfg.VG_Parameter.vg_params.Swr;
 
         double w = w0 + w_sqrtcoef * std::sqrt(std::max(0.0, t));
         w = std::max(w, 1e-6); // 数值兜底，避免除零
@@ -215,7 +215,7 @@ namespace IMPES_Iteration
         const double t = stepId * dt;
         const double x_head = xmin + std::min(Lx, front_speed * t);
         const double x_tail = std::max(xmin, x_head - slug_length);
-        const double Sw_res = satCfg.vg_params.Swr;
+        const double Sw_res = satCfg.VG_Parameter.vg_params.Swr;
 
         for (const auto& c : cells) {
             if (c.id < 0) continue;
@@ -350,7 +350,7 @@ namespace IMPES_Iteration
         const double Lx = std::max(xmax - xmin, 1e-12);
 
         // ====4. 初始化物性：先用 t=0, p_w(x), Sw=1.0 更新一次，并把 basic props 写入 *_old
-        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.vg_params, satCfg.rp_params);  //计算各相的有效饱和度、各相相对渗透率、毛细压力
+        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);  //计算各相的有效饱和度、各相相对渗透率、毛细压力
         TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //基于相对渗透率更新流度以及其他基本物性参数
 
         ///额外计算CO2相的压力
@@ -463,7 +463,7 @@ namespace IMPES_Iteration
 
 
             // 3) 得到新的两相物性参数
-            TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.vg_params, satCfg.rp_params);  //计算各相的有效饱和度、各相相对渗透率、毛细压力
+            TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);  //计算各相的有效饱和度、各相相对渗透率、毛细压力
             TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //基于相对渗透率更新流度以及其他基本物性参数
             ///额外计算CO2相的压力
             auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
