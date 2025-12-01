@@ -21,7 +21,7 @@
 
 namespace IMPES_Iteration
 {
-    struct PressureSolveControls
+    struct PressureSolveControls_analytic
     {
         PressureAssemblyConfig assembly;
 
@@ -250,7 +250,7 @@ namespace IMPES_Iteration
         const PressureBCAdapter& Pbc,
         int nSteps,
         double dt,
-        const PressureSolveControls& pressureCtrl,
+        const PressureSolveControls_analytic& pressureCtrl,
         const SaturationTransportConfig& satCfg,
         int writeEveryP = 0,
         int writeEverySw = 0,

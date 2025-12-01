@@ -36,7 +36,8 @@
 
 #include    "MultiPhaseProperties.h"
 #include    "0_PhysicalParametesCalculateandUpdata.h"
-#include    "TimeLoopDriver.h"
+#include    "TimeLoopDriver.h"   //分析解
+#include    "IMPES_Iteration_Loop.h"
 
 
 //int main1()
@@ -2353,7 +2354,7 @@ int run_IMPES_Iteration_TimeTerm_AnalyticalTest()
 	const double totalTime = 1000.0;
     const double dt = totalTime / nSteps;
 
-	IMPES_Iteration::PressureSolveControls pCtrl;
+	IMPES_Iteration::PressureSolveControls_analytic pCtrl;
 	pCtrl.assembly.pressure_field = "p_w";
 	pCtrl.assembly.pressure_old_field = "p_w_old";
 	pCtrl.assembly.pressure_prev_field = "p_w_prev";
@@ -2919,11 +2920,199 @@ int Test_AssemblePressureTwoPhase_Hydrostatic()
     return 0;
 }
 
+int run_IMPES_Iteration_TwoPhase_Test()
+{
+    // ---------------- 0. 网格与场注册 ----------------
+    const double lengthX = 100.0;
+    const double lengthY = 100.0;
+    const double lengthZ = 0.0;
+    const int sectionNumX = 20;
+    const int sectionNumY = 20;
+    const int sectionNumZ = 0;
+    const bool usePrism = true;
+    const bool useQuadBase = false;
+
+    std::cout << "\n===== [TEST] IMPES two-phase (CO2 displacement) =====\n";
+
+    std::cout << "--- IMPES: building mesh (CO2 displacement) ---\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ,
+        sectionNumX, sectionNumY, sectionNumZ,
+        usePrism, useQuadBase);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+
+    FieldRegistry     reg;
+    FaceFieldRegistry freg;
+
+    // ---------- 1. 初始主变量场 ----------
+    std::cout << "--- IMPES: initializing primary fields ---\n";
+    InitFields ic;  // 使用默认 p0 / T0 / Sw0，如果需要可以在这里改 ic 里的数值
+
+    // 主变量场：水相压力 p_w、水相饱和度 s_w、温度 T
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, "p_w", "s_w", "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+
+    // 时间层：old / prev
+    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+
+    // ---------- 2. 基岩区域分类与固相物性 ----------
+    PhysicalPropertiesManager ppm;
+    // 此测试中所有单元归为 Medium
+    ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
+    // 基于 p_w / T 更新岩石属性（孔隙度/渗透率/比热等）
+    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+
+    // ---------- 2.1 左侧 CO2 条带：把 Sw 置 0 ----------
+    {
+        const double co2StripeWidth = std::max(1.0, 0.1 * lengthX);
+        auto sw = reg.get<volScalarField>("s_w");
+        auto sw_old = reg.get<volScalarField>("s_w_old");
+        auto sw_prev = reg.get<volScalarField>("s_w_prev");
+
+        if (sw && sw_old && sw_prev)
+        {
+            const auto& cells = mgr.mesh().getCells();
+            const auto& id2idx = mgr.mesh().getCellId2Index();
+            for (const auto& c : cells)
+            {
+                if (c.id < 0) continue;
+                if (c.center.m_x <= co2StripeWidth)
+                {
+                    const size_t idx = id2idx.at(c.id);
+                    (*sw)[idx] = 0.20;
+                    (*sw_old)[idx] = 0.20;
+                    (*sw_prev)[idx] = 0.20;
+                }
+            }
+        }
+        else
+        {
+            std::cerr << "[TEST] saturation fields not found.\n";
+            return EXIT_FAILURE;
+        }
+    }
+
+    // ---------- 3. VG / 相对渗透率参数 ----------
+    VGParams vg_params;
+    vg_params.Swr = 0.20;
+    vg_params.Sgr = 0.05;
+    vg_params.alpha = 2.0e-6;
+    vg_params.n = 2.5;
+
+    RelPermParams rp_params;
+    rp_params.L = 0.5;   // Mualem 参数
+
+    // ---------- 4. 压力边界条件（左端 Dirichlet，其他默认 no-flow 或由 BC 系统处理） ----------
+    const auto& bfaces = mgr.boundaryFaces();
+    PressureBC::Registry pbc_pw;
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 6.5e6 };  // p = 6.5 MPa
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };  // Neumann
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces, P_Left, P_Right, P_Down, P_Up);
+    PressureBCAdapter PbcA{ pbc_pw };
+
+    // ---------- 5. 井配置（此例为空） ----------
+    std::vector<WellConfig_TwoPhase> wells_cfg;
+    build_masks_and_WI_for_all(mgr, reg, wells_cfg);
+
+    const int Ncells = static_cast<int>(mgr.mesh().getCells().size());
+    std::vector<WellDOF_TwoPhase> wells_dof;
+    register_well_dofs_for_all_TwoPhase(Ncells, wells_cfg, wells_dof);
+
+    // ---------- 6. 饱和度输运配置 ----------
+    IMPES_Iteration::SaturationTransportConfig satCfg;
+    // 主/旧/上一时间层饱和度场名称
+    satCfg.saturation = "s_w";
+    satCfg.saturation_old = "s_w_old";
+    satCfg.saturation_prev = "s_w_prev";
+
+    // VG + 相对渗透率参数
+    satCfg.VG_Parameter.vg_params = vg_params;
+    satCfg.VG_Parameter.relperm_params = rp_params;
+
+    // 如果 SaturationTransportConfig 里有 CFL 控制或通量名称等字段，可以在这里补：
+    // satCfg.CFL.max_CFL = 0.5;
+    // satCfg.transport_scheme = SaturationTransportScheme::Upwind;
+
+    // ---------- 7. 压力求解控制参数 ----------
+    IMPES_Iteration::PressureSolveControls pCtrl;  // 默认构造里应该已经填好场名与算子名
+
+    // 外迭代与收敛控制
+    pCtrl.max_outer = 50;        // 压力外迭代上限
+    pCtrl.tol_abs = 1e-3;     // 绝对收敛阈值 [Pa]
+    pCtrl.tol_rel = 1e-3;     // 相对收敛阈值
+    pCtrl.under_relax = 0.7;      // 欠松弛系数
+    pCtrl.verbose = true;     // 打印每次外迭代信息
+
+    // 组装级别控制：重力、非正交修正等（假定 assembly 里有这些字段）
+    pCtrl.assembly.enable_buoyancy = true;
+    pCtrl.assembly.gradient_smoothing = 0;
+    pCtrl.assembly.gravity = Vector{ 0.0, -9.81, 0.0 };
+
+    // 如果你的 PressureSolveControls 还有 operator_tag / method_flags 之类，可以在这里设：
+    // pCtrl.assembly.operator_tag = PressureEquation_String().operator_tag;
+
+    // ---------- 8. 两相通量拆分配置 ----------
+    IMPES_Iteration::FluxSplitConfig fluxCtrl;
+    // 默认构造里：水/气相通量面场名字已经从 FluxSplitConfig_String 填好
+    // 这里只需要挂上压力边界，用于识别 no-flow 面等
+    fluxCtrl.pressure_bc = &PbcA;
+
+    // 如需质量基 fractional flow，可设置 rho 标志；为空就走“体积基”逻辑
+    // fluxCtrl.rho_water = "";   // 使用默认水密度场 TwoPhase::Water().rho_tag
+    // fluxCtrl.rho_gas   = "";   // 使用默认 CO2 密度场 TwoPhase::CO2().rho_tag
+
+    // ---------- 9. IMPES 主时间推进 ----------
+    const int    nSteps = 50;     // 总时间步数（示例）
+    double       dt_initial = 1e-5;    // 初始时间步 [s]
+    const int writeEveryP = 5;
+    const int writeEverySw = 5;
+
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case4/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case4/s_impes_ps_revised/s_ps";
+    const std::string timeSeriesFn = "./Postprocess_Data/IMPES_Iteration_Test/Case4/time_series/impes_ps_revised_stats.csv";
+
+    const int snapshotEveryCsv = 5;   // 若需 CSV 快照可改成 >0
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/ps_state_reviesed";
+    std::vector<std::string> snapshotFields; // 留空 -> runTransient_IMPES 内部默认只导出 p & s_w
+
+    std::cout << "--- IMPES: start transient run ---\n";
+
+    const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration
+    (
+        mgr,
+        reg,
+        freg,
+        PbcA,
+        wells_dof,
+        nSteps,
+        dt_initial,
+        pCtrl,
+        satCfg,
+        fluxCtrl,
+        writeEveryP,
+        writeEverySw,
+        outPrefixP,
+        outPrefixSw,
+        snapshotEveryCsv,
+        snapshotPrefix
+    );
+
+    if (!ok)
+    {
+        std::cerr << "[TEST] runTransient_IMPES_Iteration failed.\n";
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "[TEST] IMPES two-phase test finished successfully.\n";
+    return EXIT_SUCCESS;
+}
 
 int main()
 {
    
 
-    //return test_saturation_explicit_exchange();
+   return run_IMPES_Iteration_TwoPhase_Test();
 }
 
