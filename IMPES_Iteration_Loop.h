@@ -16,16 +16,17 @@
 #include "PostProcess_.h"
 #include "FluxSplitterandSolver.h"
 #include "Solver_TimeLoopUtils.h"
+#include "IMPES_PostProcessIO.h"
 
 namespace IMPES_Iteration
 {
     /// 时间步控制参数
     struct TimeStepControl
     {
-        double dt_min = 1e-5;   ///< 允许的最小时间步 [s]
-        double dt_max = 1e10;   ///< 允许的最大时间步 [s]
-        double grow_factor = 1.3;    ///< 接受时间步后，最大放大倍数
-        double shrink_factor = 0.5;    ///< 拒绝时间步时收缩倍数
+        double dt_min = 1e-9;   ///< 允许的最小时间步 [s]
+        double dt_max = 10;   ///< 允许的最大时间步 [s]
+        double grow_factor = 2;    ///< 接受时间步后，最大放大倍数
+        double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
         double safety_factor = 0.9;    ///< 相对于 Redondo 建议步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数
     };
@@ -455,30 +456,6 @@ namespace IMPES_Iteration
                 << ", max_dS=" << satStats.max_dS
                 << ", dt_suggest=" << satStats.suggested_dt << "\n";
 
-            // -------- 4.4 更新两相物性到新时间层，并写入 *_old --------
-            TwoPhase::updateTwoPhasePropertiesAtTimeStep(
-                mgr, reg,
-                satCfg.saturation,
-                satCfg.VG_Parameter.vg_params,
-                satCfg.VG_Parameter.relperm_params
-            );
-            for (const auto& c : cells) {
-                if (c.id < 0) continue;
-                const size_t i = id2idx.at(c.id);
-                (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
-            }
-            TwoPhase::updateWaterBasicPropertiesAtStep(
-                mgr, reg,
-                pressureCtrl.assembly.pressure_field,
-                "T"
-            );
-            TwoPhase::updateCO2BasicPropertiesAtStep(
-                mgr, reg,
-                pressureCtrl.assembly.pressure_g,
-                "T"
-            );
-            TwoPhase::copyBasicPropertiesToOldLayer(reg);
-
             // ---- 6.7：Tecplot 输出 (P  / Sw) ----
             const bool dumpP = !outPrefixP.empty() &&
                 ((writeEveryP <= 0) || (stepId % writeEveryP == 0));
@@ -535,6 +512,49 @@ namespace IMPES_Iteration
                     return false;
                 }
             }
+
+            // CSV snapshot（cell 标量场）
+            if (snapshotEveryCsv > 0 &&
+                (stepId % snapshotEveryCsv) == 0 &&
+                !snapshotPrefix.empty())
+            {
+                const double simTime = t_next; // 本步的 t^{n+1}
+                if (!IMPES::Output::writeFieldSnapshotCSV(
+                    snapshotPrefix, stepId, simTime,
+                    mgr, reg, snapshotFields))
+                {
+                    std::cerr << "[IMPES][Iteration] CSV snapshot failed at step "
+                        << stepId << ".\n";
+                    return false;
+                }
+            }
+
+
+            // -------- 4.4 更新两相物性到新时间层，并写入 *_old --------
+            TwoPhase::updateTwoPhasePropertiesAtTimeStep(
+                mgr, reg,
+                satCfg.saturation,
+                satCfg.VG_Parameter.vg_params,
+                satCfg.VG_Parameter.relperm_params
+            );
+            for (const auto& c : cells) {
+                if (c.id < 0) continue;
+                const size_t i = id2idx.at(c.id);
+                (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
+            }
+            TwoPhase::updateWaterBasicPropertiesAtStep(
+                mgr, reg,
+                pressureCtrl.assembly.pressure_field,
+                "T"
+            );
+            TwoPhase::updateCO2BasicPropertiesAtStep(
+                mgr, reg,
+                pressureCtrl.assembly.pressure_g,
+                "T"
+            );
+            TwoPhase::copyBasicPropertiesToOldLayer(reg);
+
+
             // -------- 4.6 接受时间步，更新时间和 dt --------
             time += dt;
             ++step;
@@ -546,7 +566,7 @@ namespace IMPES_Iteration
                 dt_target = dt; // 容错：如果算法返回了非正值，就保持原 dt
             }
             // 不能比当前 dt 增长太多，但也不超过建议值
-            double dt_candidate = std::min(dt_target, Tsc.grow_factor * dt);
+            double dt_candidate = std::min({dt_target, Tsc.grow_factor * dt, Tsc.dt_max});
             dt = dt_candidate;
 
             std::cout << "[IMPES][Iteration] step " << stepId

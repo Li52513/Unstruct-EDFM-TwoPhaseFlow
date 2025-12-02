@@ -41,7 +41,7 @@ struct RockDefaults  //当前已经进行了分区处理
 struct InitFields
 {
 	//基础场：uniform+线性梯度（可都为0）
-	double p_w0 = 6e6; //基岩内部初始水相压力，单位 Pa
+	double p_w0 = 8e6; //基岩内部初始水相压力，单位 Pa
 	double dp_wdx = 0.0; //基岩压力梯度，单位 Pa/m
 	double dp_wdy = 0.0; //基岩压力梯度，单位 Pa/m
 	double dp_wdz = 0.0; //基岩压力梯度，单位 Pa/m
@@ -51,7 +51,7 @@ struct InitFields
 	double dTdy = 0.0; //基岩温度梯度，单位 K/m
 	double dTdz = 0.0; //基岩温度梯度，单位 K/m
 
-	double s_w = 0.9; //基岩初始水相饱和度 (最好等于1-Sgr)
+	double s_w = 0.05; //基岩初始水相饱和度 (最好等于1-Sgr)
 
 };
 

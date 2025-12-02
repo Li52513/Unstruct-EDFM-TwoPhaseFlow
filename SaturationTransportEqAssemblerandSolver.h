@@ -40,8 +40,8 @@ namespace IMPES_Iteration
         SatTimeControlScheme time_control_scheme = SatTimeControlScheme::SimpleCFL;
 
         /// Redondo 风格 & ΔS_max 条件使用的参数（SimpleCFL 也会用 dS_max）
-        double CFL_safety = 0.5;  ///< C_CFL 安全系数, dt_CFL = CFL_safety * ...
-        double dS_max = 0.1;  ///< 单步允许的最大 |ΔS_w|, 用于 ΔS_max 条件
+        double CFL_safety = 0.8;  ///< C_CFL 安全系数, dt_CFL = CFL_safety * ...
+        double dS_max = 0.2;  ///< 单步允许的最大 |ΔS_w|, 用于 ΔS_max 条件
     };
 
     /**

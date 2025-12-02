@@ -211,7 +211,7 @@ namespace TwoPhase
 
 			//当前基本物性参数参数为常数
 			(*rho_g)[i] = 800.0; //kg/m3
-			(*mu_g)[i] = 1.48e-5; //Pa.s
+			(*mu_g)[i] = 1.0e-3; //Pa.s
 			(*drho_g_dp)[i] = 0.0; //kg/m3.Pa
 
 			//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
@@ -259,7 +259,8 @@ namespace TwoPhase
 			const size_t i = mesh.getCellId2Index().at(c.id);
 			// Relative permeability of water
 			double sw_val = (*s_w)[i]; //主变量-已经在初场初始化的时候进行了初始化 
-			sw_val = clamp(sw_val, vg.Swr, 1.0 - vg.Sgr); //计算有效饱和度
+			const double eps = std::max(1e-6, 1e-3 * (1.0 - vg.Swr - vg.Sgr));
+			sw_val = clamp(sw_val, vg.Swr + eps, (1.0 - vg.Sgr) - eps); //计算有效饱和度
 			(*s_w)[i] = sw_val; // Write the clipped value back for consistency
 			
 			// Capillary pressure
