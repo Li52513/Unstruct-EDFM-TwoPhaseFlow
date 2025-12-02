@@ -2,12 +2,14 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "InitConfig.h"         // Where VGParams and RelPermParams are defined
-#include "CapRelPerm.h"         // Where vg_params_valid, pc_vG, etc. are defined
+#include "CapRelPerm_Simple.h"         // Simplified Pc/kr model (linear Pc + Corey kr)
 #include "Solver_TimeLoopUtils.h" // CopyField here
 
 
 namespace TwoPhase
 {
+	inline double clamp_local(double v, double lo, double hi) { return std::max(lo, std::min(hi, v)); }
+
 	/**
 	*  To define the properties tag of water phase
 	*/
@@ -211,7 +213,7 @@ namespace TwoPhase
 
 			//当前基本物性参数参数为常数
 			(*rho_g)[i] = 800.0; //kg/m3
-			(*mu_g)[i] = 1.48e-5; //Pa.s
+			(*mu_g)[i] =	5e-3; //Pa.s
 			(*drho_g_dp)[i] = 0.0; //kg/m3.Pa
 
 			//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
@@ -227,7 +229,7 @@ namespace TwoPhase
 	inline void computerWaterandCO2TwoPhasePropertiesAtTimeStep(MeshManager& mgr, FieldRegistry& reg,const std::string& Sw_field, const VGParams& vg, const RelPermParams& rp)
 	{
 		// ===== Step 1: Sanity Checks & Setup =====
-		if (!vg_params_valid(vg)) 
+		if (!SimpleCapRelPerm::params_valid(vg)) 
 		{
 			std::cerr << "ERROR [multiPhase::Rock]: Invalid Van Genuchten parameters provided." << std::endl;
 			return ;
@@ -258,20 +260,13 @@ namespace TwoPhase
 			if (c.id < 0) continue;
 			const size_t i = mesh.getCellId2Index().at(c.id);
 			// Relative permeability of water
-			double sw_val = (*s_w)[i]; //主变量-已经在初场初始化的时候进行了初始化 
-			const double eps = std::max(1e-6, 1e-3 * (1.0 - vg.Swr - vg.Sgr));
-			sw_val = clamp(sw_val, vg.Swr + eps, (1.0 - vg.Sgr) - eps); //计算有效饱和度
-			(*s_w)[i] = sw_val; // Write the clipped value back for consistency
-			
-			// Capillary pressure
-			(*Pc)[i] = pc_vG(sw_val, vg);
-			
-			// Relative permeabilities and derivative of capillary pressure
-			kr_Mualem_vG(sw_val, vg, rp, (*k_rw)[i], (*k_rg)[i]);
-			(*dPc_dSw)[i] = dpc_dSw_vG(sw_val, vg);
+			double sw_val = (*s_w)[i];
+			double se = SimpleCapRelPerm::Se_from_Sw_simple(sw_val, vg);
+			//主变量-已经在初场初始化的时候进行了初始化 															// Capillary pressure (linear Pc = pc_entry*(1-Se))
+			(*Pc)[i] = SimpleCapRelPerm::pc_linear(se, vg);																	// Capillary pressure (linear Pc = pc_entry*(1-Se))
+			SimpleCapRelPerm::kr_corey(se, vg, SimpleCapRelPerm::RelPermConfig{}, (*k_rw)[i], (*k_rg)[i]);					// Relative permeabilities and derivative of capillary pressure (Corey + linear Pc)
+			(*dPc_dSw)[i] = SimpleCapRelPerm::dpc_dSw_linear(se, vg);
 		}
-
-
 	}
 	//=============================================================封装后的函数===================================================================//
 	/**

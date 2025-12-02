@@ -117,25 +117,6 @@ namespace IMPES_Iteration
         }
     }
 
-    //================= 单次压力方程求解器（单 outer step） =================//
-
-    /**
-     * \brief
-     * 单次 “组装两相流总压力方程 + 线性求解器 + 欠松弛 + 井底压力回写”。
-     *
-     * 假设：
-     *  - 时间步 dt 已给定；
-     *  - 本时间步的物性（lambda, rho, c_t 等）已经在外面更新好，并存入 reg；
-     *  - `assemblePressureTwoPhase` 已经实现完整的时间项 + 扩散 + 毛细 + 重力 + 井耦合，并返回
-     *    - `PressureAssemblyResult::system` 线性系统
-     *    - `PressureAssemblyResult::cell_lid` cell -> DOF 映射
-     *    - 面上的总质量/体积/速度通量（若在 cfg 中配置了名字）。:contentReference[oaicite:2]{index=2}
-     *
-     * 本函数：
-     *  - 只做 “一次 outer 迭代”：不在内部循环；
-     *  - 适合在外层时间步/外迭代 driver 中反复调用；
-     *  - 通过 PressureSolveReport 返回 dp_inf 和通量信息。
-     */
     inline bool solver_IMPES_Iteration_PressureEq(
         MeshManager& mgr,
         FieldRegistry& reg,
@@ -191,7 +172,6 @@ namespace IMPES_Iteration
             ctrl.assembly.pressure_field,
             asmb.cell_lid,
             pvec);
-
         // ===== 5) 更新井底压力：p_bh = 解向量中对应 DOF ===== //
         for (auto& w : wells)
         {

@@ -38,7 +38,8 @@ namespace FVM {
             const std::string& Qf_name = "Qf",
             const std::string& ufn_name = "ufn",
             const PressureBCAdapter* bc = nullptr,
-            bool clampDirichletBackflow = false);
+            bool clampDirichletBackflow = false,
+            double dirichlet_zero_flux_tol = 0.0);
 
 
         /**

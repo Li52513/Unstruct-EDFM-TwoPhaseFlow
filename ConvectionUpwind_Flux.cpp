@@ -60,7 +60,8 @@ namespace FVM
 			const std::string& mf_name, const std::string& Qf_name,
 			const std::string& ufn_name,
 			const PressureBCAdapter* bc,
-			bool clampDirichletBackflow
+			bool clampDirichletBackflow,
+			double dirichlet_zero_flux_tol
 		)
 		{
 			Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
@@ -68,12 +69,12 @@ namespace FVM
 			const auto& id2idx = mesh.getCellId2Index();
 			const auto& cells = mesh.getCells();
 
-			auto a_f = freg.get<faceScalarField>(a_name.c_str()); //获取扩散项离散系数面场
-			auto s_f = freg.get<faceScalarField>(s_name.c_str()); //获取扩散项离散源项系数面场
+			auto a_f = freg.get<faceScalarField>(a_name.c_str());
+			auto s_f = freg.get<faceScalarField>(s_name.c_str());
 
-			auto mf = freg.getOrCreate<faceScalarField>(mf_name.c_str(), faces.size(), 0.0); //质量通量面场
-			auto Qf = freg.getOrCreate<faceScalarField>(Qf_name.c_str(), faces.size(), 0.0); //体积通量面场
-			auto ufn = freg.getOrCreate<faceScalarField>(ufn_name.c_str(), faces.size(), 0.0); //达西速度面场
+			auto mf = freg.getOrCreate<faceScalarField>(mf_name.c_str(), faces.size(), 0.0);
+			auto Qf = freg.getOrCreate<faceScalarField>(Qf_name.c_str(), faces.size(), 0.0);
+			auto ufn = freg.getOrCreate<faceScalarField>(ufn_name.c_str(), faces.size(), 0.0);
 
 			std::fill(mf->data.begin(), mf->data.end(), 0.0);
 			std::fill(Qf->data.begin(), Qf->data.end(), 0.0);
@@ -98,12 +99,10 @@ namespace FVM
 
 					mface = (*a_f)[idx] * (pP - pN) - (*s_f)[idx];
 
-					//利用线性插值方法计算面上密度
 					const double gamma = F.f_linearInterpolationCoef;
 					const double rho_f = (1.0 - gamma) * rhoP + gamma * rhoN;
 					qface = mface / std::max(rho_f, 1e-30);
 				}
-
 				else
 				{
 					bool dirichletOutflow = false;
@@ -118,19 +117,33 @@ namespace FVM
 					mface = (*a_f)[idx] * (pP)-(*s_f)[idx];
 					qface = mface / rhoP;
 
-					//防止回流
 					if (dirichletOutflow && mface < 0.0)
 					{
 						mface = 0.0;
 						qface = 0.0;
 					}
+
+					if (dirichlet_zero_flux_tol > 0.0 && bc)
+					{
+						double a = 0.0, b = 0.0, c = 0.0;
+						if (bc->getABC(F.id, a, b, c) && std::abs(a) > 1e-30 && std::abs(b) <= 1e-30)
+						{
+							const double pBC = c / a;
+							if (std::abs(pP - pBC) <= dirichlet_zero_flux_tol)
+							{
+								mface = 0.0;
+								qface = 0.0;
+							}
+						}
+					}
 				}
+
 				(*mf)[idx] = mface;
 				(*Qf)[idx] = qface;
 				(*ufn)[idx] = (Aabs > 0.0 ? qface / Aabs : 0.0);
 
 			}
-				return true;
+			return true;
 
 		}
 

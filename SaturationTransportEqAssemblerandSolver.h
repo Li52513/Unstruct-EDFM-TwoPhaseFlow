@@ -40,7 +40,7 @@ namespace IMPES_Iteration
         SatTimeControlScheme time_control_scheme = SatTimeControlScheme::SimpleCFL;
 
         /// Redondo 风格 & ΔS_max 条件使用的参数（SimpleCFL 也会用 dS_max）
-        double CFL_safety = 0.8;  ///< C_CFL 安全系数, dt_CFL = CFL_safety * ...
+        double CFL_safety = 0.9;  ///< C_CFL 安全系数, dt_CFL = CFL_safety * ...
         double dS_max = 0.2;  ///< 单步允许的最大 |ΔS_w|, 用于 ΔS_max 条件
     };
 
@@ -352,6 +352,7 @@ namespace IMPES_Iteration
 
             double Sw_new = Sw_n + dS;
             Sw_new = std::max(0.0, std::min(1.0, Sw_new));
+            Sw_new = clamp(Sw_new, cfg.VG_Parameter.vg_params.Swr, 1 - cfg.VG_Parameter.vg_params.Sgr);
             (*s_w)[ic] = Sw_new;
 
             const double dS_abs = std::fabs(Sw_new - Sw_n);

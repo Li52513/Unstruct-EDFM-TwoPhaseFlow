@@ -28,7 +28,7 @@ namespace rock
         case Cell::RegionType::Low:
             s.phi_r = 0.3;  s.kxx = 1e-15; s.kyy = 1e-15; s.kzz = 1e-15;  break;
         case Cell::RegionType::Medium:
-            s.phi_r = 0.3;  s.kxx = 1e-13; s.kyy = 1e-13; s.kzz = 1e-13; break;
+            s.phi_r = 0.2;  s.kxx = 1e-13; s.kyy = 1e-13; s.kzz = 1e-13; break;
         case Cell::RegionType::High:
             s.phi_r = 0.3;  s.kxx = 1e-11; s.kyy = 1e-11; s.kzz = 1e-11; break;
         }

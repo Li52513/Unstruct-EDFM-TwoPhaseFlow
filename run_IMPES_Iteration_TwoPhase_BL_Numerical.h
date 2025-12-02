@@ -6,9 +6,6 @@
 
 #include    "0_PhysicalParametesCalculateandUpdata.h"
 #include    "IMPES_Iteration_Loop.h"
-
-
-
 /**
  * @brief 1D Buckley–Leverett 风格的两相 IMPES 数值测试（仅数值解，不构造解析解）。
  *
@@ -30,11 +27,11 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
 {
     // ---------------- 0. 网格与场注册 ----------------
     const double lengthX = 50.0;   // [m]
-    const double lengthY = 5.0;    // 几乎 1D
+    const double lengthY = 50.0;    // 几乎 1D
     const double lengthZ = 0.0;
 
     const int sectionNumX = 50;    // 细一点，方便看前沿
-    const int sectionNumY = 5;
+    const int sectionNumY = 50;
     const int sectionNumZ = 0;
 
     const bool usePrism = true;
@@ -53,14 +50,27 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
 
     // ---------- 1. 初始主变量场 ----------
     std::cout << "--- IMPES: initializing primary fields ---\n";
+
+    // 4. VG / 相对渗透率参数：进一步减小 Pc
+    VGParams vg_params;
+    vg_params.Swr = 0.2;  // 少量束缚水
+    vg_params.Sgr = 0.25;  // 适当残余气，避免气相端点过头
+    vg_params.alpha = 1e-4;   // 保持 Pc 小
+    vg_params.n = 2.0;   // 曲线更平缓，前沿不至于过陡
+
+    RelPermParams rp_params;
+    rp_params.L = 0.5;       // Mualem 默认，减缓相对渗透率陡峭度
+
+    double P_left = 9.0e6;
+    double P_right = 8e6;
+    
     InitFields ic;  // 默认 p0 / T0 / Sw0，如有需要可以修改 ic.p0 / ic.T0 等
-    // 压力：线性从左 9 MPa 过渡到右 8 MPa
-    ic.p_w0 = 9.0e6;                        // x=0 处的压力
-    ic.dp_wdx = (8.0e6 - 9.0e6) / lengthX;  // 与 lengthX 匹配的梯度
+    ic.p_w0 = P_left;                        // x=0 处的压力
+    ic.dp_wdx = (P_right - P_left) / lengthX;  // 与 lengthX 匹配的梯度
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
-    // BL: 背景初始饱和度 = 右侧初始值 Sw_i
-    ic.s_w = 0.85;   // Sw_i
+    
+    ic.s_w = 1-vg_params.Sgr-0.2;   // Sw_i
 
     // 主变量场：水相压力 p_w、水相饱和度 s_w、温度 T
     Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
@@ -78,48 +88,11 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
     ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
 
-    // 3. Buckley–Leverett 型饱和度初场：避免 0/1 极端，留出 0.1 缓冲
-    {
-        auto sw = reg.get<volScalarField>("s_w");
-        auto sw_old = reg.get<volScalarField>("s_w_old");
-        auto sw_prev = reg.get<volScalarField>("s_w_prev");
-        if (!sw || !sw_old || !sw_prev) { std::cerr << "[BL-TEST] saturation fields not found.\n"; return EXIT_FAILURE; }
-
-        const auto& mesh = mgr.mesh();
-        const auto& cells = mesh.getCells();
-        const auto& id2idx = mesh.getCellId2Index();
-
-        const double Sw_inj = 0.05; // 注入端，远离 1.0
-        const double Sw_i = 0.85; // 背景，远离 0.0
-        const double dx = lengthX / static_cast<double>(sectionNumX);
-        const double x_threshold = dx;
-
-        for (const auto& c : cells)
-        {
-            if (c.id < 0) continue;
-            const size_t i = id2idx.at(c.id);
-            double Sw_val = (c.center.m_x < x_threshold) ? Sw_inj : Sw_i;
-            Sw_val = std::max(0.05 + 1e-6, std::min(1.0 - 0.15 - 1e-6, Sw_val)); // clamp 至 [Swr, 1-Sgr]
-            (*sw)[i] = (*sw_old)[i] = (*sw_prev)[i] = Sw_val;
-        }
-    }
-
-    // 4. VG / 相对渗透率参数：进一步减小 Pc
-    VGParams vg_params;
-    vg_params.Swr = 0.05;  // 少量束缚水
-    vg_params.Sgr = 0.15;  // 适当残余气，避免气相端点过头
-    vg_params.alpha = 1e4;   // 保持 Pc 小
-    vg_params.n = 1.3;   // 曲线更平缓，前沿不至于过陡
-
-    RelPermParams rp_params;
-    rp_params.L = 0.5;       // Mualem 默认，减缓相对渗透率陡峭度
-
-
     // ---------- 5. 压力边界条件（左高右低，其他 no-flow） ----------
     const auto& bfaces = mgr.boundaryFaces();
     PressureBC::Registry pbc_pw;
-    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 9.0e6 };
-    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, 8.0e6 };
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, P_left };
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, P_right };
     PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
     PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
 
@@ -153,6 +126,7 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     pCtrl.assembly.enable_buoyancy = false;
     pCtrl.assembly.gradient_smoothing = 1;
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
+    pCtrl.assembly.dirichlet_zero_flux_tol = 1.0; // Pa tolerance to treat boundary flux as zero
 
     // ---------- 9. 两相通量拆分配置 ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;

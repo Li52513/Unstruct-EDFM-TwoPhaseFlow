@@ -38,7 +38,11 @@ namespace IMPES_Iteration
         std::string gravity_correction_flux =       Fsc.gravity_correction_flux;           // Optional: face field (kg/s) added to water, subtracted from gas
 
         double min_lambda = 1e-30;                     // Safeguard to avoid divide-by-zero
-        double flux_sign_epsilon = 1e-15;              // Threshold to detect face flux direction
+        double flux_sign_epsilon = 1e-1;              // Threshold to detect face flux direction
+
+        // Inflow boundary handling: override fw on boundary inflow faces (N<0, flux<0)
+        bool   enforce_boundary_inflow_fw = false;      // enable/disable override
+        double boundary_inflow_fw = 1.0;               // default inlet fractional flow (mass-based), 1 = pure water
 
         const PressureBCAdapter* pressure_bc = nullptr; // Optional: BC adapter used to identify sealed Neumann faces
         double no_flow_a_epsilon = 1e-30;              // |a| <= eps -> treat as Neumann
@@ -177,6 +181,7 @@ namespace IMPES_Iteration
             // ---- 6.1 Determine upwind cell for fractional flow & weighting ---- //
             const int P = F.ownerCell;
             const int N = F.neighborCell;
+            const bool boundaryInflow = (flux_press < -cfg.flux_sign_epsilon) && (N < 0);
             int upCell = -1;
             if (std::abs(flux_press) > cfg.flux_sign_epsilon)
             {
@@ -215,6 +220,11 @@ namespace IMPES_Iteration
             else
             {
                 fw_mass = 0.0;
+            }
+            // Override fractional flow for boundary inflow to enforce prescribed inlet composition
+            if (boundaryInflow && cfg.enforce_boundary_inflow_fw)
+            {
+                fw_mass = clampValue(cfg.boundary_inflow_fw, 0.0, 1.0);
             }
 
             //---- 6.2 Pressure-driven part: split F_press ----//

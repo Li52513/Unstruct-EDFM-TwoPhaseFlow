@@ -7,7 +7,7 @@
 
 // ===== common epsilon & helpers =====//
 constexpr double kTiny = 1e-12; // 避免除零等数值问题的小量
-constexpr double kPcMax = 1e12; // 最大毛细压力，单位 Pa
+constexpr double kPcMax = 1e7; // 最大毛细压力，单位 Pa
 
 inline bool vg_params_valid(const VGParams& vg) 
 {

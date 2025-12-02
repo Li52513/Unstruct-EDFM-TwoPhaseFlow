@@ -45,6 +45,7 @@ namespace IMPES_Iteration
         std::string total_velocity_name =   P_Eq_str.total_velocity_name;
         std::string capillary_correction_flux_name = P_Eq_str.capillary_correction_flux_name;
         std::string gravity_correction_flux_name = P_Eq_str.gravity_correction_flux_name;
+        double dirichlet_zero_flux_tol = 0.0;           ///< |p_owner - p_bc| <= tol -> clamp boundary flux
     };
 
     struct PressureAssemblyResult
@@ -247,6 +248,69 @@ namespace IMPES_Iteration
         }
 
         //从扩散算子系数计算面通量
+        inline void applyStrongDirichletConditions(
+            MeshManager& mgr,
+            const PressureBCAdapter& pbc,
+            const std::vector<int>& cell_lid,
+            SparseSystemCOO& sys)
+        {
+            const auto& mesh = mgr.mesh();
+            const auto& faces = mesh.getFaces();
+            const auto& id2idx = mesh.getCellId2Index();
+
+            if (sys.n <= 0) return;
+
+            std::vector<int> counts(sys.n, 0);
+            std::vector<double> values(sys.n, 0.0);
+
+            for (const auto& F : faces)
+            {
+                if (!F.isBoundary()) continue;
+                double a = 0.0, b = 0.0, c = 0.0;
+                if (!pbc.getABC(F.id, a, b, c)) continue;
+                const double aTol = 1e-30;
+                const double bTol = 1e-30;
+                if (std::abs(a) <= aTol) continue;
+                if (std::abs(b) > bTol) continue;
+                if (F.ownerCell < 0) continue;
+                auto it = id2idx.find(F.ownerCell);
+                if (it == id2idx.end()) continue;
+                const int lid = cell_lid[it->second];
+                if (lid < 0 || lid >= sys.n) continue;
+                counts[lid] += 1;
+                values[lid] += c / a;
+            }
+
+            std::vector<double> targets(sys.n, 0.0);
+            bool hasDirichlet = false;
+            for (int i = 0; i < sys.n; ++i)
+            {
+                if (counts[i] > 0)
+                {
+                    targets[i] = values[i] / static_cast<double>(counts[i]);
+                    hasDirichlet = true;
+                }
+            }
+            if (!hasDirichlet) return;
+
+            for (auto& t : sys.A)
+            {
+                if (t.r >= 0 && t.r < sys.n && counts[t.r] > 0)
+                {
+                    t.v = 0.0;
+                }
+            }
+
+            for (int i = 0; i < sys.n; ++i)
+            {
+                if (counts[i] > 0)
+                {
+                    sys.b[i] = targets[i];
+                    sys.addA(i, i, 1.0);
+                }
+            }
+        }
+
         inline bool computeFaceFluxFromOperator(
             MeshManager& mgr,
             FieldRegistry& reg,
@@ -381,6 +445,8 @@ namespace IMPES_Iteration
         result.cell_lid = buildUnknownMap(mgr.mesh(), N);
         if (sys.n < N) sys.expandTo(N);
 
+        detailed::applyStrongDirichletConditions(mgr, pbc, result.cell_lid, sys);
+
         std::vector<double> eval_vec;
         if (!detailed::gatherFieldToVector(mgr.mesh(), reg, cfg.Pc_field, result.cell_lid, N, eval_vec))
         {
@@ -484,7 +550,8 @@ namespace IMPES_Iteration
                 cfg.total_vol_flux_name,
                 cfg.total_velocity_name,
                 &pbc,
-                false))
+                false,
+                cfg.dirichlet_zero_flux_tol))
             {
                 std::cerr << "[IMPES_revised][Pressure] failed to compute total flux.\n";
                 return false;

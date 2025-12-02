@@ -24,43 +24,12 @@ namespace IMPES_Iteration
     struct TimeStepControl
     {
         double dt_min = 1e-9;   ///< 允许的最小时间步 [s]
-        double dt_max = 10;   ///< 允许的最大时间步 [s]
+        double dt_max = 1000;   ///< 允许的最大时间步 [s]
         double grow_factor = 2;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
         double safety_factor = 0.9;    ///< 相对于 Redondo 建议步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数
     };
-
-    /**
- * \brief 基于 IMPES 的两相 CO2–H2O 主时间步推进（迭代版）。
- *
- * 时间推进顺序：
- *  - t = 0：根据初始 p_w, S_w, T 计算两相 VG / kr / Pc 与水/CO2 物性，并写入 *_old；
- *  - 每个时间步：
- *      1) 启动时间步：p_w, S_w → *_old, *_prev；
- *      2) 基于当前 S_w^n 更新 VG/kr/Pc；
- *      3) 压力步：外迭代 + 欠松弛，调用 solver_IMPES_Iteration_PressureEq，得到收敛的 p_w^{n+1}
- *         和总质量通量（face field，由压力装配模块写入 FaceFieldRegistry）；
- *      4) 调用两相通量拆分函数，将总质量通量拆成水相/气相质量通量（face field）；
- *      5) 显式 Euler 饱和度推进，调用 advanceSaturationExplicit_Euler，统计 CFL / ΔS / dt_suggest；
- *      6) 基于 p_w^{n+1}, S_w^{n+1}, T 更新两相物性，并拷贝到 *_old 供下一时间步使用；
- *      7) 按需输出 Tecplot / CSV / time-series。
- *
- * \note
- *  - 时间步控制：
- *      - 在 advanceSaturationExplicit_Euler 内部已经根据 cfg.time_control_scheme
- *        计算了 Redondo 风格或 SimpleCFL 风格的 dt_suggest；
- *      - 本函数仅用 stats.suggested_dt 和简单增长因子来更新 dt。
- *  - 所有温度字段均统一用 "T" 字符串。
- *  - 本函数依赖：
- *      - solver_IMPES_Iteration_PressureEq(...)
- *      - splitTwoPhaseMassFlux(...)
- *      - advanceSaturationExplicit_Euler(...)
- *      - TwoPhase::updateTwoPhasePropertiesAtTimeStep(...)
- *      - TwoPhase::updateWaterBasicPropertiesAtStep(...)
- *      - TwoPhase::updateCO2BasicPropertiesAtStep(...)
- *      - TwoPhase::copyBasicPropertiesToOldLayer(...)
- */
     inline bool runTransient_IMPES_Iteration(
         MeshManager& mgr,
         FieldRegistry& reg,
@@ -89,7 +58,7 @@ namespace IMPES_Iteration
             std::cerr << "[IMPES][Iteration] invalid initial dt.\n";
             return false;
         }
-        // ==== 1. Tecplot / CSV 输出目录准备 ====
+        // ==== 1. Tecplot / CSV output directory prep ====
 #if __cplusplus >= 201703L
         try {
             if (!outPrefixP.empty()) {
@@ -109,6 +78,8 @@ namespace IMPES_Iteration
             std::cerr << "[IMPES][Iteration] cannot create directories for Tecplot / CSV output.\n";
             return false;
         }
+#else
+        // std::filesystem not available: skip directory creation
 #endif
 
         // ===== 2. 基本 field / mesh 句柄 =====
@@ -138,64 +109,22 @@ namespace IMPES_Iteration
                 pressureCtrl.assembly.pressure_field,
                 satCfg.saturation
             };
-        }
+        }        
+      
+        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, "s_w", satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);
 
-        // VG 中的 Pc 字段：若不存在则按照 cell 数量创建
+        
+        auto p_g = reg.get<volScalarField>("p_g");
+        auto p_g_old = reg.get<volScalarField>("p_g_old");
+        auto p_g_prev = reg.get<volScalarField>("p_g_prev");
+
         auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
-        if (!Pc)
+        if (!p_g || !p_g_old || !p_g_prev || !Pc)
         {
-            Pc = reg.getOrCreate<volScalarField>(
-                TwoPhase::Auxiliaryparameters().Pc_tag,
-                p_w->data.size(),  // 与压力场同长度
-                0.0                // 初值 0，后面 Step 3 会被 VG 更新覆盖
-            );
-            if (!Pc)
-            {
-                std::cerr << "[IMPES][Iteration] failed to create Pc field '"
-                    << TwoPhase::Auxiliaryparameters().Pc_tag << "'.\n";
-                return false;
-            }
+            std::cerr << "[IMPES][Iteration] missing p_g/Pc fields.\n";
+            return false;
         }
 
-        // 气相压力场 p_g（可能在别处创建，这里确保存在）
-        auto p_g = reg.getOrCreate<volScalarField>(
-            pressureCtrl.assembly.pressure_g,
-            p_w->data.size(), 0.0
-        );
-
-        // ===== 3. t = 0：初始化两相物性，并写入 *_old =====
-        {
-            // 3.1: 基于初始 S_w^0 更新 VG / kr / Pc
-            TwoPhase::updateTwoPhasePropertiesAtTimeStep
-            (
-                mgr, reg,
-                satCfg.saturation,
-                satCfg.VG_Parameter.vg_params,
-                satCfg.VG_Parameter.relperm_params
-            );
-
-            // 3.2: p_g^0 = p_w^0 + Pc(S_w^0)
-            for (const auto& c : cells) 
-            {
-                if (c.id < 0) continue;
-                const size_t i = id2idx.at(c.id);
-                (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
-            }
-
-            // 3.3: 初始基本物性（水 + CO2），温度字段统一用 "T"
-            TwoPhase::updateWaterBasicPropertiesAtStep(
-                mgr, reg,
-                pressureCtrl.assembly.pressure_field,
-                "T"
-            );
-            TwoPhase::updateCO2BasicPropertiesAtStep(
-                mgr, reg,
-                pressureCtrl.assembly.pressure_g,
-                "T"
-            );
-            // 3.4: 把当前基本物性写入 *_old
-            TwoPhase::copyBasicPropertiesToOldLayer(reg);
-        }
         // ===== 4. 时间循环 =====
         double time = 0.0;
         double dt = dt_initial;
@@ -455,7 +384,7 @@ namespace IMPES_Iteration
             std::cout << "[IMPES][Saturation] max_CFL=" << satStats.max_CFL
                 << ", max_dS=" << satStats.max_dS
                 << ", dt_suggest=" << satStats.suggested_dt << "\n";
-
+            
             // ---- 6.7：Tecplot 输出 (P  / Sw) ----
             const bool dumpP = !outPrefixP.empty() &&
                 ((writeEveryP <= 0) || (stepId % writeEveryP == 0));
