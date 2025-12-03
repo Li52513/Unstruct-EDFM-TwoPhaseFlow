@@ -7,7 +7,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "Solver_AssemblerCOO.h"
-#include "MultiPhaseProperties.h"   // VGParams, RelPermParams, kr_Mualem_vG
+#include "CapRelPerm.h"   // VGParams, RelPermParams, kr_Mualem_vG
 #include "WellConfig_TwoPhase.h"    // WellDOF_TwoPhase (mode, role, target, Tin, etc.)
 
 namespace FVM {

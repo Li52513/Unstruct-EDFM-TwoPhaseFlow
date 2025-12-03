@@ -10,9 +10,7 @@
 #include "BCAdapter.h"
 #include "DiffusionCentral.h"
 #include "TwoPhaseWells_StrictRate.h"
-#include "FVM_WellCoupling_TwoPhase.h"
 #include "TimeTermAssemblerandSolver.h"
-
 #include "SolverContrlStrName.h"
 
 namespace IMPES_Iteration

@@ -261,11 +261,12 @@ namespace TwoPhase
 			const size_t i = mesh.getCellId2Index().at(c.id);
 			// Relative permeability of water
 			double sw_val = (*s_w)[i];
-			double se = SimpleCapRelPerm::Se_from_Sw_simple(sw_val, vg);
+			double se = Se_from_Sw(sw_val, vg);
 			//主变量-已经在初场初始化的时候进行了初始化 															// Capillary pressure (linear Pc = pc_entry*(1-Se))
-			(*Pc)[i] = SimpleCapRelPerm::pc_linear(se, vg);																	// Capillary pressure (linear Pc = pc_entry*(1-Se))
-			SimpleCapRelPerm::kr_corey(se, vg, SimpleCapRelPerm::RelPermConfig{}, (*k_rw)[i], (*k_rg)[i]);					// Relative permeabilities and derivative of capillary pressure (Corey + linear Pc)
-			(*dPc_dSw)[i] = SimpleCapRelPerm::dpc_dSw_linear(se, vg);
+			(*Pc)[i] = pc_vG(se, vg);																	// Capillary pressure (linear Pc = pc_entry*(1-Se))
+			//(*Pc)[i] = 1e7;
+			kr_Mualem_vG(se, vg, rp, (*k_rw)[i], (*k_rg)[i]);					// Relative permeabilities and derivative of capillary pressure (Corey + linear Pc)
+			(*dPc_dSw)[i] = dpc_dSw_vG(se, vg);
 		}
 	}
 	//=============================================================封装后的函数===================================================================//

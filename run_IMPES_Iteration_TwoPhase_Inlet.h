@@ -23,15 +23,20 @@
  *  5) 调用 IMPES_Iteration::runTransient_IMPES_Iteration 做主时间步推进；
  *  6) 输出 Tecplot 结果用于后处理。
  */
-int run_IMPES_Iteration_TwoPhase_BL_Numerical()
+
+auto clampValue = [](double v, double lo, double hi) {
+    return std::max(lo, std::min(hi, v));
+    };
+
+int run_IMPES_Iteration_TwoPhase_Inlet()
 {
     // ---------------- 0. 网格与场注册 ----------------
-    const double lengthX = 20.0;   // [m]
-    const double lengthY = 5.0;    // 几乎 1D
+    const double lengthX = 50.0;   // [m]
+    const double lengthY = 50.0;    // 几乎 1D
     const double lengthZ = 0.0;
 
-    const int sectionNumX = 40;    // 细一点，方便看前沿
-    const int sectionNumY = 5;
+    const int sectionNumX = 50;    // 细一点，方便看前沿
+    const int sectionNumY = 50;
     const int sectionNumZ = 0;
 
     const bool usePrism = true;
@@ -61,16 +66,16 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     RelPermParams rp_params;
     rp_params.L = 0.5;       // Mualem 默认，减缓相对渗透率陡峭度
 
-    double P_left = 9.0e6;
-    double P_right = 8e6;
-    
+    double P_left = 10e6;
+    double P_right = 7e6;
+
     InitFields ic;  // 默认 p0 / T0 / Sw0，如有需要可以修改 ic.p0 / ic.T0 等
     ic.p_w0 = P_left;                        // x=0 处的压力
     ic.dp_wdx = (P_right - P_left) / lengthX;  // 与 lengthX 匹配的梯度
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
-    
-    ic.s_w = 1-vg_params.Sgr-0.2;   // Sw_i
+
+    ic.s_w = vg_params.Swr + 0.1; // 例如 0.3 左右
 
     // 主变量场：水相压力 p_w、水相饱和度 s_w、温度 T
     Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
@@ -82,6 +87,27 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
     ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
     ensureTransientFields_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
+
+    auto s_w = reg.get<volScalarField>("s_w");
+    auto s_w_old = reg.get<volScalarField>("s_w_old");
+    auto s_w_prev = reg.get<volScalarField>("s_w_prev");
+    const auto& cells = mgr.mesh().getCells();
+    const auto& id2idx = mgr.mesh().getCellId2Index();
+    const double Sw_min = vg_params.Swr;
+    const double Sw_max = 1.0 - vg_params.Sgr;
+    const double Sw_background = clampValue(vg_params.Swr + 0.1, Sw_min + 1e-6, Sw_max - 1e-6);
+    const double Sw_inj = Sw_max - 1e-6;
+    const double inj_band = lengthX / double(sectionNumX) * 1.01; // 覆盖左端一列
+
+    for (const auto& c : cells) {
+        if (c.id < 0) continue;
+        const size_t i = id2idx.at(c.id);
+        double target = (c.center.m_x <= inj_band) ? Sw_inj : Sw_background;
+        target = clampValue(target, Sw_min, Sw_max);
+        (*s_w)[i] = target;
+        (*s_w_old)[i] = target;
+        (*s_w_prev)[i] = target;
+    }
 
     // ---------- 2. 基岩区域分类与固相物性 ----------
     PhysicalPropertiesManager ppm;
@@ -126,13 +152,15 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     pCtrl.assembly.enable_buoyancy = false;
     pCtrl.assembly.gradient_smoothing = 1;
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
-    pCtrl.assembly.dirichlet_zero_flux_tol = 1.0; // Pa tolerance to treat boundary flux as zero
+    pCtrl.assembly.dirichlet_zero_flux_tol = 0; // Pa tolerance to treat boundary flux as zero
 
     // ---------- 9. 两相通量拆分配置 ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;
     fluxCfg.rho_water = TwoPhase::Water().rho_tag; // "rho_w"
     fluxCfg.rho_gas = TwoPhase::CO2().rho_tag;   // "rho_g"
     fluxCfg.pressure_bc = &PbcA;
+    fluxCfg.enforce_boundary_inflow_fw = true;
+    fluxCfg.boundary_inflow_fw = 1.0;
 
     // ---------- 10. 初场后处理：同步 Pc / p_g / 物性到 old 层 ----------
     {
@@ -169,16 +197,16 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     }
 
     // ---------- 11. IMPES 主时间推进 ----------
-    const int    nSteps = 500;
+    const int    nSteps = 200;
     double       dt_initial = 1e-4;   // 更保守的初始时间步
 
     const int writeEveryP = 1;
     const int writeEverySw = 1;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case4/p_impes_ps_revised/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case4/s_impes_ps_revised/s_ps";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case5/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case5/s_impes_ps_revised/s_ps";
     const int snapshotEveryCsv = 1;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case4/ps_state_reviesed";
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case5/ps_state_reviesed";
     std::vector<std::string> snapshotFields;
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";

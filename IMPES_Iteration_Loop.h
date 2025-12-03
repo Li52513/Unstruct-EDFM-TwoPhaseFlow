@@ -15,6 +15,7 @@
 #include "0_PhysicalParametesCalculateandUpdata.h"
 #include "PostProcess_.h"
 #include "FluxSplitterandSolver.h"
+#include "TwoPhaseWells_StrictRate.h"
 #include "Solver_TimeLoopUtils.h"
 #include "IMPES_PostProcessIO.h"
 
@@ -125,6 +126,12 @@ namespace IMPES_Iteration
             return false;
         }
 
+        if (!satCfg.water_source_field.empty())
+        {
+            const size_t nCells = cells.size();
+            reg.getOrCreate<volScalarField>(satCfg.water_source_field, nCells, 0.0);
+        }
+
         // ===== 4. 时间循环 =====
         double time = 0.0;
         double dt = dt_initial;
@@ -139,6 +146,47 @@ namespace IMPES_Iteration
                 << " (t^n = " << time
                 << " s, dt = " << dt
                 << " s, t^{n+1} = " << t_next << " s) =====\n";
+
+            auto rollback_after_failure = [&](const char* stage)->bool
+            {
+                copyField(reg,
+                    pressureCtrl.assembly.pressure_old_field,
+                    pressureCtrl.assembly.pressure_field);
+                copyField(reg,
+                    satCfg.saturation_old,
+                    satCfg.saturation);
+                TwoPhase::updateTwoPhasePropertiesAtTimeStep(
+                    mgr, reg,
+                    satCfg.saturation,
+                    satCfg.VG_Parameter.vg_params,
+                    satCfg.VG_Parameter.relperm_params
+                );
+                for (const auto& c : cells)
+                {
+                    if (c.id < 0) continue;
+                    const size_t i = id2idx.at(c.id);
+                    (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
+                }
+                TwoPhase::updateWaterBasicPropertiesAtStep(
+                    mgr, reg,
+                    pressureCtrl.assembly.pressure_field,
+                    "T"
+                );
+                TwoPhase::updateCO2BasicPropertiesAtStep(
+                    mgr, reg,
+                    pressureCtrl.assembly.pressure_g,
+                    "T"
+                );
+                TwoPhase::copyBasicPropertiesToOldLayer(reg);
+
+                dt *= Tsc.shrink_factor;
+                if (dt < Tsc.dt_min) {
+                    std::cerr << "[IMPES][Iteration] dt fell below dt_min after "
+                        << stage << ".\n";
+                    return false;
+                }
+                return true;
+            };
 
             // 4.0 备份当前时间层的 p_w / S_w（用 *_old 做回滚）
             if (!startTimeStep_scalar(
@@ -300,42 +348,55 @@ namespace IMPES_Iteration
                 {
                     std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
                         << stepId << ".\n";
-                    // 保守一点：回滚 + 减小 dt
-                    copyField(reg,
-                        pressureCtrl.assembly.pressure_old_field,
-                        pressureCtrl.assembly.pressure_field);
-                    copyField(reg,
-                        satCfg.saturation_old,
-                        satCfg.saturation);
-                    TwoPhase::updateTwoPhasePropertiesAtTimeStep(
-                        mgr, reg,
-                        satCfg.saturation,
-                        satCfg.VG_Parameter.vg_params,
-                        satCfg.VG_Parameter.relperm_params
-                    );
-                    for (const auto& c : cells) {
-                        if (c.id < 0) continue;
-                        const size_t i = id2idx.at(c.id);
-                        (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
-                    }
-                    TwoPhase::updateWaterBasicPropertiesAtStep(
-                        mgr, reg,
-                        pressureCtrl.assembly.pressure_field,
-                        "T"
-                    );
-                    TwoPhase::updateCO2BasicPropertiesAtStep(
-                        mgr, reg,
-                        pressureCtrl.assembly.pressure_g,
-                        "T"
-                    );
-                    TwoPhase::copyBasicPropertiesToOldLayer(reg);
-
-                    dt *= Tsc.shrink_factor;
-                    if (dt < Tsc.dt_min) {
-                        std::cerr << "[IMPES][Iteration] dt fell below dt_min after flux split failure.\n";
+                    if (!rollback_after_failure("flux split failure"))
+                    {
                         return false;
                     }
                     continue;
+                }
+            }
+            if (!satCfg.water_source_field.empty())
+            {
+                auto qField = reg.getOrCreate<volScalarField>(
+                    satCfg.water_source_field,
+                    cells.size(), 0.0);
+                if (!wells.empty())
+                {
+                    std::vector<double> wellSources;
+                    if (!FVM::TwoPhaseWellsStrict::build_saturation_well_sources_strict(
+                        mgr,
+                        reg,
+                        wells,
+                        satCfg.VG_Parameter.vg_params,
+                        satCfg.VG_Parameter.relperm_params,
+                        pressureCtrl.assembly.pressure_field,
+                        wellSources))
+                    {
+                        std::cerr << "[IMPES][Iteration] failed to evaluate saturation well sources at time step "
+                            << stepId << ".\n";
+                        if (!rollback_after_failure("well source update"))
+                        {
+                            return false;
+                        }
+                        continue;
+                    }
+                    if (wellSources.size() != qField->data.size())
+                    {
+                        qField->data.assign(cells.size(), 0.0);
+                    }
+                    const size_t nWrite = std::min(qField->data.size(), wellSources.size());
+                    for (size_t ic = 0; ic < nWrite; ++ic)
+                    {
+                        (*qField)[ic] = wellSources[ic];
+                    }
+                    for (size_t ic = nWrite; ic < qField->data.size(); ++ic)
+                    {
+                        (*qField)[ic] = 0.0;
+                    }
+                }
+                else
+                {
+                    qField->data.assign(qField->data.size(), 0.0);
                 }
             }
             // -------- 4.3 显式饱和度步（Euler） + Redondo / SimpleCFL 时间控制 --------
@@ -344,39 +405,8 @@ namespace IMPES_Iteration
             {
                 std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
                     << stepId << ".\n";
-                // 保守一点：回滚 + 减小 dt
-                copyField(reg,
-                    pressureCtrl.assembly.pressure_old_field,
-                    pressureCtrl.assembly.pressure_field);
-                copyField(reg,
-                    satCfg.saturation_old,
-                    satCfg.saturation);
-                TwoPhase::updateTwoPhasePropertiesAtTimeStep(
-                    mgr, reg,
-                    satCfg.saturation,
-                    satCfg.VG_Parameter.vg_params,
-                    satCfg.VG_Parameter.relperm_params
-                );
-                for (const auto& c : cells) {
-                    if (c.id < 0) continue;
-                    const size_t i = id2idx.at(c.id);
-                    (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
-                }
-                TwoPhase::updateWaterBasicPropertiesAtStep(
-                    mgr, reg,
-                    pressureCtrl.assembly.pressure_field,
-                    "T"
-                );
-                TwoPhase::updateCO2BasicPropertiesAtStep(
-                    mgr, reg,
-                    pressureCtrl.assembly.pressure_g,
-                    "T"
-                );
-                TwoPhase::copyBasicPropertiesToOldLayer(reg);
-
-                dt *= Tsc.shrink_factor;
-                if (dt < Tsc.dt_min) {
-                    std::cerr << "[IMPES][Iteration] dt fell below dt_min after flux split failure.\n";
+                if (!rollback_after_failure("saturation update failure"))
+                {
                     return false;
                 }
                 continue;
