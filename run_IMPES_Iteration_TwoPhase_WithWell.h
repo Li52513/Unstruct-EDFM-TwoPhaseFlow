@@ -29,32 +29,33 @@ namespace WellDetail
 }
 
 /**
- * @brief Two-phase IMPES benchmark with Peaceman-rate wells on a 2D matrix grid.
+ * @brief Waterflood-style IMPES run: pure-water injector displaces reservoir CO2.
  *
- * Case outline:
- *  - Domain size: 100 m (x) Ã— 100 m (y), thickness handled via Peaceman H.
- *  - Grid: 50 Ã— 50 quadrilateral sections, orthogonal correction enabled.
- *  - Boundaries: no-flow Neumann on all sides to focus on well-driven flow.
- *  - Wells: injector at (15,15) m and producer at (85,85) m, both modeled with rate controls.
- *  - Injector imposes 5 kg/s total mass with 90% water fraction; producer removes 5 kg/s.
- *  - Rock/fluid properties taken from constant-property modules leveraged elsewhere.
+ * Scenario summary:
+ *  - Domain size extended to 240 m (x) ¡Á 60 m (y) so the flood front has travel distance.
+ *  - Grid: 120 ¡Á 30 quadrilateral sections, orthogonal correction enabled.
+ *  - Boundaries: no-flow Neumann on all sides; flow is entirely well-driven.
+ *  - Initial water saturation is only slightly above Swr, meaning the reservoir is mainly CO2.
+ *  - Injector near the left boundary (30 m, 30 m) delivers 60 kg/s of almost pure water.
+ *  - Producer on the right boundary (210 m, 30 m) is pressure-controlled at 8.8 MPa,
+ *    so production is initially CO2 until the water front arrives.
  */
 int run_IMPES_Iteration_TwoPhase_WithWell()
 {
     // ---------- 0. Geometry and mesh ----------
-    const double lengthX = 100.0;
-    const double lengthY = 100.0;
+    const double lengthX = 240.0;
+    const double lengthY = 60.0;
     const double lengthZ = 0.0;
 
-    const int sectionNumX = 50;
-    const int sectionNumY = 50;
+    const int sectionNumX = 120;
+    const int sectionNumY = 30;
     const int sectionNumZ = 0;
 
     const bool usePrism = true;
     const bool useQuadBase = false;
 
     std::cout << "\n===== [CASE] IMPES two-phase with rate-controlled wells =====\n";
-    std::cout << "--- IMPES: building mesh (100m x 100m, 50x50 sections) ---\n";
+    std::cout << "--- IMPES: building mesh (240m x 60m, 120x30 sections) ---\n";
 
     MeshManager mgr(lengthX, lengthY, lengthZ,
         sectionNumX, sectionNumY, sectionNumZ,
@@ -67,7 +68,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     // ---------- 1. Primary field initialization ----------
     VGParams vg_params;
     vg_params.Swr = 0.12;
-    vg_params.Sgr = 0.12;
+    vg_params.Sgr = 0.1;
     vg_params.alpha = 2.5e-4;
     vg_params.n = 2.0;
 
@@ -79,7 +80,8 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     ic.dp_wdx = 0.0;
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
-    const double sw_background = WellDetail::clampValue(vg_params.Swr + 0.08, vg_params.Swr + 1e-5, 1.0 - vg_params.Sgr - 1e-5);
+    // Start just above Swr so the formation mainly contains CO2.
+    const double sw_background = WellDetail::clampValue(vg_params.Swr + 0.01, vg_params.Swr + 1e-5, 1.0 - vg_params.Sgr - 1e-5);
     ic.s_w = sw_background;
 
     Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
@@ -109,23 +111,25 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     WellConfig_TwoPhase inj;
     inj.name = "INJ_A";
     inj.role = WellDOF_TwoPhase::Role::Injector;
-    inj.mode = WellDOF_TwoPhase::Mode::Rate;
-    inj.target = 15.0; // kg/s
+    inj.mode = WellDOF_TwoPhase::Mode::RateWithPressureBias;
+    inj.target = 60.0; // kg/s
+    inj.weak_pressure_target = 1.15e7; // Pa
+    inj.weak_pressure_weight = 5e-8;
     inj.Tin = 330.0;
-    inj.s_w_bh = 0.95;
-    inj.mu_w_inj = 5e-4;
-    inj.mu_g_inj = 3e-5;
-    inj.rho_w_inj = 950.0;
-    inj.rho_g_inj = 600.0;
+    inj.s_w_bh = 0.999; // virtually pure water
+    inj.mu_w_inj = 6.5e-4;
+    inj.mu_g_inj = 3.5e-5;
+    inj.rho_w_inj = 960.0;
+    inj.rho_g_inj = 550.0;
     inj.cp_w_inj = 4200.0;
     inj.cp_g_inj = 1400.0;
     inj.geom.name = inj.name;
-    inj.geom.pos = Vector{ 15.0, 15.0, 0.0 };
+    inj.geom.pos = Vector{ 30.0, 30.0, 0.0 };
     inj.geom.rw = 0.1;
     inj.geom.skin = 0.0;
-    inj.geom.H = 20.0;
-    inj.geom.perfRadius = 5.0;
-    inj.geom.maxHitCells = 4;
+    inj.geom.H = 30.0;
+    inj.geom.perfRadius = 7.5;
+    inj.geom.maxHitCells = 6;
     inj.pm_2p.reFactor = 0.28;
     inj.pm_2p.fallbackKh = 2.0e-14;
     wells_cfg.push_back(inj);
@@ -134,7 +138,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     prod.name = "PROD_B";
     prod.role = WellDOF_TwoPhase::Role::Producer;
     prod.mode = WellDOF_TwoPhase::Mode::Pressure;
-    prod.target = 9.5e6; // Pa
+    prod.target = 8.8e6; // Pa
     prod.Tin = 315.0;
     prod.s_w_bh = 0.05;
     prod.mu_w_inj = 5e-4;
@@ -144,12 +148,12 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     prod.cp_w_inj = 4200.0;
     prod.cp_g_inj = 1400.0;
     prod.geom.name = prod.name;
-    prod.geom.pos = Vector{ 65.0, 65.0, 0.0 };
+    prod.geom.pos = Vector{ 210.0, 30.0, 0.0 };
     prod.geom.rw = 0.1;
     prod.geom.skin = 0.0;
-    prod.geom.H = 20.0;
-    prod.geom.perfRadius = 5.0;
-    prod.geom.maxHitCells = 4;
+    prod.geom.H = 30.0;
+    prod.geom.perfRadius = 7.5;
+    prod.geom.maxHitCells = 6;
     prod.pm_2p.reFactor = 0.28;
     prod.pm_2p.fallbackKh = 2.0e-14;
     wells_cfg.push_back(prod);
@@ -169,8 +173,8 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     satCfg.VG_Parameter.vg_params = vg_params;
     satCfg.VG_Parameter.relperm_params = rp_params;
     satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::RedondoLike;
-    satCfg.CFL_safety = 0.8;
-    satCfg.dS_max = 0.1;
+    satCfg.CFL_safety = 0.6;
+    satCfg.dS_max = 0.05;
 
     // ---------- 6. Pressure solver configuration ----------
     IMPES_Iteration::PressureSolveControls pCtrl;
@@ -221,16 +225,16 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     }
 
     // ---------- 9. Time-stepping controls ----------
-    const int    nSteps = 2000;
-    double       dt_initial = 1.0e-3;
+    const int    nSteps = 4500;
+    double       dt_initial = 2.5e-3;
 
     const int writeEveryP = 1;
     const int writeEverySw = 1;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case6/p_impes_ps_revised/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case6/s_impes_ps_revised/s_ps";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case7/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case7/s_impes_ps_revised/s_ps";
     const int snapshotEveryCsv = 1;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case6/ps_state_reviesed";
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case7/waterflood_ps_state";
     std::vector<std::string> snapshotFields = { "p_w", "s_w" };
 
     std::cout << "--- IMPES: start transient run (two-phase with wells) ---\n";
@@ -264,6 +268,16 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
 
     auto reportWellRates = [&]()
     {
+        auto modeToString = [](WellDOF_TwoPhase::Mode mode)
+        {
+            switch (mode)
+            {
+            case WellDOF_TwoPhase::Mode::Pressure: return "Pressure";
+            case WellDOF_TwoPhase::Mode::Rate: return "Rate";
+            case WellDOF_TwoPhase::Mode::RateWithPressureBias: return "Rate+BHP";
+            default: return "Unknown";
+            }
+        };
         std::cout << "\n[CASE] Well mass-flow summary (kg/s):\n";
         std::vector<double> Mw_cell, Mg_cell;
         for (const auto& well : wells_dof)
@@ -286,7 +300,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
             const double totalMass = totalMw + totalMg;
             std::cout << "  * " << well.name
                 << " [" << (well.role == WellDOF_TwoPhase::Role::Injector ? "Injector" : "Producer")
-                << ", " << (well.mode == WellDOF_TwoPhase::Mode::Pressure ? "Pressure" : "Rate")
+                << ", " << modeToString(well.mode)
                 << "] Mw=" << totalMw << ", Mg=" << totalMg << ", total=" << totalMass << "\n";
         }
     };

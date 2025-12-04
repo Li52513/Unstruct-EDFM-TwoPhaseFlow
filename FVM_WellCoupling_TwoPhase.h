@@ -54,8 +54,15 @@ namespace FVM {
                 return;
             }
 
+            const bool isPressureMode = (well.mode == WellDOF_TwoPhase::Mode::Pressure);
+            const bool isPureRateMode = (well.mode == WellDOF_TwoPhase::Mode::Rate);
+            const bool isHybridRateMode = (well.mode == WellDOF_TwoPhase::Mode::RateWithPressureBias);
+            const bool treatAsRateMode = (isPureRateMode || isHybridRateMode);
+            const double weak_penalty = treatAsRateMode ? std::max(0.0, well.weak_pressure_weight) : 0.0;
+            const double weak_rhs = weak_penalty * well.weak_pressure_target;
+
             // --- Part 1: Handle the well's own constraint row ---
-            if (well.mode == WellDOF_TwoPhase::Mode::Pressure) {
+            if (isPressureMode) {
                 // For a pressure-controlled well, the constraint is simple: 1 * P_bh = P_target
                 sys.addA(well_lid, well_lid, 1.0);
                 sys.addb(well_lid, well.target);
@@ -92,7 +99,7 @@ namespace FVM {
                 // Add PI_total_i to the diagonal A[cell_lid, cell_lid]
                 sys.addA(cell_lid, cell_lid, PI_total_i);
 
-                if (well.mode == WellDOF_TwoPhase::Mode::Pressure) {
+                if (isPressureMode) {
                     // P_bh is known (well.target), so -PI_total_i * P_bh is a source term
                     // that moves to the RHS.
                     sys.addb(cell_lid, PI_total_i * well.target);
@@ -109,16 +116,14 @@ namespace FVM {
             }
 
             // --- Part 3: Finalize the well's row for rate-controlled mode ---
-            if (well.mode == WellDOF_TwoPhase::Mode::Rate) {
-                if (rate_diag_sum != 0.0) {
-                    // Add the diagonal term ¦²(PI_i) to A[well_lid, well_lid]
-                    sys.addA(well_lid, well_lid, rate_diag_sum);
+            if (treatAsRateMode) {
+                double total_diag = rate_diag_sum + weak_penalty;
+                if (total_diag != 0.0) {
+                    sys.addA(well_lid, well_lid, total_diag);
                 }
-                // Add the target rate Q_target to the RHS b[well_lid]
-                sys.addb(well_lid, well.target);
+                sys.addb(well_lid, well.target + weak_rhs);
             }
         }
-
         /**
          * @brief Adds the EXPLICIT source/sink terms from a well to the SATURATION equation's RHS.
          *
@@ -255,7 +260,8 @@ namespace FVM {
              const WellDOF_TwoPhase& well,
              const volScalarField& Qw_well, // Pass in the per-cell flow rates
              const volScalarField& Qg_well
-         ) {
+         )
+         {
              auto& mesh = mgr.mesh();
              const int Nc = (int)mesh.getCells().size();
 

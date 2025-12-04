@@ -14,7 +14,7 @@
 struct WellDOF_TwoPhase {
 
     // --- Enums from the original WellDOF ---
-    enum class Mode { Pressure, Rate };
+    enum class Mode { Pressure, Rate, RateWithPressureBias };
     enum class Role { Injector, Producer };
 
     // --- Core well properties ---
@@ -24,6 +24,8 @@ struct WellDOF_TwoPhase {
 
     // --- Control target value ---
     double target = 0.0;                      // Target value: BHP in [Pa] or total mass flow rate in [kg/s]
+    double weak_pressure_target = 0.0;         // Desired BHP for hybrid modes (Pa)
+    double weak_pressure_weight = 0.0;         // Penalty coefficient for weak BHP control [kg/(s*Pa)]
 
     // === Two-Phase Specific Injection Parameters (for Injectors only) ===
     double Tin = 0.0;                           // Injection temperature T_inj [K]

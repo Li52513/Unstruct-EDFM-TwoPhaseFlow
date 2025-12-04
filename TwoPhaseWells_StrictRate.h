@@ -11,7 +11,8 @@
 #include "WellConfig_TwoPhase.h"    // WellDOF_TwoPhase (mode, role, target, Tin, etc.)
 
 namespace FVM {
-    namespace TwoPhaseWellsStrict {
+    namespace TwoPhaseWellsStrict 
+    {
 
         /// 小常数，避免除零
         static constexpr double kTiny = 1e-30;
@@ -115,6 +116,13 @@ namespace FVM {
             }
 
             // 0) 井自己的 DOF 行：Pressure 模式直接钉住 P_bh
+            const bool isPressureMode = (well.mode == WellDOF_TwoPhase::Mode::Pressure);
+            const bool isPureRateMode = (well.mode == WellDOF_TwoPhase::Mode::Rate);
+            const bool isHybridRateMode = (well.mode == WellDOF_TwoPhase::Mode::RateWithPressureBias);
+            const bool treatAsRateMode = (isPureRateMode || isHybridRateMode);
+            const double weak_penalty = treatAsRateMode ? std::max(0.0, well.weak_pressure_weight) : 0.0;
+            const double weak_rhs = weak_penalty * well.weak_pressure_target;
+
             if (well.mode == WellDOF_TwoPhase::Mode::Pressure) {
                 sys.addA(well_lid, well_lid, 1.0);
                 sys.addb(well_lid, well.target);   ///< P_bh = target (Pa)
@@ -198,7 +206,7 @@ namespace FVM {
                 // 4.2 Cell 行：+PI_mass_i * p_i - PI_mass_i * p_bh
                 sys.addA(cell_lid, cell_lid, PI_mass_i);
 
-                if (well.mode == WellDOF_TwoPhase::Mode::Pressure) {
+                if (isPressureMode) {
                     // P_bh 已知，-PI * P_bh -> RHS
                     sys.addb(cell_lid, PI_mass_i * well.target);
                 }
@@ -214,17 +222,17 @@ namespace FVM {
             }
 
             // 5) Rate 模式井行对角和 RHS
-            if (well.mode == WellDOF_TwoPhase::Mode::Rate) {
-                if (rate_diag_sum <= kTiny) {
+            if (treatAsRateMode) {
+                double total_diag = rate_diag_sum + weak_penalty;
+                if (total_diag <= kTiny) {
                     std::cerr << "[TwoPhaseWellsStrict] Rate-mode well " << well.name
                         << " has zero total PI, skip.\n";
                     return;
                 }
-                sys.addA(well_lid, well_lid, rate_diag_sum);
-                sys.addb(well_lid, well.target);   ///< target 解释为 Σ(dotM_i) = target (kg/s)
+                sys.addA(well_lid, well_lid, total_diag);
+                sys.addb(well_lid, well.target + weak_rhs);   ///< target ????? ??(dotM_i) = target (kg/s)
             }
         }
-
         //======================================================================//
         // 2. 统一计算完井单元上的相质量流率（供饱和度/温度方程复用）
         //======================================================================//
@@ -254,6 +262,7 @@ namespace FVM {
          * @param[out] Mw_cell         单元水相质量流率（kg/s），流入单元为正
          * @param[out] Mg_cell         单元气相质量流率（kg/s），流入单元为正
          */
+
         inline bool compute_well_phase_mass_rates_strict(
             MeshManager& mgr,
             const FieldRegistry& reg,
@@ -406,7 +415,8 @@ namespace FVM {
          * @param pressure_field_name 压力场名称（如 "p_w"）
          * @param[out] wellSources    单元水相质量源（长度=单元数）
          */
-        inline bool build_saturation_well_sources_strict(
+        inline bool build_saturation_well_sources_strict
+        (
             MeshManager& mgr,
             const FieldRegistry& reg,
             const std::vector<WellDOF_TwoPhase>& wells,

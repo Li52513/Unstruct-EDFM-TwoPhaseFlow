@@ -21,6 +21,8 @@ struct WellConfig_TwoPhase {
     // ... (rest of the struct is identical to the previous version) ...
     WellDOF_TwoPhase::Mode mode;
     double target;
+    double weak_pressure_target;
+    double weak_pressure_weight;
     double Tin;
     double s_w_bh;
     double mu_w_inj;
@@ -39,7 +41,7 @@ struct WellConfig_TwoPhase {
     WellConfig_TwoPhase() :
         role(WellDOF_TwoPhase::Role::Injector),
         mode(WellDOF_TwoPhase::Mode::Pressure),
-        target(0.0), Tin(0.0), s_w_bh(1.0), mu_w_inj(3e-4), mu_g_inj(1.5e-5), rho_w_inj(980.0), rho_g_inj(700.0), cp_w_inj(4200.0), cp_g_inj(1200.0), lid(-1) {
+        target(0.0), weak_pressure_target(0.0), weak_pressure_weight(0.0), Tin(0.0), s_w_bh(1.0), mu_w_inj(3e-4), mu_g_inj(1.5e-5), rho_w_inj(980.0), rho_g_inj(700.0), cp_w_inj(4200.0), cp_g_inj(1200.0), lid(-1) {
     }
 
     void derive_names_if_empty() {
@@ -54,6 +56,8 @@ struct WellConfig_TwoPhase {
         w.role = role;
         w.mode = mode;
         w.target = target;
+        w.weak_pressure_target = weak_pressure_target;
+        w.weak_pressure_weight = weak_pressure_weight;
         w.Tin = Tin;
         w.s_w_bh = s_w_bh;
         w.mu_w_inj = mu_w_inj;
