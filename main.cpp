@@ -10,6 +10,6 @@
 
 int main()
 {
-    return  run_IMPES_Iteration_TwoPhase_WithWell();
+    return  SinglePhase_CO2_TH_withWell();
 }
 

@@ -151,7 +151,7 @@ int SinglePhase_CO2_TH_withWell()
     // —— 压力收敛与线性求解 —— //
     sc.tol_p_abs = 1e-6;
     sc.tol_p_rel = 1e-6;
-    sc.urf_p = 0.35;
+    sc.urf_p =1;
 
     sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB;
     sc.lin_p.maxIters = 4000;
@@ -197,7 +197,7 @@ int SinglePhase_CO2_TH_withWell()
     const int    nSteps = 100;
     const double dt = 1000.0 / nSteps;
 
-    bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell(mgr, reg, freg, ppm, TbcA, PbcA, g, nSteps, dt, sc, wellsCfg, 1, 1, "./Postprocess_Data/P_CO2_withWell_rate/p", "./Postprocess_Data/T_CO2_withWell_rate/T");
+    bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell(mgr, reg, freg, ppm, TbcA, PbcA, g, nSteps, dt, sc, wellsCfg, 1, 1, "./Postprocess_Data/P_CO2_withWell_rate_withoutUr/p", "./Postprocess_Data/T_CO2_withWell_rate_withoutUr/T");
     // —— 调用加速版时间推进 —— //
     //bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell_accel(
     //    mgr, reg, freg, ppm,

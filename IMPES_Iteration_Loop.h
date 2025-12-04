@@ -26,7 +26,7 @@ namespace IMPES_Iteration
     {
         double dt_min = 1e-9;   ///< 允许的最小时间步 [s]
         double dt_max = 1000;   ///< 允许的最大时间步 [s]
-        double grow_factor = 2;    ///< 接受时间步后，最大放大倍数
+        double grow_factor = 5;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
         double safety_factor = 0.9;    ///< 相对于 Redondo 建议步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数

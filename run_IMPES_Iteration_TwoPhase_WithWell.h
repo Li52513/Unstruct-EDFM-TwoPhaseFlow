@@ -111,16 +111,16 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     WellConfig_TwoPhase inj;
     inj.name = "INJ_A";
     inj.role = WellDOF_TwoPhase::Role::Injector;
-    inj.mode = WellDOF_TwoPhase::Mode::RateWithPressureBias;
+    inj.mode = WellDOF_TwoPhase::Mode::Rate;
     inj.target = 60.0; // kg/s
     inj.weak_pressure_target = 1.15e7; // Pa
     inj.weak_pressure_weight = 5e-8;
     inj.Tin = 330.0;
     inj.s_w_bh = 0.999; // virtually pure water
-    inj.mu_w_inj = 6.5e-4;
-    inj.mu_g_inj = 3.5e-5;
-    inj.rho_w_inj = 960.0;
-    inj.rho_g_inj = 550.0;
+    inj.mu_w_inj = 1.0e-3;
+    inj.mu_g_inj = 5e-3;
+    inj.rho_w_inj = 1000.0;
+    inj.rho_g_inj = 800.0;
     inj.cp_w_inj = 4200.0;
     inj.cp_g_inj = 1400.0;
     inj.geom.name = inj.name;
@@ -141,10 +141,10 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     prod.target = 8.8e6; // Pa
     prod.Tin = 315.0;
     prod.s_w_bh = 0.05;
-    prod.mu_w_inj = 5e-4;
-    prod.mu_g_inj = 3e-5;
-    prod.rho_w_inj = 950.0;
-    prod.rho_g_inj = 600.0;
+    prod.mu_w_inj = 1.0e-3;
+    prod.mu_g_inj = 5e-3;
+    prod.rho_w_inj = 1000.0;
+    prod.rho_g_inj = 800.0;
     prod.cp_w_inj = 4200.0;
     prod.cp_g_inj = 1400.0;
     prod.geom.name = prod.name;
@@ -179,7 +179,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     // ---------- 6. Pressure solver configuration ----------
     IMPES_Iteration::PressureSolveControls pCtrl;
     pCtrl.max_outer = 2;
-    pCtrl.tol_abs = 1e3;
+    pCtrl.tol_abs = 1e-2;
     pCtrl.tol_rel = 1e-4;
     pCtrl.under_relax = 1;
     pCtrl.verbose = true;

@@ -173,7 +173,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                     // 三角形单元有三个节点，其中 k=0,1,2 分别对应三个节点 //局部编号
                 
                     cellNodeIDs.push_back(static_cast<int>(nodeTagsPerElement[i][3 * j + k]));  
-					cout << "Node ID = " << cellNodeIDs[k] << endl<<endl;
+					//cout << "Node ID = " << cellNodeIDs[k] << endl<<endl;
                     
 				}
                 
@@ -339,15 +339,15 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
 
 
 	//// === Step 3: 构造 Face 对象并建立 Cell 和 Face 的对应关系 ===
-    std::cout << "BuildMesh: faces_ count = " << faces_.size() << std::endl;
-    cout << "=== Face owner/neighbor check ===" << std::endl;
-    for (const auto& face : faces_) {
-       cout << "Face " << face.id << ": [";
-        for (int nid : face.FaceNodeIDs)
-           cout << nid << " ";
-       cout << "], owner = " << face.ownerCell
-            << ", neighbor = " << face.neighborCell << std::endl;
-    }
+    //std::cout << "BuildMesh: faces_ count = " << faces_.size() << std::endl;
+    //cout << "=== Face owner/neighbor check ===" << std::endl;
+    //for (const auto& face : faces_) {
+    //   cout << "Face " << face.id << ": [";
+    //    for (int nid : face.FaceNodeIDs)
+    //       cout << nid << " ";
+    //  /* cout << "], owner = " << face.ownerCell
+    //        << ", neighbor = " << face.neighborCell << std::endl;*/
+    //}
 
 	buildFaceBins(); // 构建面 bin
     gmsh::write("UnstructuredMesh-EDFM.msh");

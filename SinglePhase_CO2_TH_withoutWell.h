@@ -80,7 +80,7 @@ int SinglePhase_CO2_TH_withoutWell()
     // Ñ¹Á¦
     sc.tol_p_abs = 1e-6;     // ¾ø¶ÔÈÝ²î£¨Pa£©
     sc.tol_p_rel = 1e-6;     // Ïà¶ÔÈÝ²î
-    sc.urf_p = 0.20;     // Ç·ËÉ³Ú
+    sc.urf_p = 1;     // Ç·ËÉ³Ú
     sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB;
     sc.lin_p.maxIters = 5000;
     sc.lin_p.tol = sc.tol_p_abs;
@@ -90,7 +90,7 @@ int SinglePhase_CO2_TH_withoutWell()
     // ÎÂ¶È
     sc.tol_T_abs = 1e-6;
     sc.tol_T_rel = 1e-6;
-    sc.urf_T = 0.20;
+    sc.urf_T = 1;
     sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
     sc.lin_T.maxIters = 5000;
     sc.lin_T.tol = sc.tol_T_abs;

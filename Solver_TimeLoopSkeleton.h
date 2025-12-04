@@ -391,17 +391,17 @@ inline bool outerIter_constProperties_singlePhase_CO2_T_H
 		// —— 进度输出 —— //
 		std::cout << "[Outer " << it << "]  |Δp|_inf=" << dp << "  |ΔT|_inf=" << dT << "\n";
 
-		// —— 自适应松弛—— //
-		if (it > 0)
-		{
-			double rT = dT / std::max(prev_dT, 1e-30);
-			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
-			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
-			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
-			double rp = dp / std::max(prev_dp_g, 1e-30);
-			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
-			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
-		}
+		//// —— 自适应松弛—— //
+		//if (it > 0)
+		//{
+		//	double rT = dT / std::max(prev_dT, 1e-30);
+		//	double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+		//	auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+		//	ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+		//	double rp = dp / std::max(prev_dp_g, 1e-30);
+		//	double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+		//	ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+		//}
 
 		prev_dp_g = dp;
 		prev_dT = dT;
@@ -749,17 +749,17 @@ inline bool outerIter_constProperties_singlePhase_CO2_T_H_withWell
 		// —— 进度输出 —— //
 		std::cout << "[Outer " << it << "]  |Δp|_inf=" << dp << "  |ΔT|_inf=" << dT << "\n";
 
-		// —— 自适应松弛—— //
-		if (it > 0)
-		{
-			double rT = dT / std::max(prev_dT, 1e-30);
-			double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
-			auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
-			ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
-			double rp = dp / std::max(prev_dp_g, 1e-30);
-			double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
-			ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
-		}
+		//// —— 自适应松弛—— //
+		//if (it > 0)
+		//{
+		//	double rT = dT / std::max(prev_dT, 1e-30);
+		//	double uT = (rT < 0.7) ? +0.05 : (rT > 0.95 ? -0.05 : 0.0);
+		//	auto& ctrl_mut = const_cast<SolverControls&>(ctrl);
+		//	ctrl_mut.urf_T = std::min(0.7, std::max(0.15, ctrl_mut.urf_T + uT));
+		//	double rp = dp / std::max(prev_dp_g, 1e-30);
+		//	double up = (rp < 0.7) ? +0.05 : (rp > 0.95 ? -0.05 : 0.0);
+		//	ctrl_mut.urf_p = std::min(0.7, std::max(0.15, ctrl_mut.urf_p + up));
+		//}
 
 		prev_dp_g = dp;
 		prev_dT = dT;
