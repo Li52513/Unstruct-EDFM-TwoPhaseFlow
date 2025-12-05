@@ -329,6 +329,7 @@ inline bool underRelaxInPlace
     for (size_t i = 0; i < x->data.size(); ++i) 
     {
         x->data[i] = xp->data[i] + alpha * (x->data[i] - xp->data[i]);
+        //x->data[i] = x->data[i];
     }
     return true;
 }

@@ -17,14 +17,14 @@ int SinglePhase_CO2_TH_withoutWell()
     //定义几何区域参数
     double lengthX = 1, lengthY = 1, lengthZ = 0;
     //确定网格划分策略及参数
-    int sectionNumX = 20, sectionNumY = 20, sectionNumZ = 0;
+    int sectionNumX = 100, sectionNumY = 100, sectionNumZ = 0;
     bool usePrism = true;       ///  3D情况usePrism=true 进行“扫掠 ”；
     bool useQuadBase = false;    /// 在 2D 情况：false 为非结构化三角, true  为非结构化四边形； 在 3D 扫掠模式：仅用来选择底面网格类型
 
     // 1) 构造并预处理网格
     auto t0 = std::chrono::high_resolution_clock::now(); // 计时开始
     MeshManager mgr(lengthX, lengthY, lengthZ, sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
-    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection); //这里输入面法矢量修正方法；其中MinimumCorrection-最小修正值法；OrthogonalCorrection-正交修正法；OverRelaxed-超松弛修正法  当前三维几何还不能计算几何和非正交性
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OverRelaxed); //这里输入面法矢量修正方法；其中MinimumCorrection-最小修正值法；OrthogonalCorrection-正交修正法；OverRelaxed-超松弛修正法  当前三维几何还不能计算几何和非正交性
     auto t1 = std::chrono::high_resolution_clock::now(); // 计时结束
     auto ms0 = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
     std::cout << "MatrixMesh built in " << ms0 << " ms.\n";

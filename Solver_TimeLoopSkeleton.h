@@ -143,7 +143,7 @@ struct SolverControls
 	double tol_T_rel = 1e-6;   // 新增：温度相对容差
 	double urf_p = 0.7;	// 压力欠松弛因子 应用于压力场更新
 	double urf_T = 0.7; // 温度欠松弛因子 应用于温度度场更新
-	double c_phi_const = 1e-12; // 孔隙度可压缩性
+	double c_phi_const = 0; // 孔隙度可压缩性
 	double theta_p = 0.5;	// 时间项theta_p
 	double theta_T = 0.5;	// 时间项theta_T
 	LinearSolverOptions lin_p; // 压力求解设置
@@ -236,7 +236,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 		{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },  // K/mu ⋅ rho_g
 		"rho_g", RhoFaceMethod::Linear,
 		g, Pbc,
-		/*massForm=*/false, /*alpha_anisotropy=*/0
+		/*massForm=*/false, /*alpha_anisotropy=*/2
 	);
 	if (!ok) return false;
 
