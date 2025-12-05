@@ -136,7 +136,7 @@ namespace IMPES_Iteration
             std::cerr << "[IMPES_Iteration][Pressure] invalid dt.\n";
             return false;
         }
-        // ===== 1) 组装压力方程（包括时间项、扩散、毛细、重力、井耦合、总通量） ===== //
+        // 1) 组装压力方程（时间项、扩散、毛细、重力、井耦合，不含通量）
         PressureAssemblyResult asmb;  //创建一个组装结果的实体
         if (!assemblePressureTwoPhase(mgr, reg, freg, Pbc, wells, dt, ctrl.assembly, asmb))
         {
@@ -180,44 +180,16 @@ namespace IMPES_Iteration
                 w.p_bh = pvec[w.lid];
             }
         }
-
         // ===== 6) 对 cell 压力做欠松弛（相对于 *_prev） ===== //
         double dpInf = 0.0;
-        if (ctrl.under_relax > 0.0 && ctrl.under_relax < 1.0 &&
-            !ctrl.assembly.pressure_prev_field.empty())
-        {
-            // 欠松弛：p_new = urf * p_new + (1-urf) * p_prev
-            underRelaxInPlace(
-                reg,
-                ctrl.assembly.pressure_field,
-                ctrl.assembly.pressure_prev_field,
-                ctrl.under_relax);
-        }
-
-        // ===== 7) 计算 dp_inf，并更新 prev 场 ===== //
-        if (!ctrl.assembly.pressure_prev_field.empty())
-        {
-            dpInf = maxAbsDiff(
-                reg,
-                ctrl.assembly.pressure_field,
-                ctrl.assembly.pressure_prev_field);
-
-            updatePrevIterates(
-                reg,
-                {
-                    { ctrl.assembly.pressure_field,
-                      ctrl.assembly.pressure_prev_field }
-                });
-        }
-
-        // ===== 8) 填充报告 ===== //
+        // 欠松弛
+        underRelaxInPlace(reg, ctrl.assembly.pressure_field, ctrl.assembly.pressure_prev_field, ctrl.under_relax);
+        dpInf = maxAbsDiff(reg, ctrl.assembly.pressure_field, ctrl.assembly.pressure_prev_field);
+        updatePrevIterates(reg, { { ctrl.assembly.pressure_field,ctrl.assembly.pressure_prev_field } });
+        // ===== 填充报告 ===== //
         dp_inf = dpInf;
         lin_residual = linRes;
         lin_iterations = linIters;
-        // 总质量/体积/速度通量已经写在 freg 里（由 assemblePressureTwoPhase 按字段名存放）
-        // 后续两相 flux 分配 / 饱和度方程直接从 FaceFieldRegistry 读取即可，无需在此返回指针。
-
-
         return true;
     }
 

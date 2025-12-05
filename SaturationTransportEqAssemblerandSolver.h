@@ -32,7 +32,7 @@ namespace IMPES_Iteration
         std::string saturation_prev =       S_Eq_str.saturation_prev;       ///外迭代 / RK2 stage 备用的饱和度拷贝（可选）  
 
         std::string water_mass_flux =       S_Eq_str.water_mass_flux;          // Output: water-phase mass flux
-        std::string water_source_field;         /// （可选）水相源汇项，单位 [kg/s]，例如井源的水相质量源 若为空字符串则视为无显式体源项
+        std::string water_source_field;                                      /// （可选）水相源汇项，单位 [kg/s]，例如井源的水相质量源 若为空字符串则视为无显式体源项
 
         TwoPhase_VG_Parameters              VG_Parameter;
 

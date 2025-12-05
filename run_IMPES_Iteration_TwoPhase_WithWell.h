@@ -186,7 +186,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     pCtrl.assembly.enable_buoyancy = false;
     pCtrl.assembly.gradient_smoothing = 1;
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
-    pCtrl.assembly.dirichlet_zero_flux_tol = 0.0;
+   // pCtrl.assembly.dirichlet_zero_flux_tol = 0.0;
 
     // ---------- 7. Mass-flux splitting configuration ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;

@@ -126,7 +126,7 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     pCtrl.assembly.enable_buoyancy = false;
     pCtrl.assembly.gradient_smoothing = 1;
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
-    pCtrl.assembly.dirichlet_zero_flux_tol = 1.0; // Pa tolerance to treat boundary flux as zero
+    //pCtrl.assembly.dirichlet_zero_flux_tol = 1.0; // Pa tolerance to treat boundary flux as zero
 
     // ---------- 9. 两相通量拆分配置 ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;

@@ -51,6 +51,7 @@ namespace IMPES_Iteration
         std::vector<std::string>   snapshotFields = {}
     ) 
     {
+        //================Step0 初始化设置，确认字符串以及导出文件是否合理===================//
         if (nSteps <= 0) {
             std::cerr << "[IMPES][Iteration] invalid nSteps.\n";
             return false;
@@ -82,8 +83,6 @@ namespace IMPES_Iteration
 #else
         // std::filesystem not available: skip directory creation
 #endif
-
-        // ===== 2. 基本 field / mesh 句柄 =====
         TimeStepControl Tsc;
         Mesh& mesh = mgr.mesh();
         const auto& cells = mesh.getCells();
@@ -94,50 +93,34 @@ namespace IMPES_Iteration
         auto p_w_old = reg.get<volScalarField>(pressureCtrl.assembly.pressure_old_field);
         auto p_w_prev = reg.get<volScalarField>(pressureCtrl.assembly.pressure_prev_field);
         auto s_w_old = reg.get<volScalarField>(satCfg.saturation_old);
-        auto s_w_prev = reg.get<volScalarField>(satCfg.saturation_prev);
 
-        if (!p_w || !s_w || !p_w_old || !p_w_prev || !s_w_old || !s_w_prev) {
+        if (!p_w || !s_w || !p_w_old || !p_w_prev || !s_w_old ) 
+        {
             std::cerr << "[IMPES][Iteration] missing pressure/saturation or old/prev fields.\n";
             return false;
         }
-
-        // 操作符字段名（时间项系数等），用于 snapshot 时导出
-        const OperatorFieldNames opNames = makeNames(pressureCtrl.assembly.operator_tag);
-
-        if (snapshotFields.empty()) 
-        {
-            snapshotFields = {
-                pressureCtrl.assembly.pressure_field,
-                satCfg.saturation
-            };
-        }        
-      
         TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, "s_w", satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);
-
-        
         auto p_g = reg.get<volScalarField>("p_g");
         auto p_g_old = reg.get<volScalarField>("p_g_old");
         auto p_g_prev = reg.get<volScalarField>("p_g_prev");
-
         auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
         if (!p_g || !p_g_old || !p_g_prev || !Pc)
         {
             std::cerr << "[IMPES][Iteration] missing p_g/Pc fields.\n";
             return false;
         }
-
         if (!satCfg.water_source_field.empty())
         {
             const size_t nCells = cells.size();
             reg.getOrCreate<volScalarField>(satCfg.water_source_field, nCells, 0.0);
         }
+        //===========================================================================================//
 
-        // ===== 4. 时间循环 =====
+
+       //====================================Step1 进入时间步循环========================================//
         double time = 0.0;
         double dt = dt_initial;
-        std::cout << "[IMPES][Iteration] Starting transient run: "
-            << "nSteps = " << nSteps
-            << ", dt_initial = " << dt_initial << " s\n";
+        std::cout << "[IMPES][Iteration] Starting transient run: " << "nSteps = " << nSteps<< ", dt_initial = " << dt_initial << " s\n";  
         for (int step = 0; step < nSteps; /* 手动控制 step++ */)
         {
             const int    stepId = step + 1;
@@ -188,7 +171,7 @@ namespace IMPES_Iteration
                 return true;
             };
 
-            // 4.0 备份当前时间层的 p_w / S_w（用 *_old 做回滚）
+            /// 1.1 备份当前时间层的 p_w / S_w（用 *_old 做回滚）
             if (!startTimeStep_scalar(
                 mesh, reg,
                 pressureCtrl.assembly.pressure_field,
@@ -207,26 +190,24 @@ namespace IMPES_Iteration
                 std::cerr << "[IMPES][Iteration] startTimeStep for saturation failed.\n";
                 return false;
             }
-            // 标记本时间步是否接受
-            bool accept_step = true;
+           
+            bool accept_step = true;                // 标记本时间步是否接受
 
-            // -------- 4.1 压力步：外迭代 --------
-            double dp_prev = std::numeric_limits<double>::infinity();
-            double dp_last = dp_prev;
+            /// 1.2 总压力方程外迭代求解 --------
+            double dp_prev = 0.0;
             double linRes_last = 0.0;
             int    linIters_last = 0;
             int    used_outer = 0;
             bool   p_converged = false;
-
-            for (int it = 0; it < pressureCtrl.max_outer; ++it)
+            for (int it = 0; it < pressureCtrl.max_outer; ++it) //外迭代开始
             {
-                // 4.1.1: 更新 p_g = p_w + Pc
+                //// 1.2.1 更新 p_g = p_w + Pc
                 for (const auto& c : cells) {
                     if (c.id < 0) continue;
                     const size_t i = id2idx.at(c.id);
                     (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
                 }
-                // 4.1.2: 更新基本物性（水 + CO2），温度字段统一用 "T"
+                //// 1.2.2 更新基本物性（水 + CO2），温度字段统一用 "T"
                 TwoPhase::updateWaterBasicPropertiesAtStep(
                     mgr, reg,
                     pressureCtrl.assembly.pressure_field,
@@ -237,7 +218,7 @@ namespace IMPES_Iteration
                     pressureCtrl.assembly.pressure_g,
                     "T"
                 );
-                // 4.1.3: 单次外迭代：组装 + 线性求解 + 欠松弛
+                //// 1.2.3 单次外迭代：组装 + 线性求解 + 欠松弛
                 double dp_inf = 0.0;
                 double linRes = 0.0;
                 int    linIts = 0;
@@ -253,35 +234,30 @@ namespace IMPES_Iteration
                     linRes,
                     linIts
                 );
-
-                if (!okP) {
+                if (!okP) 
+                {
                     std::cerr << "[IMPES][PressureStep] solver_IMPES_Iteration_PressureEq failed at outer it="
                         << it << ".\n";
                     accept_step = false;
                     break;
                 }
-
                 used_outer = it + 1;
-                dp_prev = dp_last;
-                dp_last = dp_inf;
+                dp_prev = dp_inf;
                 linRes_last = linRes;
                 linIters_last = linIts;
-
                 if (pressureCtrl.verbose) 
                 {
                     std::cout << "[IMPES][Pressure] outer " << used_outer
-                        << " dp_inf=" << dp_last
+                        << " dp_inf=" << dp_prev
                         << " linRes=" << linRes_last
                         << " linIters=" << linIters_last
                         << " (URF=" << pressureCtrl.under_relax << ")\n";
                 }
-
-                const bool conv_abs = (dp_last <= pressureCtrl.tol_abs);
-                const bool conv_rel = (it > 0 && dp_last <= pressureCtrl.tol_rel * dp_prev);
-
-                if (conv_abs || conv_rel) {
+                const bool conv_abs = (dp_prev <= pressureCtrl.tol_abs);
+                if (conv_abs) 
+                {
                     std::cout << "[IMPES][Pressure] converged at outer iter " << it
-                        << " with dp_inf=" << dp_last << "\n";
+                        << " with dp_inf=" << dp_prev << "\n";
                     p_converged = true;
                     break;
                 }
@@ -289,71 +265,38 @@ namespace IMPES_Iteration
                 {
                     std::cout << "[IMPES][Pressure] reached max_outer_iterations without convergence.\n";
                 }
-            }
-
+            }//外迭代结束
+            
+            /// 1.3 外迭代结束后的收敛处理
             if (!p_converged || !accept_step)
             {
-                // 压力步没收敛：回滚 + 缩小 dt 重算该步
                 std::cerr << "[IMPES][Iteration] Pressure not converged at time step "
                     << stepId << ", rollback and shrink dt.\n";
 
-                // 回滚 p_w, S_w 到 old 层
-                copyField(reg,
-                    pressureCtrl.assembly.pressure_old_field,
-                    pressureCtrl.assembly.pressure_field);
-                copyField(reg,
-                    satCfg.saturation_old,
-                    satCfg.saturation);
-
-                // 回滚物性：简单做法是重新基于回滚后的 p_w, S_w 计算
-                TwoPhase::updateTwoPhasePropertiesAtTimeStep
-                (
-                    mgr, reg,
-                    satCfg.saturation,
-                    satCfg.VG_Parameter.vg_params,
-                    satCfg.VG_Parameter.relperm_params
-                );
-                for (const auto& c : cells) 
+                // 使用统一的回滚逻辑：恢复 *_old，重算 p_g / 物性，缩小 dt
+                if (!rollback_after_failure("pressure convergence failure"))
                 {
-                    if (c.id < 0) continue;
-                    const size_t i = id2idx.at(c.id);
-                    (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
+                    return false;   // dt 已经小于 dt_min
                 }
-                TwoPhase::updateWaterBasicPropertiesAtStep(
-                    mgr, reg,
-                    pressureCtrl.assembly.pressure_field,
-                    "T"
-                );
-                TwoPhase::updateCO2BasicPropertiesAtStep(
-                    mgr, reg,
-                    pressureCtrl.assembly.pressure_g,
-                    "T"
-                );
-                TwoPhase::copyBasicPropertiesToOldLayer(reg);
-                dt *= Tsc.shrink_factor;
-
-                if (dt < Tsc.dt_min) {
-                    std::cerr << "[IMPES][Iteration] dt fell below dt_min after pressure rollback.\n";
-                    return false;
-                }
-                // 不推进时间，不加 step，直接重算本时间步
-                continue;
+                continue;           // 重新计算该时间段（step 不自增）
             }
+
+            /// 1.4 得到收敛的压力后，计算主扩散通量、毛细通量以及重力通量
 
             // -------- 4.2 两相总通量 → 水/气相通量拆分 --------
             {
                 FluxSplitResult fluxRep;
                 
-                if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg, nullptr, &fluxRep))
-                {
-                    std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
-                        << stepId << ".\n";
-                    if (!rollback_after_failure("flux split failure"))
-                    {
-                        return false;
-                    }
-                    continue;
-                }
+                //if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg,pressureCtrl.assembly, nullptr, &fluxRep))
+                //{
+                //    std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
+                //        << stepId << ".\n";
+                //    if (!rollback_after_failure("flux split failure"))
+                //    {
+                //        return false;
+                //    }
+                //    continue;
+                //}
             }
             if (!satCfg.water_source_field.empty())
             {
@@ -415,6 +358,8 @@ namespace IMPES_Iteration
                 << ", max_dS=" << satStats.max_dS
                 << ", dt_suggest=" << satStats.suggested_dt << "\n";
             
+           
+            
             // ---- 6.7：Tecplot 输出 (P  / Sw) ----
             const bool dumpP = !outPrefixP.empty() &&
                 ((writeEveryP <= 0) || (stepId % writeEveryP == 0));
@@ -471,7 +416,14 @@ namespace IMPES_Iteration
                     return false;
                 }
             }
-
+            if (snapshotFields.empty())
+            {
+                snapshotFields =
+                {
+                    pressureCtrl.assembly.pressure_field,
+                    satCfg.saturation
+                };
+            }
             // CSV snapshot（cell 标量场）
             if (snapshotEveryCsv > 0 &&
                 (stepId % snapshotEveryCsv) == 0 &&

@@ -36,23 +36,12 @@ namespace IMPES_Iteration
 		std::string rho_mix_field =         P_Eq_str.rho_mix_field; 			       ///< ρ_mix = ρ_w s_w + ρ_g s_g
         std::string lambda_gravity_field =  P_Eq_str.lambda_gravity_field;             ///< λ_gra = λ_w ρ_w + λ_g ρ_g
         std::string gravity_dummy_field =   P_Eq_str.gravity_dummy_field;              /// 用于占位的重力场
-
-        ///储存通量名称的场
-        std::string total_mass_flux_name =  P_Eq_str.total_mass_flux_name;
-        std::string total_vol_flux_name =   P_Eq_str.total_vol_flux_name;
-        std::string total_velocity_name =   P_Eq_str.total_velocity_name;
-        std::string capillary_correction_flux_name = P_Eq_str.capillary_correction_flux_name;
-        std::string gravity_correction_flux_name = P_Eq_str.gravity_correction_flux_name;
-        double dirichlet_zero_flux_tol = 0.0;           ///< |p_owner - p_bc| <= tol -> clamp boundary flux
     };
 
     struct PressureAssemblyResult
     {
         SparseSystemCOO system;
         std::vector<int> cell_lid;
-        std::shared_ptr<faceScalarField> total_mass_flux;
-        std::shared_ptr<faceScalarField> total_vol_flux;
-        std::shared_ptr<faceScalarField> total_face_velocity;
     };
 
 
@@ -200,7 +189,11 @@ namespace IMPES_Iteration
             return true;
         }
 
-        //首先利用模板构建扩散项系数，组装矩阵，并计算通量大小
+        /// 一个 Null BCProvider，永远不返回 ABC
+        struct NullPressureBCAdapter {
+            bool getABC(int, double&, double&, double&) const { return false; }
+        };
+
         inline bool buildAndApplyOperator
         (
             MeshManager& mgr,
@@ -243,70 +236,6 @@ namespace IMPES_Iteration
             }
             applyCOO(helper, eval_vec, result_vec);
             return true;
-        }
-
-        //从扩散算子系数计算面通量
-        inline void applyStrongDirichletConditions(
-            MeshManager& mgr,
-            const PressureBCAdapter& pbc,
-            const std::vector<int>& cell_lid,
-            SparseSystemCOO& sys)
-        {
-            const auto& mesh = mgr.mesh();
-            const auto& faces = mesh.getFaces();
-            const auto& id2idx = mesh.getCellId2Index();
-
-            if (sys.n <= 0) return;
-
-            std::vector<int> counts(sys.n, 0);
-            std::vector<double> values(sys.n, 0.0);
-
-            for (const auto& F : faces)
-            {
-                if (!F.isBoundary()) continue;
-                double a = 0.0, b = 0.0, c = 0.0;
-                if (!pbc.getABC(F.id, a, b, c)) continue;
-                const double aTol = 1e-30;
-                const double bTol = 1e-30;
-                if (std::abs(a) <= aTol) continue;
-                if (std::abs(b) > bTol) continue;
-                if (F.ownerCell < 0) continue;
-                auto it = id2idx.find(F.ownerCell);
-                if (it == id2idx.end()) continue;
-                const int lid = cell_lid[it->second];
-                if (lid < 0 || lid >= sys.n) continue;
-                counts[lid] += 1;
-                values[lid] += c / a;
-            }
-
-            std::vector<double> targets(sys.n, 0.0);
-            bool hasDirichlet = false;
-            for (int i = 0; i < sys.n; ++i)
-            {
-                if (counts[i] > 0)
-                {
-                    targets[i] = values[i] / static_cast<double>(counts[i]);
-                    hasDirichlet = true;
-                }
-            }
-            if (!hasDirichlet) return;
-
-            for (auto& t : sys.A)
-            {
-                if (t.r >= 0 && t.r < sys.n && counts[t.r] > 0)
-                {
-                    t.v = 0.0;
-                }
-            }
-
-            for (int i = 0; i < sys.n; ++i)
-            {
-                if (counts[i] > 0)
-                {
-                    sys.b[i] = targets[i];
-                    sys.addA(i, i, 1.0);
-                }
-            }
         }
 
         inline bool computeFaceFluxFromOperator(
@@ -443,7 +372,6 @@ namespace IMPES_Iteration
         result.cell_lid = buildUnknownMap(mgr.mesh(), N);
         if (sys.n < N) sys.expandTo(N);
 
-        detailed::applyStrongDirichletConditions(mgr, pbc, result.cell_lid, sys);
 
         std::vector<double> eval_vec;
         if (!detailed::gatherFieldToVector(mgr.mesh(), reg, cfg.Pc_field, result.cell_lid, N, eval_vec))
@@ -451,12 +379,15 @@ namespace IMPES_Iteration
             std::cerr << "[IMPES_revised][Pressure] failed to gather Pc.\n";
             return false;
         }
+        PressureBC::Registry nullReg;
+        PressureBCAdapter   nullPbc{ nullReg };
 
-		///—— 组装毛细压力扩散项 ——//
+        ///—— 组装毛细压力扩散项 ——//
         OperatorFieldNames nmCap = makeNames(cfg.operator_tag + "_cap");
-		std::vector<double> zeroVec(N, 0.0), capContribution;
+		std::vector<double> capContribution;
+
         if (!detailed::buildAndApplyOperator(
-            mgr, reg, freg, pbc,
+            mgr, reg, freg, nullPbc,
             nmCap,
             mobility_tokens,
             cfg.rho_capillary_field,
@@ -473,23 +404,11 @@ namespace IMPES_Iteration
         {
             sys.addb(r, -capContribution[r]);
         }
-        if (!cfg.capillary_correction_flux_name.empty())
-        {
-            if (!detailed::computeFaceFluxFromOperator(
-                mgr, reg, freg,
-                nmCap,
-                cfg.Pc_field,
-                cfg.capillary_correction_flux_name))
-            {
-                return false;
-            }
-        }
-
 		///—— 组装重力项 ——//
         OperatorFieldNames nmGrav = makeNames(cfg.operator_tag + "_grav");
         std::vector<double> zeroVec1(N, 0.0), gravContribution;
         if (!detailed::buildAndApplyOperator(
-            mgr, reg, freg, pbc,
+            mgr, reg, freg, nullPbc,
             nmGrav,
             mobility_tokens,
             cfg.rho_coeff_field,
@@ -506,18 +425,6 @@ namespace IMPES_Iteration
         {
             sys.addb(r, -gravContribution[r]);
         }
-        if (!cfg.gravity_correction_flux_name.empty())
-        {
-            if (!detailed::computeFaceFluxFromOperator(
-                mgr, reg, freg,
-                nmGrav,
-                cfg.gravity_dummy_field,
-                cfg.gravity_correction_flux_name))
-            {
-                return false;
-            }
-        }
-
         int desired_n = sys.n;
         for (const auto& well : wells)
         {
@@ -536,38 +443,7 @@ namespace IMPES_Iteration
                 cfg.VG_Parameter.relperm_params    // 同上，对应 RelPermParams
             );
         }
-        if (!cfg.total_mass_flux_name.empty())
-        {
-
-            if (!FVM::Convection::buildFlux_Darcy_Mass(
-                mgr, reg, freg,
-                nm.a_f_diff, nm.s_f_diff,
-                cfg.pressure_field,
-                cfg.rho_mix_field,
-                cfg.total_mass_flux_name,
-                cfg.total_vol_flux_name,
-                cfg.total_velocity_name,
-                &pbc,
-                false,
-                cfg.dirichlet_zero_flux_tol))
-            {
-                std::cerr << "[IMPES_revised][Pressure] failed to compute total flux.\n";
-                return false;
-            }
-            result.total_mass_flux = freg.get<faceScalarField>(cfg.total_mass_flux_name);
-            result.total_vol_flux = freg.get<faceScalarField>(cfg.total_vol_flux_name);
-            result.total_face_velocity = freg.get<faceScalarField>(cfg.total_velocity_name);
-        }
-        else
-        {
-            result.total_mass_flux.reset();
-            result.total_vol_flux.reset();
-            result.total_face_velocity.reset();
-        }
-
         result.system = std::move(sys);
         return true;
-
-
     }	    
 }

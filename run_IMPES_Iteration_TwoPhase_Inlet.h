@@ -24,7 +24,7 @@
  *  6) 输出 Tecplot 结果用于后处理。
  */
 
-auto clampValue = [](double v, double lo, double hi) {
+auto clampValue2 = [](double v, double lo, double hi) {
     return std::max(lo, std::min(hi, v));
     };
 
@@ -95,7 +95,7 @@ int run_IMPES_Iteration_TwoPhase_Inlet()
     const auto& id2idx = mgr.mesh().getCellId2Index();
     const double Sw_min = vg_params.Swr;
     const double Sw_max = 1.0 - vg_params.Sgr;
-    const double Sw_background = clampValue(vg_params.Swr + 0.1, Sw_min + 1e-6, Sw_max - 1e-6);
+    const double Sw_background = clampValue2(vg_params.Swr + 0.1, Sw_min + 1e-6, Sw_max - 1e-6);
     const double Sw_inj = Sw_max - 1e-6;
     const double inj_band = lengthX / double(sectionNumX) * 1.01; // 覆盖左端一列
 
@@ -103,7 +103,7 @@ int run_IMPES_Iteration_TwoPhase_Inlet()
         if (c.id < 0) continue;
         const size_t i = id2idx.at(c.id);
         double target = (c.center.m_x <= inj_band) ? Sw_inj : Sw_background;
-        target = clampValue(target, Sw_min, Sw_max);
+        target = clampValue2(target, Sw_min, Sw_max);
         (*s_w)[i] = target;
         (*s_w_old)[i] = target;
         (*s_w_prev)[i] = target;
@@ -152,7 +152,7 @@ int run_IMPES_Iteration_TwoPhase_Inlet()
     pCtrl.assembly.enable_buoyancy = false;
     pCtrl.assembly.gradient_smoothing = 1;
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
-    pCtrl.assembly.dirichlet_zero_flux_tol = 0; // Pa tolerance to treat boundary flux as zero
+    //pCtrl.assembly.dirichlet_zero_flux_tol = 0; // Pa tolerance to treat boundary flux as zero
 
     // ---------- 9. 两相通量拆分配置 ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;

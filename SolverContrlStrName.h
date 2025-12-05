@@ -29,6 +29,16 @@ namespace IMPES_Iteration
         std::string gravity_correction_flux_name = "mf_gravity_corr";
     };
 
+    struct FaceMassRate_String
+    {
+        ///储存通量名称的场
+        std::string total_mass_flux_name = "mf_total";
+        std::string capillary_correction_flux_name = "mf_capillary_corr";
+        std::string gravity_correction_flux_name = "mf_gravity_corr";
+        std::string total_vol_flux_name = "Qf_total";
+        std::string total_velocity_name = "ufn_total";
+    };
+
     struct SaturationEquation_String
     {
         std::string saturation =        "s_w";                 ///当前时间层的水相饱和度（正在求解的）
