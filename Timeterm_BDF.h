@@ -155,7 +155,7 @@ namespace FVM {
                 const double b = (V / dt) * (ph * rhoN
                     - ph * rhoStar
                     + ph * drdp * pStar
-                    + ph * rhoStar * cphi * pn);
+                    + ph * rhoStar * cphi * pStar);
 
                 (*aC)[i] = a;
                 (*bC)[i] = b;

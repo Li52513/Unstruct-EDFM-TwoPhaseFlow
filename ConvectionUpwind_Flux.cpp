@@ -51,16 +51,23 @@ namespace FVM
 
 		// 路线 A1：达西（质量通量形态，复用 a_f/s_f） //复用a_f_Diff_T s_f_Diff_T 即包含密度的达西定律离散系数与面向量
 		// 约定：mf = a_f * Δp − s_f（内部 Δp=pP−pN；边界 Δp=pP）
-
+		/**
+		 * @brief 根据 a_f / s_f 面系数构建达西质量通量、体积通量和法向速度。
+		 *
+		 * - 内部面：使用 m_f = a_f (p_P - p_N) - s_f
+		 * - Dirichlet / Robin 边界：使用 m_f = a_f p_P - s_f（p_B 已编码在 s_f 中）
+		 * - 纯 Neumann 零梯度边界 (a≈0, b≠0, c≈0)：在此函数中解释为“无流边界”，
+		 *   直接强制 mf = 0, Qf = 0, ufn = 0，即便 s_f 中有重力/毛细项也一并屏蔽。
+		 */
 		bool buildFlux_Darcy_Mass
 		(
-			MeshManager& mgr, const FieldRegistry& reg,  FaceFieldRegistry& freg,
+			MeshManager& mgr, const FieldRegistry& reg, FaceFieldRegistry& freg,
 			const std::string& a_name, const std::string& s_name,
 			const std::string& p_name, const std::string& rho_name,
 			const std::string& mf_name, const std::string& Qf_name,
 			const std::string& ufn_name,
 			const PressureBCAdapter* bc,
-			bool clampDirichletBackflow,
+			bool   clampDirichletBackflow,
 			double dirichlet_zero_flux_tol
 		)
 		{
@@ -72,6 +79,12 @@ namespace FVM
 			auto a_f = freg.get<faceScalarField>(a_name.c_str());
 			auto s_f = freg.get<faceScalarField>(s_name.c_str());
 
+			if (!a_f || !s_f) {
+				std::cerr << "[buildFlux_Darcy_Mass] face fields '" << a_name
+					<< "' or '" << s_name << "' not found.\n";
+				return false;
+			}
+
 			auto mf = freg.getOrCreate<faceScalarField>(mf_name.c_str(), faces.size(), 0.0);
 			auto Qf = freg.getOrCreate<faceScalarField>(Qf_name.c_str(), faces.size(), 0.0);
 			auto ufn = freg.getOrCreate<faceScalarField>(ufn_name.c_str(), faces.size(), 0.0);
@@ -80,59 +93,102 @@ namespace FVM
 			std::fill(Qf->data.begin(), Qf->data.end(), 0.0);
 			std::fill(ufn->data.begin(), ufn->data.end(), 0.0);
 
+			const double eps = 1e-30;
+
 			for (const auto& F : faces) {
 				const int idx = F.id - 1;
 				Vector A; double Aabs; faceAreaVec(F, A, Aabs);
 
-				const int P = F.ownerCell;
+				const int    P = F.ownerCell;
 				const double pP = cellScalar(reg, mesh, p_name.c_str(), P, 0.0);
-				const double rhoP = cellScalar(reg, mesh, rho_name.c_str(), P, 0.0);
+				const double rhoP = cellScalar(reg, mesh, rho_name.c_str(), P, 1.0);
 
 				double mface = 0.0;
 				double qface = 0.0;
 
 				if (!F.isBoundary())
 				{
-					const int N = F.neighborCell;
+					// -------------------------
+					// 内部面：标准达西通量
+					// m_f = a_f (pP - pN) - s_f
+					// -------------------------
+					const int    N = F.neighborCell;
 					const double pN = cellScalar(reg, mesh, p_name.c_str(), N, 0.0);
-					const double rhoN = cellScalar(reg, mesh, rho_name.c_str(), N, 0.0);
+					const double rhoN = cellScalar(reg, mesh, rho_name.c_str(), N, 1.0);
 
 					mface = (*a_f)[idx] * (pP - pN) - (*s_f)[idx];
 
 					const double gamma = F.f_linearInterpolationCoef;
 					const double rho_f = (1.0 - gamma) * rhoP + gamma * rhoN;
-					qface = mface / std::max(rho_f, 1e-30);
+					const double rho_safe = std::max(rho_f, eps);
+					qface = mface / rho_safe;
 				}
 				else
 				{
+					// =======================================================
+					// 边界面：先识别“无流边界”，再处理 Dirichlet / Robin。
+					// 约定：a≈0, b≠0, c≈0 在本函数中表示 No-flow 边界，
+					//       即总达西质量通量 mf = 0 （包括毛细 + 重力）。
+					// =======================================================
+					bool noFlowBoundary = false;
 					bool dirichletOutflow = false;
-					if (clampDirichletBackflow && bc) {
-						double a = 0.0, b = 0.0, c = 0.0;
-						if (bc->getABC(F.id, a, b, c) && std::abs(a) > 1e-30) {
-							const double pBC = c / a;
-							dirichletOutflow = (pP >= pBC);
+
+					if (bc) {
+						double a_bc = 0.0, b_bc = 0.0, c_bc = 0.0;
+						if (bc->getABC(F.id, a_bc, b_bc, c_bc)) {
+							const bool isDirichlet = (std::abs(a_bc) > eps && std::abs(b_bc) <= eps);
+							const bool isZeroGrad = (std::abs(a_bc) <= eps && std::abs(b_bc) > eps);
+
+							// —— 无流边界判据：纯 Neumann 且 c≈0 —— //
+							if (isZeroGrad && std::abs(c_bc) <= dirichlet_zero_flux_tol) {
+								noFlowBoundary = true;
+							}
+
+							// —— Dirichlet 边界：用于回流截断判断 —— //
+							if (isDirichlet && clampDirichletBackflow) {
+								const double pBC = c_bc / a_bc;
+								// 若单元内压力 >= 边界压力，则“倾向于出流边界”
+								dirichletOutflow = (pP >= pBC);
+							}
 						}
 					}
 
-					mface = (*a_f)[idx] * (pP)-(*s_f)[idx];
-					qface = mface / rhoP;
-
-					if (dirichletOutflow && mface < 0.0)
+					if (noFlowBoundary)
 					{
+						// -----------------------------------------------------
+						// 真·无流边界：直接强制 mf=0，qf=0，忽略 a_f / s_f 中
+						// 预先计算的毛细项和重力项，确保总达西通量为 0。
+						// -----------------------------------------------------
 						mface = 0.0;
 						qface = 0.0;
 					}
-
-					if (dirichlet_zero_flux_tol > 0.0 && bc)
+					else
 					{
-						double a = 0.0, b = 0.0, c = 0.0;
-						if (bc->getABC(F.id, a, b, c) && std::abs(a) > 1e-30 && std::abs(b) <= 1e-30)
-						{
-							const double pBC = c / a;
-							if (std::abs(pP - pBC) <= dirichlet_zero_flux_tol)
+						// -----------------------------------------------------
+						// 其余边界（Dirichlet / Robin）：沿用
+						// m_f = a_f pP - s_f
+						// 其中 s_f 已经包含 p_B / 重力 / 毛细信息。
+						// -----------------------------------------------------
+						mface = (*a_f)[idx] * (pP)-(*s_f)[idx];
+						qface = (rhoP > eps) ? (mface / rhoP) : 0.0;
+
+						// ---- 对“出流型 Dirichlet 边界”可选截断回流 ---- //
+						if (dirichletOutflow && mface < 0.0) {
+							mface = 0.0;
+							qface = 0.0;
+						}
+
+						// ---- 对纯 Dirichlet 边界，当 pP≈pB 时，可选零通量 ---- //
+						if (dirichlet_zero_flux_tol > 0.0 && bc) {
+							double a_bc = 0.0, b_bc = 0.0, c_bc = 0.0;
+							if (bc->getABC(F.id, a_bc, b_bc, c_bc)
+								&& std::abs(a_bc) > eps && std::abs(b_bc) <= eps)
 							{
-								mface = 0.0;
-								qface = 0.0;
+								const double pBC = c_bc / a_bc;
+								if (std::abs(pP - pBC) <= dirichlet_zero_flux_tol) {
+									mface = 0.0;
+									qface = 0.0;
+								}
 							}
 						}
 					}
@@ -141,10 +197,9 @@ namespace FVM
 				(*mf)[idx] = mface;
 				(*Qf)[idx] = qface;
 				(*ufn)[idx] = (Aabs > 0.0 ? qface / Aabs : 0.0);
-
 			}
-			return true;
 
+			return true;
 		}
 
 		bool buildFlux_Darcy_Vol  //通过FVM::Diffusion::buildFaceCoeff_Cenrtal计算得到的a_f和s_f 进而计算质量通量 面通量 和 达西速度

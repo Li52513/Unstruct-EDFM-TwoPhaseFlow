@@ -247,7 +247,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 		"phi_r",               // φ^n
 		"p_g_old",           // p^n
 		"rho_g",             // ρ^n
-		"p_g_prev",          // p^⋆
+		"p_g_old",          // p^⋆
 		"rho_g",             // ρ^⋆
 		"Drho_Dp_g",         // (∂ρ/∂p)^⋆
 		nmP.a_time, nmP.b_time
@@ -313,7 +313,7 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed
 		mgr, reg, freg,
 		nmP.a_f_diff, nmP.s_f_diff,
 		"p_g", "rho_g",
-		"mf_g", "Qf_g", "ufn_g", &Pbc, true
+		"mf_g", "Qf_g", "ufn_g", &Pbc, true,1
 	);
 
 	if (!ok) return false;

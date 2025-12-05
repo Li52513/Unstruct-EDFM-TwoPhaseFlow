@@ -72,7 +72,7 @@ int SinglePhase_CO2_TH_withoutWell()
     TemperatureBCAdapter TbcA{ tbc };
 
     // 5) 求解器与时间推进设置
-    Vector g = { 0.0, 0.0, 0.0 };
+    Vector g = { 0.0, -9.8, 0.0 };
 
     SolverControls sc;
     sc.maxOuter = 300;

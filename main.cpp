@@ -10,6 +10,6 @@
 
 int main()
 {
-    return  SinglePhase_CO2_TH_withWell();
+    return  SinglePhase_CO2_TH_withoutWell();
 }
 
