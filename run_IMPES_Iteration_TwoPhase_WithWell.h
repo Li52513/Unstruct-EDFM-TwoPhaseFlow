@@ -190,8 +190,6 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
 
     // ---------- 7. Mass-flux splitting configuration ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;
-    fluxCfg.rho_water = TwoPhase::Water().rho_tag;
-    fluxCfg.rho_gas = TwoPhase::CO2().rho_tag;
     fluxCfg.pressure_bc = &PbcA;
 
     // ---------- 8. Initialize Pc/p_g/old property layers ----------
@@ -239,7 +237,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
 
     std::cout << "--- IMPES: start transient run (two-phase with wells) ---\n";
 
-    const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration
+    /*const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration
     (
         mgr,
         reg,
@@ -264,7 +262,7 @@ int run_IMPES_Iteration_TwoPhase_WithWell()
     {
         std::cerr << "[CASE] IMPES transient run with wells failed.\n";
         return EXIT_FAILURE;
-    }
+    }*/
 
     auto reportWellRates = [&]()
     {

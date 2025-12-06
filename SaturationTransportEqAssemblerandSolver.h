@@ -9,7 +9,7 @@
 #include "CapRelPerm.h"
 
 #include "SolverContrlStrName.h"
-//#include "FluxSplitterandSolver.h"
+#include "FluxSplitterandSolver.h"
 
 namespace IMPES_Iteration
 {
@@ -31,7 +31,7 @@ namespace IMPES_Iteration
         std::string saturation_old =        S_Eq_str.saturation_old;         ///上一时间步的水相饱和度 （已知解，用于时间项）
         std::string saturation_prev =       S_Eq_str.saturation_prev;       ///外迭代 / RK2 stage 备用的饱和度拷贝（可选）  
 
-        std::string water_mass_flux =       S_Eq_str.water_mass_flux;          // Output: water-phase mass flux
+        //std::string water_mass_flux =       S_Eq_str.water_mass_flux;          // Output: water-phase mass flux
         std::string water_source_field;                                      /// （可选）水相源汇项，单位 [kg/s]，例如井源的水相质量源 若为空字符串则视为无显式体源项
 
         TwoPhase_VG_Parameters              VG_Parameter;
@@ -193,6 +193,7 @@ namespace IMPES_Iteration
         FieldRegistry& reg,
         FaceFieldRegistry& freg,
         const SaturationTransportConfig& cfg,
+        const FluxSplitConfig& FluxCfg,
         double dt,
         SaturationStepStats& stats)
     {
@@ -225,7 +226,7 @@ namespace IMPES_Iteration
             return false;
         }
 
-        auto mf_w = freg.get<faceScalarField>(cfg.water_mass_flux);
+        auto mf_w = freg.get<faceScalarField>(FluxCfg.water_mass_flux);  //new: 取分配后的
         if (!mf_w)
         {
             std::cerr << " missing face fieldof water mass flux  <<.\n";
@@ -271,15 +272,15 @@ namespace IMPES_Iteration
         // 如果要用 Redondo, 提前拿 total_vol_flux face 场
         PressureEquation_String P_names;
         std::shared_ptr<faceScalarField> Qf_total;
-        if (cfg.time_control_scheme == SatTimeControlScheme::RedondoLike) 
-        {
-            Qf_total = freg.get<faceScalarField>(P_names.total_vol_flux_name);
-            if (!Qf_total) {
-                std::cerr << "[Saturation] RedondoLike requires total_vol_flux face field '"
-                    << P_names.total_vol_flux_name << "'.\n";
-                return false;
-            }
-        }
+        //if (cfg.time_control_scheme == SatTimeControlScheme::RedondoLike) 
+        //{
+        //    Qf_total = freg.get<faceScalarField>(P_names.total_vol_flux_name);
+        //    if (!Qf_total) {
+        //        std::cerr << "[Saturation] RedondoLike requires total_vol_flux face field '"
+        //            << P_names.total_vol_flux_name << "'.\n";
+        //        return false;
+        //    }
+        //}
 
         for (const auto& F : faces)
         {

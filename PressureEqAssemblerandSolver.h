@@ -31,7 +31,7 @@ namespace IMPES_Iteration
 
         //扩散项离散系数临时储存名称
         std::string rho_coeff_field =       P_Eq_str.rho_coeff_field;                  ///< ρ_coeff = λ_w ρ_w + λ_g ρ_g
-        std::string rho_capillary_field =   P_Eq_str.capillary_correction_flux_name;   ///< ρ_cap = λ_g ρ_g
+        std::string rho_capillary_field =   P_Eq_str.rho_capillary_field;               ///< ρ_cap = λ_g ρ_g
         std::string rho_gravity_field =     P_Eq_str.rho_gravity_field;                ///< ρ_gra = (λ_w ρ_w² + λ_g ρ_g²)/(λ_w ρ_w + λ_g ρ_g)
 		std::string rho_mix_field =         P_Eq_str.rho_mix_field; 			       ///< ρ_mix = ρ_w s_w + ρ_g s_g
         std::string lambda_gravity_field =  P_Eq_str.lambda_gravity_field;             ///< λ_gra = λ_w ρ_w + λ_g ρ_g

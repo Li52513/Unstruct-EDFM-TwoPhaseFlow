@@ -20,13 +20,6 @@ namespace IMPES_Iteration
         std::string rho_mix_field = "rho_mix"; 			             ///< ρ_mix = ρ_w s_w + ρ_g s_g
         std::string lambda_gravity_field = "lambda_gravity_mass";   ///< λ_gra = λ_w ρ_w + λ_g ρ_g
         std::string gravity_dummy_field = "gravity_dummy_scalar";   /// 用于占位的重力场
-
-        ///储存通量名称的场
-        std::string total_mass_flux_name = "mf_total";
-        std::string total_vol_flux_name = "Qf_total";
-        std::string total_velocity_name = "ufn_total";
-        std::string capillary_correction_flux_name = "mf_capillary_corr";
-        std::string gravity_correction_flux_name = "mf_gravity_corr";
     };
 
     struct FaceMassRate_String
@@ -41,25 +34,17 @@ namespace IMPES_Iteration
 
     struct SaturationEquation_String
     {
-        std::string saturation =        "s_w";                 ///当前时间层的水相饱和度（正在求解的）
-        std::string saturation_old =    "s_w_old";         ///上一时间步的水相饱和度 （已知解，用于时间项）
-        std::string saturation_prev =   "s_w_prev";       ///外迭代 / RK2 stage 备用的饱和度拷贝（可选）  
-
-        std::string water_mass_flux =   "mf_w";          // Output: water-phase mass flux
-        std::string water_source_field = "";         /// （可选）水相源汇项，单位 [kg/s]，例如井源的水相质量源 若为空字符串则视为无显式体源项
+        std::string saturation =        "s_w";              ///当前时间层的水相饱和度（正在求解的）
+        std::string saturation_old =    "s_w_old";          ///上一时间步的水相饱和度 （已知解，用于时间项）
+        std::string saturation_prev =   "s_w_prev";         ///外迭代 / RK2 stage 备用的饱和度拷贝（可选）  
+        std::string water_source_field = "";                /// 水相源汇项，单位 [kg/s]，例如井源的水相质量源 若为空字符串则视为无显式体源项
     };
 
     struct FluxSplitConfig_String
     {
         std::string water_mass_flux = "mf_w";          // Output: water-phase mass flux
         std::string gas_mass_flux = "mf_g";            // Output: gas-phase (CO2) mass flux
-        std::string fractional_flow_face = "fw_face";  // Optional: water fractional flow on faces (can be empty)
-
-        std::string rho_water = "";                         // Optional: water density for mass-based fractional flow
-        std::string rho_gas = "";                           // Optional: gas density for mass-based fractional flow
-
-        std::string capillary_correction_flux = "";         // Optional: face field (kg/s) added to water, subtracted from gas
-        std::string gravity_correction_flux = "";           // Optional: face field (kg/s) added to water, subtracted from gas
+        std::string fractional_flow_face = "fw_face";  // Optional: water fractional flow on faces (can be empty)   
     };
 
     struct TwoPhase_VG_Parameters

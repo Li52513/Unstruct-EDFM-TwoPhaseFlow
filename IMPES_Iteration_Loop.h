@@ -18,6 +18,7 @@
 #include "TwoPhaseWells_StrictRate.h"
 #include "Solver_TimeLoopUtils.h"
 #include "IMPES_PostProcessIO.h"
+#include "FaceMassRateCalculate.h"
 
 namespace IMPES_Iteration
 {
@@ -42,6 +43,7 @@ namespace IMPES_Iteration
         const PressureSolveControls& pressureCtrl,
         const SaturationTransportConfig& satCfg,
         const FluxSplitConfig& fluxCfg,
+        const FaceMassRateConfig& FaceMassRateCfg,   //新增
         int                        writeEveryP = 0,
         int                        writeEverySw = 0,
         const std::string& outPrefixP = "",
@@ -191,7 +193,7 @@ namespace IMPES_Iteration
                 return false;
             }
            
-            bool accept_step = true;                // 标记本时间步是否接受
+            bool accept_step = true; // 标记本时间步是否接受
 
             /// 1.2 总压力方程外迭代求解 --------
             double dp_prev = 0.0;
@@ -199,10 +201,12 @@ namespace IMPES_Iteration
             int    linIters_last = 0;
             int    used_outer = 0;
             bool   p_converged = false;
+
             for (int it = 0; it < pressureCtrl.max_outer; ++it) //外迭代开始
             {
                 //// 1.2.1 更新 p_g = p_w + Pc
-                for (const auto& c : cells) {
+                for (const auto& c : cells) 
+                {
                     if (c.id < 0) continue;
                     const size_t i = id2idx.at(c.id);
                     (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
@@ -282,23 +286,31 @@ namespace IMPES_Iteration
             }
 
             /// 1.4 得到收敛的压力后，计算主扩散通量、毛细通量以及重力通量
-
-            // -------- 4.2 两相总通量 → 水/气相通量拆分 --------
+            if (!buildFaceMassRates(mgr, reg, freg, pressureCtrl.assembly, Pbc, FaceMassRateCfg))
             {
-                FluxSplitResult fluxRep;
-                
-                //if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg,pressureCtrl.assembly, nullptr, &fluxRep))
-                //{
-                //    std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
-                //        << stepId << ".\n";
-                //    if (!rollback_after_failure("flux split failure"))
-                //    {
-                //        return false;
-                //    }
-                //    continue;
-                //}
+                std::cerr << "[IMPES_Iteration] buildFaceMassRates failed after pressure convergence.\n";
+                return false;
             }
-            if (!satCfg.water_source_field.empty())
+            // -------- 4.2 两相总通量 → 水/气相通量拆分 --------
+            FluxSplitResult fluxRep; // 可选：用于收集诊断信息（max|fw-?, ...）
+            FaceSignMask faceMask;   // 可选：记录面方向 + 上游信息
+
+            if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg, FaceMassRateCfg, &faceMask, &fluxRep))
+            {
+                std::cerr << "[IMPES_Iteration] splitTwoPhaseMassFlux failed.\n";
+                return false;
+            }
+            // 此时，freg 中应已生成：
+            //  - fluxCfg.water_mass_flux 对应的面场：m_w
+            //  - fluxCfg.gas_mass_flux   对应的面场：m_g
+            //  - （可选）fluxCfg.fractional_flow_face：fw_mass
+            //  - fluxCfg.capillary_correction_flux：毛细修正（已加到水、从气中减去）
+            //  - fluxCfg.gravity_correction_flux：重力修正（同样规则）
+            //
+            // 后续饱和度方程只需要使用 water_mass_flux / gas_mass_flux 即可。
+
+
+            /*if (!satCfg.water_source_field.empty())
             {
                 auto qField = reg.getOrCreate<volScalarField>(
                     satCfg.water_source_field,
@@ -341,10 +353,10 @@ namespace IMPES_Iteration
                 {
                     qField->data.assign(qField->data.size(), 0.0);
                 }
-            }
+            }*/
             // -------- 4.3 显式饱和度步（Euler） + Redondo / SimpleCFL 时间控制 --------
             SaturationStepStats satStats;
-            if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, dt, satStats))
+            /*if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, dt, satStats))
             {
                 std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
                     << stepId << ".\n";
@@ -353,7 +365,7 @@ namespace IMPES_Iteration
                     return false;
                 }
                 continue;
-            }
+            }*/
             std::cout << "[IMPES][Saturation] max_CFL=" << satStats.max_CFL
                 << ", max_dS=" << satStats.max_dS
                 << ", dt_suggest=" << satStats.suggested_dt << "\n";
@@ -439,8 +451,6 @@ namespace IMPES_Iteration
                     return false;
                 }
             }
-
-
             // -------- 4.4 更新两相物性到新时间层，并写入 *_old --------
             TwoPhase::updateTwoPhasePropertiesAtTimeStep(
                 mgr, reg,

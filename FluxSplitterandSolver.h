@@ -32,12 +32,6 @@ namespace IMPES_Iteration
         std::string gas_mass_flux =                 Fsc.gas_mass_flux;            // Output: gas-phase (CO2) mass flux
         std::string fractional_flow_face =          Fsc.fractional_flow_face;  // Optional: water fractional flow on faces (can be empty)
 
-        std::string rho_water =                     Fsc.rho_water;                         // Optional: water density for mass-based fractional flow
-        std::string rho_gas =                       Fsc.rho_gas;                           // Optional: gas density for mass-based fractional flow
-
-        std::string capillary_correction_flux =     Fsc.capillary_correction_flux;         // Optional: face field (kg/s) added to water, subtracted from gas
-        std::string gravity_correction_flux =       Fsc.gravity_correction_flux;           // Optional: face field (kg/s) added to water, subtracted from gas
-
         double min_lambda = 1e-30;                     // Safeguard to avoid divide-by-zero
         double flux_sign_epsilon = 1e-1;              // Threshold to detect face flux direction
 
@@ -198,18 +192,12 @@ namespace IMPES_Iteration
             return false;
         }
 
-        if (cfg.rho_water.empty() || cfg.rho_gas.empty())
-        {
-            std::cerr << "[IMPES][Flux] rho_water/rho_gas field names must be provided in FluxSplitConfig.\n";
-            return false;
-        }
-
-        auto rho_w = reg.get<volScalarField>(cfg.rho_water.c_str());
-        auto rho_g = reg.get<volScalarField>(cfg.rho_gas.c_str());
+        auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
+        auto rho_g = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
         if (!rho_w || !rho_g)
         {
-            std::cerr << "[IMPES][Flux] density fields '" << cfg.rho_water
-                << "' or '" << cfg.rho_gas << "' not found.\n";
+            std::cerr << "[IMPES][Flux] density fields '" << TwoPhase::Water().rho_tag
+                << "' or '" << TwoPhase::CO2().rho_tag << "' not found.\n";
             return false;
         }
 
