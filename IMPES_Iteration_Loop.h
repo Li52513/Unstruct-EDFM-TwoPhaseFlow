@@ -26,7 +26,7 @@ namespace IMPES_Iteration
     struct TimeStepControl
     {
         double dt_min = 1e-5;   ///< 允许的最小时间步 [s]
-        double dt_max = 1000;   ///< 允许的最大时间步 [s]
+        double dt_max = 10;   ///< 允许的最大时间步 [s]
         double grow_factor = 5;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
         double safety_factor = 0.9;    ///< 相对于 Redondo 建议步长的安全系数
@@ -40,7 +40,7 @@ namespace IMPES_Iteration
         std::vector<WellDOF_TwoPhase>& wells,
         int                        nSteps,
         double                     dt_initial,
-        const PressureSolveControls& pressureCtrl,
+         PressureSolveControls& pressureCtrl,
         const SaturationTransportConfig& satCfg,
         const FluxSplitConfig& fluxCfg,
         const FaceMassRateConfig& FaceMassRateCfg,   //新增
@@ -325,8 +325,16 @@ namespace IMPES_Iteration
                     if (!rollback_after_failure("flux split")) return false;
                     accept_step = false;
                 }
-
+                // 3.5) 调试：检查边界 inflow/outflow 通量与 fw
+                IMPES_Iteration::diagnoseBoundaryFluxWithFw(
+                    mgr,
+                    freg,
+                    FaceMassRateCfg.total_mass_flux,        // 对应 mf_total
+                    fluxCfg.fractional_flow_face,   // 对应 fw_face，一般是 "fw_face"
+                    fluxCfg.flux_sign_epsilon       // 与 splitTwoPhaseMassFlux 使用同一阈值
+                );
             }
+
             /// 1.5 显式推进水相饱和度 S_w
             SaturationStepStats satStats;
             if (accept_step)

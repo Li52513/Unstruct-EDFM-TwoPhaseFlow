@@ -62,7 +62,7 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     rp_params.L = 0.5;       // Mualem 默认，减缓相对渗透率陡峭度
 
     double P_left = 9.0e6;
-    double P_right = 7.5e6;
+    double P_right = 8e6;
     
     InitFields ic;  // 默认 p0 / T0 / Sw0，如有需要可以修改 ic.p0 / ic.T0 等
     ic.p_w0 = 8e6;                        // x=0 处的压力
@@ -126,7 +126,7 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
 
     pCtrl.max_outer = 1000;        // 常物性可保持很小
-    pCtrl.tol_abs = 1e-2;
+    pCtrl.tol_abs = 1e8;
     pCtrl.tol_rel = 1e-4;
     pCtrl.under_relax = 1;
     pCtrl.verbose = true;
@@ -146,14 +146,14 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     fluxCfg.pressure_bc = &PbcA;
 
     // ---------- 11. IMPES 主时间推进 ----------
-    const int    nSteps = 500;
-    double       dt_initial = 1e-4;   // 更保守的初始时间步
+    const int    nSteps = 100;
+    double       dt_initial = 1e-7;   // 更保守的初始时间步
 
     const int writeEveryP = 1;
     const int writeEverySw = 1;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case4/p_impes_ps_revised/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case4/s_impes_ps_revised/s_ps";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case5/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case5/s_impes_ps_revised/s_ps";
     const int snapshotEveryCsv = 1;
     const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case4/ps_state_reviesed";
 
