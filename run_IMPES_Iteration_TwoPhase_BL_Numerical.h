@@ -26,12 +26,12 @@
 int run_IMPES_Iteration_TwoPhase_BL_Numerical()
 {
     // ---------------- 0. 网格与场注册 ----------------
-    const double lengthX = 20.0;   // [m]
-    const double lengthY = 5.0;    // 几乎 1D
+    const double lengthX = 1.0;   // [m]
+    const double lengthY = 1.0;    // 几乎 1D
     const double lengthZ = 0.0;
 
-    const int sectionNumX = 40;    // 细一点，方便看前沿
-    const int sectionNumY = 5;
+    const int sectionNumX = 50;    // 细一点，方便看前沿
+    const int sectionNumY = 50;
     const int sectionNumZ = 0;
 
     const bool usePrism = true;
@@ -43,7 +43,7 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     MeshManager mgr(lengthX, lengthY, lengthZ,
         sectionNumX, sectionNumY, sectionNumZ,
         usePrism, useQuadBase);
-    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OverRelaxed);
 
     FieldRegistry     reg;
     FaceFieldRegistry freg;
@@ -62,31 +62,34 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     rp_params.L = 0.5;       // Mualem 默认，减缓相对渗透率陡峭度
 
     double P_left = 9.0e6;
-    double P_right = 8e6;
+    double P_right = 7.5e6;
     
     InitFields ic;  // 默认 p0 / T0 / Sw0，如有需要可以修改 ic.p0 / ic.T0 等
-    ic.p_w0 = P_left;                        // x=0 处的压力
-    ic.dp_wdx = (P_right - P_left) / lengthX;  // 与 lengthX 匹配的梯度
+    ic.p_w0 = 8e6;                        // x=0 处的压力
+    ic.dp_wdx = 0.0;  // 与 lengthX 匹配的梯度
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
     
     ic.s_w = 1-vg_params.Sgr-0.2;   // Sw_i
+    // ------------ 2.变量字符设置 ------------
+    IMPES_Iteration::PressureEquation_String P_Eq;
+    IMPES_Iteration::SaturationEquation_String S_Eq;
+    IMPES_Iteration::FaceMassRate_String Mf_Eq;
+    IMPES_Iteration::FluxSplitConfig_String Fsp_Eq;
 
     // 主变量场：水相压力 p_w、水相饱和度 s_w、温度 T
-    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
-        mgr.mesh(), reg, "p_w", "s_w", "T");
-    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(
-        mgr.mesh(), reg, ic);
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, P_Eq.pressure_field, S_Eq.saturation, "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
 
     // 时间层：old / prev（p_w、s_w、p_g 都准备好）
-    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
-    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    ensureTransientFields_scalar(mgr.mesh(), reg, P_Eq.pressure_field, P_Eq.pressure_old_field, P_Eq.pressure_prev_field);
+    ensureTransientFields_scalar(mgr.mesh(), reg, S_Eq.saturation, S_Eq.saturation_old, S_Eq.saturation_prev);
     ensureTransientFields_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
 
     // ---------- 2. 基岩区域分类与固相物性 ----------
     PhysicalPropertiesManager ppm;
     ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
-    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateMatrixRockAt(mgr, reg, P_Eq.pressure_field, "T");
 
     // ---------- 5. 压力边界条件（左高右低，其他 no-flow） ----------
     const auto& bfaces = mgr.boundaryFaces();
@@ -102,69 +105,45 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     // ---------- 6. 井配置（BL 测试：无井源） ----------
     std::vector<WellConfig_TwoPhase> wells_cfg;
     build_masks_and_WI_for_all(mgr, reg, wells_cfg);
-
     const int Ncells = static_cast<int>(mgr.mesh().getCells().size());
     std::vector<WellDOF_TwoPhase> wells_dof;
     register_well_dofs_for_all_TwoPhase(Ncells, wells_cfg, wells_dof);
 
-    // ---------- 7. 饱和度输运配置 ----------
+    // ---------- 7. 饱和度方程配置 ----------
     IMPES_Iteration::SaturationTransportConfig satCfg;
-    satCfg.saturation = "s_w";
-    satCfg.saturation_old = "s_w_old";
-    satCfg.saturation_prev = "s_w_prev";
     satCfg.VG_Parameter.vg_params = vg_params;
     satCfg.VG_Parameter.relperm_params = rp_params;
+    satCfg.dS_max = 0.1;
+    satCfg.CFL_safety = 0.8;
 
-    // ---------- 8. 压力求解控制参数 ----------
+    // ---------- 8. 压力方程组装与求解控制参数 ----------   
     IMPES_Iteration::PressureSolveControls pCtrl;
-    pCtrl.max_outer = 1;        // 常物性可保持很小
-    pCtrl.tol_abs = 1e15;
+    //组装
+    pCtrl.assembly.VG_Parameter.vg_params= vg_params;
+    pCtrl.assembly.VG_Parameter.relperm_params = rp_params;
+    pCtrl.assembly.enable_buoyancy = false;
+    pCtrl.assembly.gradient_smoothing = 6;
+    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
+
+    pCtrl.max_outer = 1000;        // 常物性可保持很小
+    pCtrl.tol_abs = 1e-2;
     pCtrl.tol_rel = 1e-4;
     pCtrl.under_relax = 1;
     pCtrl.verbose = true;
 
-    pCtrl.assembly.enable_buoyancy = false;
-    pCtrl.assembly.gradient_smoothing = 1;
-    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
-    //pCtrl.assembly.dirichlet_zero_flux_tol = 1.0; // Pa tolerance to treat boundary flux as zero
-
+    // ----------- 9. 面通量计算配置---------------
+    IMPES_Iteration::FaceMassRateConfig m_FCtrl;
+    m_FCtrl.clamp_dirichlet_backflow = true;
+    m_FCtrl.dirichlet_zero_flux_tol = 1e-10;
+    m_FCtrl.enable_conservation_check = true;
+    m_FCtrl.flux_check_tol = 1e-10;
+    
     // ---------- 9. 两相通量拆分配置 ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;
+    fluxCfg.boundary_inflow_fw = 1;
+    fluxCfg.enforce_boundary_inflow_fw = true;
+    fluxCfg.flux_sign_epsilon = 1e-10;
     fluxCfg.pressure_bc = &PbcA;
-
-    // ---------- 10. 初场后处理：同步 Pc / p_g / 物性到 old 层 ----------
-    {
-        // 更新 Pc, krw, krg, dPc/dSw
-        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, "s_w", vg_params, rp_params);
-
-        // 设置 p_g = p_w + Pc，并同步到 old/prev
-        auto p_w = reg.get<volScalarField>("p_w");
-        auto p_g = reg.get<volScalarField>("p_g");
-        auto p_w_old = reg.get<volScalarField>("p_w_old");
-        auto p_w_prev = reg.get<volScalarField>("p_w_prev");
-        auto p_g_old = reg.get<volScalarField>("p_g_old");
-        auto p_g_prev = reg.get<volScalarField>("p_g_prev");
-        auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
-        const auto& cells = mgr.mesh().getCells();
-        const auto& id2idx = mgr.mesh().getCellId2Index();
-        for (const auto& c : cells)
-        {
-            if (c.id < 0) continue;
-            const size_t i = id2idx.at(c.id);
-            const double pg_val = (*p_w)[i] + (*Pc)[i];
-            (*p_g)[i] = pg_val;
-            (*p_g_old)[i] = pg_val;
-            (*p_g_prev)[i] = pg_val;
-            // 确保 p_w_old/p_w_prev 也和 p_w 同步
-            (*p_w_old)[i] = (*p_w)[i];
-            (*p_w_prev)[i] = (*p_w)[i];
-        }
-
-        // 更新水/CO2 物性并拷贝到 *_old 层
-        TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, "p_w", "T");
-        TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, "p_g", "T");
-        TwoPhase::copyBasicPropertiesToOldLayer(reg);
-    }
 
     // ---------- 11. IMPES 主时间推进 ----------
     const int    nSteps = 500;
@@ -177,36 +156,14 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case4/s_impes_ps_revised/s_ps";
     const int snapshotEveryCsv = 1;
     const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case4/ps_state_reviesed";
-    std::vector<std::string> snapshotFields;
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
-
-   /* const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration
-    (
-        mgr,
-        reg,
-        freg,
-        PbcA,
-        wells_dof,
-        nSteps,
-        dt_initial,
-        pCtrl,
-        satCfg,
-        fluxCfg,
-        writeEveryP,
-        writeEverySw,
-        outPrefixP,
-        outPrefixSw,
-        snapshotEveryCsv,
-        snapshotPrefix,
-        snapshotFields
-    );*/
-
-   /* if (!ok)
+    const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);
+    if (!ok)
     {
         std::cerr << "[BL-TEST] IMPES transient run failed.\n";
         return EXIT_FAILURE;
-    }*/
+    }
 
     std::cout << "[BL-TEST] IMPES two-phase Buckley–Leverett numerical test finished successfully.\n";
     return EXIT_SUCCESS;

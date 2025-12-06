@@ -26,10 +26,10 @@ namespace IMPES_Iteration
 		std::string total_velocity = ctrl.total_velocity_name;						/// 对应的法向速度 u_n_total [m/s]
 		std::string capillary_mass_flux = ctrl.capillary_correction_flux_name;		/// 毛细校正质量通量 m_cap [kg/s]
 		std::string gravity_mass_flux = ctrl.gravity_correction_flux_name;			/// 重力校正质量通量 m_grav [kg/s]
-		bool clamp_dirichlet_backflow = false;										/// 是否对 Dirichlet 出流边界做“回流截断”（交给 buildFlux_Darcy_Mass）
-		double dirichlet_zero_flux_tol = 0.0;										/// |p_owner - p_bc| <= tol 时将边界通量视为 0（交给 buildFlux_Darcy_Mass）
-		bool enable_conservation_check = false;										/// 是否启用通量守恒检查（内部+边界）
-		double flux_check_tol = 0.0;												/// 用于检查“理论零通量”的容差（如 no-flow 边界、cap/gravity 边界） 若 <=0，则仅打印最大值，不做阈值判断
+		bool clamp_dirichlet_backflow = true;										/// 是否对 Dirichlet 出流边界做“回流截断”（交给 buildFlux_Darcy_Mass）
+		double dirichlet_zero_flux_tol = 1e-10;										/// |p_owner - p_bc| <= tol 时将边界通量视为 0（交给 buildFlux_Darcy_Mass）
+		bool enable_conservation_check = true;										/// 是否启用通量守恒检查（内部+边界）
+		double flux_check_tol = 1e-10;												/// 用于检查“理论零通量”的容差（如 no-flow 边界、cap/gravity 边界） 若 <=0，则仅打印最大值，不做阈值判断
 	};
 
 

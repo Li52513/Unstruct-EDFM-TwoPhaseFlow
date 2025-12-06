@@ -25,7 +25,7 @@ namespace IMPES_Iteration
     /// 时间步控制参数
     struct TimeStepControl
     {
-        double dt_min = 1e-9;   ///< 允许的最小时间步 [s]
+        double dt_min = 1e-5;   ///< 允许的最小时间步 [s]
         double dt_max = 1000;   ///< 允许的最大时间步 [s]
         double grow_factor = 5;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
@@ -49,8 +49,7 @@ namespace IMPES_Iteration
         const std::string& outPrefixP = "",
         const std::string& outPrefixSw = "",
         int                        snapshotEveryCsv = 0,
-        const std::string& snapshotPrefix = "",
-        std::vector<std::string>   snapshotFields = {}
+        const std::string& snapshotPrefix = ""
     ) 
     {
         //================Step0 初始化设置，确认字符串以及导出文件是否合理===================//
@@ -101,7 +100,7 @@ namespace IMPES_Iteration
             std::cerr << "[IMPES][Iteration] missing pressure/saturation or old/prev fields.\n";
             return false;
         }
-        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, "s_w", satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);
+        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);
         auto p_g = reg.get<volScalarField>("p_g");
         auto p_g_old = reg.get<volScalarField>("p_g_old");
         auto p_g_prev = reg.get<volScalarField>("p_g_prev");
@@ -111,6 +110,25 @@ namespace IMPES_Iteration
             std::cerr << "[IMPES][Iteration] missing p_g/Pc fields.\n";
             return false;
         }
+        // 初始化 p_g = p_w + Pc，并更新一次物性 old 层
+        for (const auto& c : cells)
+        {
+            if (c.id < 0) continue;
+            const size_t i = id2idx.at(c.id);
+            (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
+        }
+        TwoPhase::updateWaterBasicPropertiesAtStep(
+            mgr, reg,
+            pressureCtrl.assembly.pressure_field,
+            "T"
+        );
+        TwoPhase::updateCO2BasicPropertiesAtStep(
+            mgr, reg,
+            pressureCtrl.assembly.pressure_g,
+            "T"
+        );
+        TwoPhase::copyBasicPropertiesToOldLayer(reg);
+
         if (!satCfg.water_source_field.empty())
         {
             const size_t nCells = cells.size();
@@ -123,6 +141,8 @@ namespace IMPES_Iteration
         double time = 0.0;
         double dt = dt_initial;
         std::cout << "[IMPES][Iteration] Starting transient run: " << "nSteps = " << nSteps<< ", dt_initial = " << dt_initial << " s\n";  
+        std::vector<std::string> snapshotFields;
+        
         for (int step = 0; step < nSteps; /* 手动控制 step++ */)
         {
             const int    stepId = step + 1;
@@ -278,221 +298,189 @@ namespace IMPES_Iteration
                     << stepId << ", rollback and shrink dt.\n";
 
                 // 使用统一的回滚逻辑：恢复 *_old，重算 p_g / 物性，缩小 dt
-                if (!rollback_after_failure("pressure convergence failure"))
-                {
-                    return false;   // dt 已经小于 dt_min
-                }
+                //if (!rollback_after_failure("pressure convergence failure"))
+                //{
+                //    return false;   // dt 已经小于 dt_min
+                //}
                 continue;           // 重新计算该时间段（step 不自增）
             }
 
-            /// 1.4 得到收敛的压力后，计算主扩散通量、毛细通量以及重力通量
-            if (!buildFaceMassRates(mgr, reg, freg, pressureCtrl.assembly, Pbc, FaceMassRateCfg))
+            /// 1.4 压力收敛后：构建面质量通量
+            if (accept_step)
             {
-                std::cerr << "[IMPES_Iteration] buildFaceMassRates failed after pressure convergence.\n";
-                return false;
+                if (!buildFaceMassRates(mgr, reg, freg, pressureCtrl.assembly, Pbc, FaceMassRateCfg))
+                {
+                    std::cerr << "[IMPES_Iteration] buildFaceMassRates failed after pressure convergence.\n";
+                    accept_step = false;
+                }
             }
-            // -------- 4.2 两相总通量 → 水/气相通量拆分 --------
+            /// 1.5 两相通量分配，mf_total -> mf_w / mf_g
             FluxSplitResult fluxRep; // 可选：用于收集诊断信息（max|fw-?, ...）
             FaceSignMask faceMask;   // 可选：记录面方向 + 上游信息
-
-            if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg, FaceMassRateCfg, &faceMask, &fluxRep))
+            if (accept_step)
             {
-                std::cerr << "[IMPES_Iteration] splitTwoPhaseMassFlux failed.\n";
-                return false;
-            }
-            // 此时，freg 中应已生成：
-            //  - fluxCfg.water_mass_flux 对应的面场：m_w
-            //  - fluxCfg.gas_mass_flux   对应的面场：m_g
-            //  - （可选）fluxCfg.fractional_flow_face：fw_mass
-            //  - fluxCfg.capillary_correction_flux：毛细修正（已加到水、从气中减去）
-            //  - fluxCfg.gravity_correction_flux：重力修正（同样规则）
-            //
-            // 后续饱和度方程只需要使用 water_mass_flux / gas_mass_flux 即可。
-
-
-            /*if (!satCfg.water_source_field.empty())
-            {
-                auto qField = reg.getOrCreate<volScalarField>(
-                    satCfg.water_source_field,
-                    cells.size(), 0.0);
-                if (!wells.empty())
+                if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg, FaceMassRateCfg, &faceMask, &fluxRep))
                 {
-                    std::vector<double> wellSources;
-                    if (!FVM::TwoPhaseWellsStrict::build_saturation_well_sources_strict(
-                        mgr,
-                        reg,
-                        wells,
-                        satCfg.VG_Parameter.vg_params,
-                        satCfg.VG_Parameter.relperm_params,
-                        pressureCtrl.assembly.pressure_field,
-                        wellSources))
-                    {
-                        std::cerr << "[IMPES][Iteration] failed to evaluate saturation well sources at time step "
-                            << stepId << ".\n";
-                        if (!rollback_after_failure("well source update"))
-                        {
-                            return false;
-                        }
-                        continue;
-                    }
-                    if (wellSources.size() != qField->data.size())
-                    {
-                        qField->data.assign(cells.size(), 0.0);
-                    }
-                    const size_t nWrite = std::min(qField->data.size(), wellSources.size());
-                    for (size_t ic = 0; ic < nWrite; ++ic)
-                    {
-                        (*qField)[ic] = wellSources[ic];
-                    }
-                    for (size_t ic = nWrite; ic < qField->data.size(); ++ic)
-                    {
-                        (*qField)[ic] = 0.0;
-                    }
+                    std::cerr << "[IMPES_Iteration] splitTwoPhaseMassFlux failed.\n";
+                    if (!rollback_after_failure("flux split")) return false;
+                    accept_step = false;
+                }
+
+            }
+            /// 1.5 显式推进水相饱和度 S_w
+            SaturationStepStats satStats;
+            if (accept_step)
+            {
+                if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, fluxCfg, dt, satStats))
+                {
+                    std::cerr << "[IMPES][Iteration] advanceSaturationExplicit_Euler failed at step "
+                        << stepId << ".\n";
+                    if (!rollback_after_failure("saturation")) return false;
+                    accept_step = false;
                 }
                 else
                 {
-                    qField->data.assign(qField->data.size(), 0.0);
-                }
-            }*/
-            // -------- 4.3 显式饱和度步（Euler） + Redondo / SimpleCFL 时间控制 --------
-            SaturationStepStats satStats;
-            /*if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, dt, satStats))
-            {
-                std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
-                    << stepId << ".\n";
-                if (!rollback_after_failure("saturation update failure"))
-                {
-                    return false;
-                }
-                continue;
-            }*/
-            std::cout << "[IMPES][Saturation] max_CFL=" << satStats.max_CFL
-                << ", max_dS=" << satStats.max_dS
-                << ", dt_suggest=" << satStats.suggested_dt << "\n";
-            
-           
-            
-            // ---- 6.7：Tecplot 输出 (P  / Sw) ----
-            const bool dumpP = !outPrefixP.empty() &&
-                ((writeEveryP <= 0) || (stepId % writeEveryP == 0));
-            const bool dumpSw = !outPrefixSw.empty() &&
-                ((writeEverySw <= 0) || (stepId % writeEverySw == 0));
-            if (dumpP)
-            {
-                const std::vector<Vector>gradP = computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, pressureCtrl.assembly.pressure_field.c_str(), 0);
-                std::ostringstream fnP;
-                fnP << outPrefixP << "_step_" << std::setw(5) << std::setfill('0')
-                    << stepId << ".plt";
-                const std::string faceFieldName = pressureCtrl.assembly.pressure_field + "_face_tmp";
-                const bool okPltP = outputTecplot_cellToFaceToNode_BC(
-                    mgr, reg, freg,
-                    nullptr, &Pbc,
-                    pressureCtrl.assembly.pressure_field,
-                    faceFieldName,
-                    &gradP,
-                    fnP.str());
-
-                if (!okPltP)
-                {
-                    std::cerr << "[IMPES][AnalyticTest] Tecplot export (pressure) failed at step "
-                        << stepId << ".\n";
-                    return false;
+                    std::cout << "[IMPES][Saturation] step " << stepId
+                        << ": max_CFL=" << satStats.max_CFL
+                        << ", max_dS=" << satStats.max_dS
+                        << ", dt_suggest=" << satStats.suggested_dt << "\n";
                 }
             }
-            if (dumpSw)
+
+            //====================================Step2 当前时间步计算结束，时步更新并结果输出========================================//           
+            if (accept_step)
             {
-                const std::vector<Vector> gradSw =
-                    computeCellGradients_LSQ_with_GG(
-                        mgr.mesh(), reg,
-                        satCfg.saturation.c_str(), 0);
+                // ---- ：Tecplot 输出 (P  / Sw) ----
+                const bool dumpP = !outPrefixP.empty() &&((writeEveryP <= 0) || (stepId % writeEveryP == 0));
+                const bool dumpSw = !outPrefixSw.empty() &&((writeEverySw <= 0) || (stepId % writeEverySw == 0));
+                if (dumpP)
+                {
+                    const std::vector<Vector>gradP = computeCellGradients_LSQ_with_GG(mgr.mesh(), reg, pressureCtrl.assembly.pressure_field.c_str(), 0);
+                    std::ostringstream fnP;
+                    fnP << outPrefixP << "_step_" << std::setw(5) << std::setfill('0')
+                        << stepId << ".plt";
+                    const std::string faceFieldName = pressureCtrl.assembly.pressure_field + "_face_tmp";
+                    const bool okPltP = outputTecplot_cellToFaceToNode_BC(
+                        mgr, reg, freg,
+                        nullptr, &Pbc,
+                        pressureCtrl.assembly.pressure_field,
+                        faceFieldName,
+                        &gradP,
+                        fnP.str());
 
-                std::ostringstream fnSw;
-                fnSw << outPrefixSw << "_step_" << std::setw(5) << std::setfill('0')
-                    << stepId << ".plt";
+                    if (!okPltP)
+                    {
+                        std::cerr << "[IMPES][AnalyticTest] Tecplot export (pressure) failed at step "
+                            << stepId << ".\n";
+                        return false;
+                    }
+                }
+                if (dumpSw)
+                {
+                    const std::vector<Vector> gradSw =
+                        computeCellGradients_LSQ_with_GG(
+                            mgr.mesh(), reg,
+                            satCfg.saturation.c_str(), 0);
 
-                const std::string faceFieldName =
-                    satCfg.saturation + "_face_tmp";
+                    std::ostringstream fnSw;
+                    fnSw << outPrefixSw << "_step_" << std::setw(5) << std::setfill('0')
+                        << stepId << ".plt";
 
-                const bool okPltSw = outputTecplot_cellToFaceToNode_BC(
-                    mgr, reg, freg,
-                    nullptr, nullptr,
+                    const std::string faceFieldName =
+                        satCfg.saturation + "_face_tmp";
+
+                    const bool okPltSw = outputTecplot_cellToFaceToNode_BC(
+                        mgr, reg, freg,
+                        nullptr, nullptr,
+                        satCfg.saturation,
+                        faceFieldName,
+                        &gradSw,
+                        fnSw.str());
+
+                    if (!okPltSw)
+                    {
+                        std::cerr << "[IMPES][AnalyticTest] Tecplot export (saturation) failed at step "
+                            << stepId << ".\n";
+                        return false;
+                    }
+                }
+                if (snapshotFields.empty())
+                {
+                    snapshotFields =
+                    {
+                        pressureCtrl.assembly.pressure_field,
+                        satCfg.saturation
+                    };
+                }
+                // CSV snapshot（cell 标量场）
+                if (snapshotEveryCsv > 0 &&
+                    (stepId % snapshotEveryCsv) == 0 &&
+                    !snapshotPrefix.empty())
+                {
+                    const double simTime = t_next; // 本步的 t^{n+1}
+                    if (!IMPES::Output::writeFieldSnapshotCSV(
+                        snapshotPrefix, stepId, simTime,
+                        mgr, reg, snapshotFields))
+                    {
+                        std::cerr << "[IMPES][Iteration] CSV snapshot failed at step "
+                            << stepId << ".\n";
+                        return false;
+                    }
+                }
+            }
+            if (accept_step)
+            {
+                // -------- 4.4 更新两相物性到新时间层，并写入 *_old --------
+                TwoPhase::updateTwoPhasePropertiesAtTimeStep(
+                    mgr, reg,
                     satCfg.saturation,
-                    faceFieldName,
-                    &gradSw,
-                    fnSw.str());
-
-                if (!okPltSw)
-                {
-                    std::cerr << "[IMPES][AnalyticTest] Tecplot export (saturation) failed at step "
-                        << stepId << ".\n";
-                    return false;
+                    satCfg.VG_Parameter.vg_params,
+                    satCfg.VG_Parameter.relperm_params
+                );
+                for (const auto& c : cells) {
+                    if (c.id < 0) continue;
+                    const size_t i = id2idx.at(c.id);
+                    (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
                 }
-            }
-            if (snapshotFields.empty())
-            {
-                snapshotFields =
-                {
+                TwoPhase::updateWaterBasicPropertiesAtStep(
+                    mgr, reg,
                     pressureCtrl.assembly.pressure_field,
-                    satCfg.saturation
-                };
+                    "T"
+                );
+                TwoPhase::updateCO2BasicPropertiesAtStep(
+                    mgr, reg,
+                    pressureCtrl.assembly.pressure_g,
+                    "T"
+                );
+                TwoPhase::copyBasicPropertiesToOldLayer(reg);
+
             }
-            // CSV snapshot（cell 标量场）
-            if (snapshotEveryCsv > 0 &&
-                (stepId % snapshotEveryCsv) == 0 &&
-                !snapshotPrefix.empty())
+            //====================================Step3 更新时间步========================================//  
+            if (accept_step) 
             {
-                const double simTime = t_next; // 本步的 t^{n+1}
-                if (!IMPES::Output::writeFieldSnapshotCSV(
-                    snapshotPrefix, stepId, simTime,
-                    mgr, reg, snapshotFields))
+                double dt_new = dt;
+                if (satStats.suggested_dt > 0.0 &&
+                    std::isfinite(satStats.suggested_dt))
                 {
-                    std::cerr << "[IMPES][Iteration] CSV snapshot failed at step "
-                        << stepId << ".\n";
-                    return false;
+                    double dt_suggest = satStats.suggested_dt;
+                    dt_suggest = std::max(Tsc.dt_min,
+                                   std::min(Tsc.dt_max, dt_suggest));
+
+                    const double dt_grow = dt * Tsc.grow_factor;
+                    dt_new = std::min(dt_grow,
+                                      Tsc.safety_factor * dt_suggest);
                 }
+                else
+                {
+                    // 如果饱和度没给出靠谱的建议步长，就保守缩小一点
+                    dt_new = dt * Tsc.shrink_factor;
+                }
+                dt = std::max(Tsc.dt_min, std::min(Tsc.dt_max, dt_new));
+
+                // ---- 真正推进物理时间 & 步号 ----
+                time = t_next;  // 本步物理时间走到 t^{n+1}
+                ++step;
             }
-            // -------- 4.4 更新两相物性到新时间层，并写入 *_old --------
-            TwoPhase::updateTwoPhasePropertiesAtTimeStep(
-                mgr, reg,
-                satCfg.saturation,
-                satCfg.VG_Parameter.vg_params,
-                satCfg.VG_Parameter.relperm_params
-            );
-            for (const auto& c : cells) {
-                if (c.id < 0) continue;
-                const size_t i = id2idx.at(c.id);
-                (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
-            }
-            TwoPhase::updateWaterBasicPropertiesAtStep(
-                mgr, reg,
-                pressureCtrl.assembly.pressure_field,
-                "T"
-            );
-            TwoPhase::updateCO2BasicPropertiesAtStep(
-                mgr, reg,
-                pressureCtrl.assembly.pressure_g,
-                "T"
-            );
-            TwoPhase::copyBasicPropertiesToOldLayer(reg);
-
-
-            // -------- 4.6 接受时间步，更新时间和 dt --------
-            time += dt;
-            ++step;
-
-            // 使用 Redondo / SimpleCFL 建议的 dt 作为主要约束，
-            // 并允许适度增长（dt_growth_factor）
-            double dt_target = satStats.suggested_dt;
-            if (!(dt_target > 0.0)) {
-                dt_target = dt; // 容错：如果算法返回了非正值，就保持原 dt
-            }
-            // 不能比当前 dt 增长太多，但也不超过建议值
-            double dt_candidate = std::min({dt_target, Tsc.grow_factor * dt, Tsc.dt_max});
-            dt = dt_candidate;
-
-            std::cout << "[IMPES][Iteration] step " << stepId
-                << " accepted. Next dt = " << dt << " s, simTime = "
-                << time << " s\n";
         }
 
         std::cout << "\n[IMPES][Iteration] Transient run finished. Final time = "
@@ -501,3 +489,92 @@ namespace IMPES_Iteration
     }
 
 } // namespace IMPES_Iteration
+
+//
+//
+//
+// // 此时，freg 中应已生成：
+//            //  - fluxCfg.water_mass_flux 对应的面场：m_w
+//            //  - fluxCfg.gas_mass_flux   对应的面场：m_g
+//            //  - （可选）fluxCfg.fractional_flow_face：fw_mass
+//            //  - fluxCfg.capillary_correction_flux：毛细修正（已加到水、从气中减去）
+//            //  - fluxCfg.gravity_correction_flux：重力修正（同样规则）
+//            //
+//            // 后续饱和度方程只需要使用 water_mass_flux / gas_mass_flux 即可。
+//
+//
+//            /*if (!satCfg.water_source_field.empty())
+//            {
+//                auto qField = reg.getOrCreate<volScalarField>(
+//                    satCfg.water_source_field,
+//                    cells.size(), 0.0);
+//                if (!wells.empty())
+//                {
+//                    std::vector<double> wellSources;
+//                    if (!FVM::TwoPhaseWellsStrict::build_saturation_well_sources_strict(
+//                        mgr,
+//                        reg,
+//                        wells,
+//                        satCfg.VG_Parameter.vg_params,
+//                        satCfg.VG_Parameter.relperm_params,
+//                        pressureCtrl.assembly.pressure_field,
+//                        wellSources))
+//                    {
+//                        std::cerr << "[IMPES][Iteration] failed to evaluate saturation well sources at time step "
+//                            << stepId << ".\n";
+//                        if (!rollback_after_failure("well source update"))
+//                        {
+//                            return false;
+//                        }
+//                        continue;
+//                    }
+//                    if (wellSources.size() != qField->data.size())
+//                    {
+//                        qField->data.assign(cells.size(), 0.0);
+//                    }
+//                    const size_t nWrite = std::min(qField->data.size(), wellSources.size());
+//                    for (size_t ic = 0; ic < nWrite; ++ic)
+//                    {
+//                        (*qField)[ic] = wellSources[ic];
+//                    }
+//                    for (size_t ic = nWrite; ic < qField->data.size(); ++ic)
+//                    {
+//                        (*qField)[ic] = 0.0;
+//                    }
+//                }
+//                else
+//                {
+//                    qField->data.assign(qField->data.size(), 0.0);
+//                }
+//            }*/
+//            // -------- 4.3 显式饱和度步（Euler） + Redondo / SimpleCFL 时间控制 --------
+//SaturationStepStats satStats;
+///*if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, dt, satStats))
+//{
+//    std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
+//        << stepId << ".\n";
+//    if (!rollback_after_failure("saturation update failure"))
+//    {
+//        return false;
+//    }
+//    continue;
+//}*/
+
+//
+//    // -------- 4.6 接受时间步，更新时间和 dt --------
+//time += dt;
+//++step;
+//
+//// 使用 Redondo / SimpleCFL 建议的 dt 作为主要约束，
+//// 并允许适度增长（dt_growth_factor）
+//double dt_target = satStats.suggested_dt;
+//if (!(dt_target > 0.0)) {
+//    dt_target = dt; // 容错：如果算法返回了非正值，就保持原 dt
+//}
+//// 不能比当前 dt 增长太多，但也不超过建议值
+//double dt_candidate = std::min({ dt_target, Tsc.grow_factor * dt, Tsc.dt_max });
+//dt = dt_candidate;
+//
+//std::cout << "[IMPES][Iteration] step " << stepId
+//<< " accepted. Next dt = " << dt << " s, simTime = "
+//<< time << " s\n";

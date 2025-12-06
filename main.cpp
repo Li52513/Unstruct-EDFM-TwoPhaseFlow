@@ -10,6 +10,6 @@
 
 int main()
 {
-    return  SinglePhase_CO2_TH_withoutWell();
+    return  run_IMPES_Iteration_TwoPhase_BL_Numerical();
 }
 
