@@ -53,8 +53,8 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
 
     // 4. VG / 相对渗透率参数：进一步减小 Pc
     VGParams vg_params;
-    vg_params.Swr = 0.2;  // 少量束缚水
-    vg_params.Sgr = 0.25;  // 适当残余气，避免气相端点过头
+    vg_params.Swr = 0.1;  // 少量束缚水
+    vg_params.Sgr = 0.15;  // 适当残余气，避免气相端点过头
     vg_params.alpha = 1e-4;   // 保持 Pc 小
     vg_params.n = 2.0;   // 曲线更平缓，前沿不至于过陡
 
@@ -70,7 +70,7 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
     
-    ic.s_w = 1-vg_params.Sgr-0.2;   // Sw_i
+    ic.s_w = 0.2;   // Sw_i
     // ------------ 2.变量字符设置 ------------
     IMPES_Iteration::PressureEquation_String P_Eq;
     IMPES_Iteration::SaturationEquation_String S_Eq;
@@ -146,16 +146,16 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     fluxCfg.pressure_bc = &PbcA;
 
     // ---------- 11. IMPES 主时间推进 ----------
-    const int    nSteps = 100;
+    const int    nSteps = 500;
     double       dt_initial = 1e-7;   // 更保守的初始时间步
 
     const int writeEveryP = 1;
     const int writeEverySw = 1;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case5/p_impes_ps_revised/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case5/s_impes_ps_revised/s_ps";
-    const int snapshotEveryCsv = 1;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case4/ps_state_reviesed";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case6/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case6/s_impes_ps_revised/s_ps";
+    const int snapshotEveryCsv = 50;
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case6/ps_state_reviesed";
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
     const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);

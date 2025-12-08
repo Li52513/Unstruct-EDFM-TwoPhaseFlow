@@ -142,7 +142,21 @@ namespace IMPES_Iteration
         double dt = dt_initial;
         std::cout << "[IMPES][Iteration] Starting transient run: " << "nSteps = " << nSteps<< ", dt_initial = " << dt_initial << " s\n";  
         std::vector<std::string> snapshotFields;
-        
+        const std::string fluxTimeSeriesFile =
+            snapshotPrefix.empty()
+            ? "boundary_mass_flux_timeseries.csv"
+            : (snapshotPrefix + "_boundary_mass_flux_timeseries.csv");
+
+        const std::string WaterfluxTimeSeriesFile =
+            snapshotPrefix.empty()
+            ? "boundary_mass_flux_timeseries.csv"
+            : (snapshotPrefix + "_boundary_water_mass_flux_timeseries.csv");
+
+        const std::string CO2TimeSeriesFile =
+            snapshotPrefix.empty()
+            ? "boundary_mass_flux_timeseries.csv"
+            : (snapshotPrefix + "_boundary_CO2_mass_flux_timeseries.csv");
+
         for (int step = 0; step < nSteps; /* 手动控制 step++ */)
         {
             const int    stepId = step + 1;
@@ -358,7 +372,93 @@ namespace IMPES_Iteration
             //====================================Step2 当前时间步计算结束，时步更新并结果输出========================================//           
             if (accept_step)
             {
-                // ---- ：Tecplot 输出 (P  / Sw) ----
+                // ---- 2.0 统计边界总质量 inflow / outflow，并写入时间序列 CSV ----
+                {
+                    IMPES::Output::MassFluxSummary mfSummary;
+                    if (IMPES::Output::computeMassFluxSummary(
+                        mgr,
+                        freg,
+                        FaceMassRateCfg.total_mass_flux,  // 总质量通量面场名
+                        mfSummary))
+                    {
+                        IMPES::Output::TimeSeriesRecord rec;
+                        rec.step = stepId;
+                        rec.simTime = t_next;            // 当前步的 t^{n+1}
+                        rec.outerIterations = used_outer;        // 压力外迭代次数
+                        rec.dp_inf = dp_prev;           // 最后一轮 dp_inf
+                        rec.dT_inf = 0.0;               // 当前没有温度外迭代，用 0 占位
+                        rec.satCFL = satStats.max_CFL;  // 饱和度 CFL 诊断
+                        rec.satSuggestedDt = satStats.suggested_dt;
+                        rec.pressureLinIters = linIters_last;     // 线性求解器迭代数
+                        rec.temperatureLinIters = 0;                 // 没有温度方程，写 0
+                        rec.flux = mfSummary;         // 这里面包含 boundaryInflow/outflow
+
+                        IMPES::Output::appendTimeSeriesRecord(
+                            fluxTimeSeriesFile, rec);
+                    }
+                    else
+                    {
+                        std::cerr << "[IMPES][Iteration] computeMassFluxSummary failed at step "
+                            << stepId << ".\n";
+                    }
+
+                    IMPES::Output::MassFluxSummary mfSummary_water;
+                    if (IMPES::Output::computeMassFluxSummary(
+                        mgr,
+                        freg,
+                        fluxCfg.water_mass_flux,  // 总质量通量面场名
+                        mfSummary_water))
+                    {
+                        IMPES::Output::TimeSeriesRecord rec;
+                        rec.step = stepId;
+                        rec.simTime = t_next;            // 当前步的 t^{n+1}
+                        rec.outerIterations = used_outer;        // 压力外迭代次数
+                        rec.dp_inf = dp_prev;           // 最后一轮 dp_inf
+                        rec.dT_inf = 0.0;               // 当前没有温度外迭代，用 0 占位
+                        rec.satCFL = satStats.max_CFL;  // 饱和度 CFL 诊断
+                        rec.satSuggestedDt = satStats.suggested_dt;
+                        rec.pressureLinIters = linIters_last;     // 线性求解器迭代数
+                        rec.temperatureLinIters = 0;                 // 没有温度方程，写 0
+                        rec.flux = mfSummary_water;         // 这里面包含 boundaryInflow/outflow
+
+                        IMPES::Output::appendTimeSeriesRecord(
+                            WaterfluxTimeSeriesFile, rec);
+                    }
+                    else
+                    {
+                        std::cerr << "[IMPES][Iteration] compute_Water_MassFluxSummary failed at step "
+                            << stepId << ".\n";
+                    }
+
+                    IMPES::Output::MassFluxSummary mfSummary_CO2;
+                    if (IMPES::Output::computeMassFluxSummary(
+                        mgr,
+                        freg,
+                        fluxCfg.gas_mass_flux,  // 总质量通量面场名
+                        mfSummary_CO2))
+                    {
+                        IMPES::Output::TimeSeriesRecord rec;
+                        rec.step = stepId;
+                        rec.simTime = t_next;            // 当前步的 t^{n+1}
+                        rec.outerIterations = used_outer;        // 压力外迭代次数
+                        rec.dp_inf = dp_prev;           // 最后一轮 dp_inf
+                        rec.dT_inf = 0.0;               // 当前没有温度外迭代，用 0 占位
+                        rec.satCFL = satStats.max_CFL;  // 饱和度 CFL 诊断
+                        rec.satSuggestedDt = satStats.suggested_dt;
+                        rec.pressureLinIters = linIters_last;     // 线性求解器迭代数
+                        rec.temperatureLinIters = 0;                 // 没有温度方程，写 0
+                        rec.flux = mfSummary_CO2;         // 这里面包含 boundaryInflow/outflow
+
+                        IMPES::Output::appendTimeSeriesRecord(
+                            CO2TimeSeriesFile, rec);
+                    }
+                    else
+                    {
+                        std::cerr << "[IMPES][Iteration] compute_Water_MassFluxSummary failed at step "
+                            << stepId << ".\n";
+                    }
+                }
+                // ---- 2.1：Tecplot 输出 (P  / Sw) ----
                 const bool dumpP = !outPrefixP.empty() &&((writeEveryP <= 0) || (stepId % writeEveryP == 0));
                 const bool dumpSw = !outPrefixSw.empty() &&((writeEverySw <= 0) || (stepId % writeEverySw == 0));
                 if (dumpP)
