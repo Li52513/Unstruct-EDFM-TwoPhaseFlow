@@ -67,13 +67,13 @@ namespace IMPES_Iteration
     }
 
     /// \brief 调试用：打印单口生产井当前的 Peaceman 质量指数和预期流量。
-///
-/// \param mgr   网格管理器
-/// \param reg   场注册表（提供 p_w, lambda_w, lambda_g, rho_w, rho_g, mask, WI）
-/// \param well  目标井（通常为生产井，mode=Pressure）
-/// \param pw_field_name  压力场名称（如 "p_w"）
-///
-/// 调用时机：压力方程收敛、well.p_bh 已更新之后。
+    ///
+    /// \param mgr   网格管理器
+    /// \param reg   场注册表（提供 p_w, lambda_w, lambda_g, rho_w, rho_g, mask, WI）
+    /// \param well  目标井（通常为生产井，mode=Pressure）
+    /// \param pw_field_name  压力场名称（如 "p_w"）
+    ///
+    /// 调用时机：压力方程收敛、well.p_bh 已更新之后。
 inline void debugPrintPeacemanPIAndRate(
     MeshManager& mgr,
     const FieldRegistry& reg,

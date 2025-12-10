@@ -23,6 +23,7 @@
 
 #include "TwoPhaseWells_StrictRate.h"
 #include "IMPES_Iteration_WellHelpers.h"
+#include "PostProcess_OutputReport.h"
 
 
 
@@ -166,6 +167,10 @@ namespace IMPES_Iteration
             snapshotPrefix.empty()
             ? "boundary_mass_flux_timeseries.csv"
             : (snapshotPrefix + "_boundary_CO2_mass_flux_timeseries.csv");
+        const std::string wellBdryCsvFile =
+            snapshotPrefix.empty()
+            ? "well_boundary_timeseries.csv"
+            : (snapshotPrefix + "__well_boundary_timeseries.csv");
 
         for (int step = 0; step < nSteps; /* 手动控制 step++ */)
         {
@@ -377,8 +382,6 @@ namespace IMPES_Iteration
 
                 }
             }
-
-
             /// 1.4 压力收敛后：构建面质量通量
             if (accept_step)
             {
@@ -387,8 +390,6 @@ namespace IMPES_Iteration
                     std::cerr << "[IMPES_Iteration] buildFaceMassRates failed after pressure convergence.\n";
                     accept_step = false;
                 }
-
-
             }
             /// 1.5 两相通量分配，mf_total -> mf_w / mf_g
             FluxSplitResult fluxRep; // 可选：用于收集诊断信息（max|fw-?, ...）
@@ -401,14 +402,14 @@ namespace IMPES_Iteration
                     if (!rollback_after_failure("flux split")) return false;
                     accept_step = false;
                 }
-                // 3.5) 调试：检查边界 inflow/outflow 通量与 fw
-                IMPES_Iteration::diagnoseBoundaryFluxWithFw(
-                    mgr,
-                    freg,
-                    FaceMassRateCfg.total_mass_flux,        // 对应 mf_total
-                    fluxCfg.fractional_flow_face,   // 对应 fw_face，一般是 "fw_face"
-                    fluxCfg.flux_sign_epsilon       // 与 splitTwoPhaseMassFlux 使用同一阈值
-                );
+                //// 3.5) 调试：检查边界 inflow/outflow 通量与 fw 因为边界上忽略了毛细通量和重力通量
+                //IMPES_Iteration::diagnoseBoundaryFluxWithFw(
+                //    mgr,
+                //    freg,
+                //    FaceMassRateCfg.total_mass_flux,        // 对应 mf_total
+                //    fluxCfg.fractional_flow_face,   // 对应 fw_face，一般是 "fw_face"
+                //    fluxCfg.flux_sign_epsilon       // 与 splitTwoPhaseMassFlux 使用同一阈值
+                //);
             }
 
             if (!IMPES_Iteration::buildWaterSourceFieldFromWells(mgr, reg, wells, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params, pressureCtrl.assembly.pressure_field, Qw_well_name))
@@ -603,6 +604,128 @@ namespace IMPES_Iteration
                         return false;
                     }
                 }
+
+                // =======================================================================
+    // [BEGIN] 井 + 边界 时间序列 CSV 输出
+    // =======================================================================
+                using IMPES_Iteration::WellMassReport;
+                using IMPES_Iteration::BoundaryMassReport;
+                using IMPES_Iteration::WellBoundaryCSVRow;
+
+                // 3.1 收集每口井的质量流量报告
+                std::vector<WellMassReport> wellReports;
+                {
+                    Mesh& mesh = mgr.mesh();
+                    const auto& cells = mesh.getCells();
+                    const auto& id2idx = mesh.getCellId2Index();
+                    const int Nc = static_cast<int>(cells.size());
+
+                    std::vector<double> Mw_cell, Mg_cell; // 临时缓存，不同井复用
+
+                    for (const auto& w : wells)
+                    {
+
+                        WellMassReport rep;
+                        rep.name = w.name;
+                        rep.role = w.role;
+                        rep.mode = w.mode;
+                        rep.Tin = w.Tin;
+
+                        // Pressure 模式：BHP = target；Rate 模式：BHP = 解出的 p_bh
+                        if (w.mode == WellDOF_TwoPhase::Mode::Pressure) {
+                            rep.p_bh = w.target; // Pa
+                        }
+                        else {
+                            rep.p_bh = w.p_bh;   // 由线性系统给出
+                        }
+
+                        // 调用你已经实现好的 严格 Peaceman 两相质量率计算函数
+                        if (!FVM::TwoPhaseWellsStrict::compute_well_phase_mass_rates_strict(
+                            mgr,
+                            reg,
+                            w,
+                            pressureCtrl.assembly.VG_Parameter.vg_params,
+                            pressureCtrl.assembly.VG_Parameter.relperm_params,
+                            pressureCtrl.assembly.pressure_field, // 一般是 "p_w"
+                            Mw_cell,
+                            Mg_cell))
+                        {
+                            std::cerr << "[WellReport] compute_well_phase_mass_rates_strict failed for well "
+                                << w.name << ".\n";
+                            continue;
+                        }
+
+                        // 汇总这口井的总 Mw / Mg
+                        double Mw_tot = 0.0;
+                        double Mg_tot = 0.0;
+                        for (int ic = 0; ic < Nc; ++ic) {
+                            Mw_tot += Mw_cell[ic];
+                            Mg_tot += Mg_cell[ic];
+                        }
+                        rep.Mw_tot = Mw_tot;
+                        rep.Mg_tot = Mg_tot;
+
+                        const double denom = std::abs(Mw_tot) + std::abs(Mg_tot);
+                        rep.fw_mass = (denom > 1e-30) ? (Mw_tot / denom) : 0.0; // 水相质量分率 fw
+
+                        // 找一个代表性的 hostCellId：第一个完井单元 ID
+                        rep.hostCellId = -1;
+                        auto mask_field = reg.get<volScalarField>(w.mask_field.c_str());
+                        if (mask_field)
+                        {
+                            for (int ic = 0; ic < Nc; ++ic) {
+                                const auto& c = cells[ic];
+                                if (c.id < 0) continue;
+                                auto it = id2idx.find(c.id);
+                                if (it == id2idx.end()) continue;
+                                size_t idx = it->second;
+                                if (idx < mask_field->data.size()
+                                    && (*mask_field)[idx] > 0.5)  // 视为完井单元
+                                {
+                                    rep.hostCellId = c.id;
+                                    break;
+                                }
+                            }
+                        }
+
+                        wellReports.push_back(rep);
+                    }
+                }
+
+                // 3.2 诊断边界外流，并同时汇总边界水/气质量通量
+                BoundaryMassReport bdryRep;
+                IMPES_Iteration::diagnoseBoundaryFluxWithFw(
+                    mgr,
+                    freg,
+                    FaceMassRateCfg.total_mass_flux,    // 总质量通量面场名
+                    fluxCfg.fractional_flow_face,      // fw_face 面场名，比如 "fw_face"
+                    fluxCfg.flux_sign_epsilon,         // 判定流向阈值
+                    &bdryRep                            // 额外：把结果写到这个结构里
+                );
+
+                // 3.3 基于 wellReports + bdryRep 构造一行 CSV 的数据
+                WellBoundaryCSVRow row;
+                {
+                    // 这里的 time 变量应该是当前物理时间 t^{n+1}
+                    // 如果你的代码用的是别的名字（比如 t 或 tn1），替换一下即可
+                    double t_phys = time;
+
+                    IMPES_Iteration::buildWellBoundaryRowFromReports(
+                        mgr,
+                        reg,
+                        wellReports,
+                        pressureCtrl.assembly.pressure_field, // 用来取井所在基岩单元压力
+                        bdryRep,
+                        t_phys,
+                        row
+                    );
+                }
+                ensureWellBoundaryCSVHeader(wellBdryCsvFile);
+                // 3.4 追加写入 CSV 文件
+                IMPES_Iteration::appendWellBoundaryCSVRow(
+                    wellBdryCsvFile,
+                    row
+                );
             }
             if (accept_step)
             {

@@ -90,8 +90,8 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     // ---------- 3. 压力边界条件（左高右低，其他 no-flow） ----------
     const auto& bfaces = mgr.boundaryFaces();
     PressureBC::Registry pbc_pw;
-    PressureBC::BoundaryCoefficient P_Left{ 0.0, 1.0, 0.0 }; // ∂p/∂n = 0
-    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 9e6 }; // ∂p/∂n = 0
+    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, 9e6 };
     PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
     PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
 
@@ -112,7 +112,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         inj.Tin = 300.0;                            // 注入温度，随意设置一个值，占位
         inj.s_w_bh = 1.0;                           // 纯水注入
 
-        inj.geom.pos = Vector{ 0.25 * lengthX,0.25 * lengthY ,0.0 };
+        inj.geom.pos = Vector{ 0.01 * lengthX,0.01 * lengthY ,0.0 };
         inj.geom.rw = 0.001;                        // 井筒半径
         inj.geom.skin = 0.0;
         inj.geom.H = 1.0;                           // 有效厚度
@@ -127,13 +127,13 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         WellConfig_TwoPhase prod;
         prod.name = "PROD";
         prod.role = WellDOF_TwoPhase::Role::Producer;
-        prod.mode = WellDOF_TwoPhase::Mode::Rate; // BHP 控制
-        prod.target = -0.03;                             // 8 MPa
+        prod.mode = WellDOF_TwoPhase::Mode::Pressure; // BHP 控制
+        prod.target = 5e6;                             // 8 MPa
 
         prod.Tin = 300.0;  // 对产井无实际意义，仅占位
         prod.s_w_bh = 1.0;    // 占位
 
-        prod.geom.pos = Vector{ 0.75 * lengthX, 0.75 * lengthY, 0.0 };
+        prod.geom.pos = Vector{ 0.99 * lengthX, 0.99 * lengthY, 0.0 };
         prod.geom.rw = 0.001;
         prod.geom.skin = 0.0;
         prod.geom.H = 1.0;
@@ -188,16 +188,16 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     fluxCfg.pressure_bc = &PbcA;
 
     // ---------- 11. IMPES 主时间推进 ----------
-    const int    nSteps = 10000;
+    const int    nSteps = 100;
     double       dt_initial = 1e-7;   // 更保守的初始时间步
 
-    const int writeEveryP = 100;
-    const int writeEverySw = 100;
+    const int writeEveryP = 10;
+    const int writeEverySw = 10;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case9/p_impes_ps_withwell/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case9/s_impes_ps_withwell/s_ps";
-    const int snapshotEveryCsv = 100;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case9/ps_state_withwell";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case11/p_impes_ps_withwell/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case11/s_impes_ps_withwell/s_ps";
+    const int snapshotEveryCsv = 10;
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case11/ps_state_withwell";
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
     const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);

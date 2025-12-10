@@ -15,7 +15,6 @@
 #include "SolverContrlStrName.h"
 #include "ConvectionUpwind_Flux.h"
 #include "PressureEqAssemblerandSolver.h"
-
 namespace IMPES_Iteration
 {
 	struct FaceMassRateConfig
@@ -170,80 +169,6 @@ namespace IMPES_Iteration
 				<< flux_tol << "\n";
 		}
 	}
-	/// \brief 诊断边界上的流入/流出总质量通量，并打印对应的 f_w（若存在）。
-	///
-	/// 约定：
-	///  - 正通量 mf_total > 0: owner -> 外侧（outflow）
-	///  - 负通量 mf_total < 0: 外侧 -> owner（inflow）
-	///  - 只在 |mf_total| > flux_sign_epsilon 时认为是真正的流入/流出
-	///
-	/// 参数：
-	///  - total_mass_flux_name : total Darcy mass flux 面场名（通常来自 FaceMassRateConfig::total_mass_flux）
-	///  - fw_face_name         : f_w 面场名（通常来自 FluxSplitConfig::fractional_flow_face，例 "fw_face"）
-	///  - flux_sign_epsilon    : 判定流向的阈值，应与 splitTwoPhaseMassFlux 中一致
-	inline void diagnoseBoundaryFluxWithFw(
-		MeshManager& mgr,
-		FaceFieldRegistry& freg,
-		const std::string& total_mass_flux_name,
-		const std::string& fw_face_name,
-		double flux_sign_epsilon)
-	{
-		auto mf_total = freg.get<faceScalarField>(total_mass_flux_name.c_str());
-		if (!mf_total) {
-			std::cerr << "[FluxCheck][boundary] total mass flux field '"
-				<< total_mass_flux_name << "' not found.\n";
-			return;
-		}
-
-		std::shared_ptr<faceScalarField> fw_face = nullptr;
-		if (!fw_face_name.empty()) {
-			fw_face = freg.get<faceScalarField>(fw_face_name.c_str());
-			if (!fw_face) {
-				std::cerr << "[FluxCheck][boundary] fw face field '"
-					<< fw_face_name << "' not found.\n";
-			}
-		}
-
-		const Mesh& mesh = mgr.mesh();
-		const auto& faces = mesh.getFaces();
-
-		std::cout << "[FluxCheck][boundary] listing inflow/outflow faces with mf_total & fw\n";
-
-		for (const auto& F : faces)
-		{
-			if (!F.isBoundary()) continue;
-
-			const int iF = F.id - 1;
-			if (iF < 0 || iF >= static_cast<int>(mf_total->data.size())) continue;
-
-			const double flux = (*mf_total)[iF];
-			if (std::abs(flux) <= flux_sign_epsilon) continue; // 视为近似无流
-
-			const bool isInflow = (flux < -flux_sign_epsilon); // 边界 -> owner
-			const bool isOutflow = (flux > flux_sign_epsilon); // owner -> 边界
-
-			if (!isInflow && !isOutflow) continue;
-
-			double fw_val = -1.0;
-			if (fw_face && iF < static_cast<int>(fw_face->data.size())) {
-				fw_val = (*fw_face)[iF];
-			}
-
-			std::cout << "  Face " << F.id
-				<< "  type = " << (isInflow ? "INFLOW " : "OUTFLOW")
-				<< ", mf_total = " << flux;
-
-			if (fw_face) {
-				std::cout << ", fw = " << fw_val;
-			}
-			else {
-				std::cout << ", fw = (not available)";
-			}
-
-			std::cout << "\n";
-		}
-	}
-
 
 	//===============================================//
 	/**

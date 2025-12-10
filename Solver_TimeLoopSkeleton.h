@@ -712,10 +712,6 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed_withWell
 
 		return true;
 	}
-	
-
-	
-
 }
 
 

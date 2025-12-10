@@ -213,7 +213,7 @@ namespace FVM {
                     sys.addA(cell_lid, well_lid, -PI_mass_i);
 
                     // 井行方程 Σ PI_i (p_bh - p_i) = target_mass
-                    // 其中 Σ(PI_i * p_bh) 对应井行对角；Σ(-PI_i * p_i) 是井行的非对角
+                    // 其中 Σ(PI_i) 对应井行对角；Σ(-PI_i ) 是井行的非对角
                     rate_diag_sum += PI_mass_i;
                     sys.addA(well_lid, cell_lid, -PI_mass_i);
                 }
