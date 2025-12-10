@@ -3,13 +3,12 @@
 #include    "TestCapillaryTerm_v2.h"
 #include    "run_IMPES_Iteration_TimeTerm_AnalyticalTest.h"
 #include    "run_IMPES_Iteration_TwoPhase_BL_Numerical.h"
-#include "run_IMPES_Iteration_TwoPhase_Inlet.h"
-#include "run_IMPES_Iteration_TwoPhase_WithWell.h"
+#include "run_IMPES_Iteration_TwoPhase_withWell.h"
 
 
 
 int main()
 {
-    return  run_IMPES_Iteration_TwoPhase_BL_Numerical();
+    return  run_IMPES_Iteration_TwoPhase_WellCase();
 }
 

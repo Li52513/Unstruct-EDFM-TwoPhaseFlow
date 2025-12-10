@@ -11,10 +11,11 @@
  * of the injected fluid.
  */
 
-struct WellDOF_TwoPhase {
+struct WellDOF_TwoPhase 
+{
 
     // --- Enums from the original WellDOF ---
-    enum class Mode { Pressure, Rate, RateWithPressureBias };
+    enum class Mode { Pressure, Rate};
     enum class Role { Injector, Producer };
 
     // --- Core well properties ---
@@ -24,17 +25,13 @@ struct WellDOF_TwoPhase {
 
     // --- Control target value ---
     double target = 0.0;                      // Target value: BHP in [Pa] or total mass flow rate in [kg/s]
-    double weak_pressure_target = 0.0;         // Desired BHP for hybrid modes (Pa)
-    double weak_pressure_weight = 0.0;         // Penalty coefficient for weak BHP control [kg/(s*Pa)]
 
     // === Two-Phase Specific Injection Parameters (for Injectors only) ===
     double Tin = 0.0;                           // Injection temperature T_inj [K]
     double s_w_bh = 1.0;                        // Water saturation of the injected fluid at the wellbore, S_w_bh [-]
                                                 // s_w_bh = 1.0 for pure water injection
                                                 // s_w_bh = 0.0 for pure CO2 injection
-                                                // 0 < s_w_bh < 1 for mixed-phase injection
-	
-
+                                                // 0 < s_w_bh < 1 for mixed-phase injection	
      // --- Fluid properties of the injected fluid ---
     double mu_w_inj = 3e-4;                   // Viscosity of injected water at wellbore conditions [Pa¡¤s]
     double mu_g_inj = 1.5e-5;                 // Viscosity of injected CO2 at wellbore conditions [Pa¡¤s]
@@ -48,7 +45,7 @@ struct WellDOF_TwoPhase {
     std::string PI_field_w;                   // Field name for the WATER phase productivity index (e.g., "PI_w_INJ1")
     std::string PI_field_g;                   // Field name for the GAS (CO2) phase productivity index (e.g., "PI_g_INJ1")
     int    lid = -1;                          // Index in the global unknown vector if solved simultaneously
-    double p_bh = 0.0;                           // Bottom-hole pressure at the wellbore [Pa]
+    double p_bh = 0.0;                        // Bottom-hole pressure at the wellbore [Pa]
 };
 
 /**

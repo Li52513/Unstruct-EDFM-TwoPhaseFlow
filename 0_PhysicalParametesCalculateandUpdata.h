@@ -167,7 +167,7 @@ namespace TwoPhase
 			double p_w = (*p_wF)[i];
 
 			//当前基本物性参数参数为常数
-			(*rho_w)[i] = 1000.0; //kg/m3
+			(*rho_w)[i] = 800.0; //kg/m3
 			(*mu_w)[i] = 1.0e-3; //Pa.s
 			(*drho_w_dp)[i] = 0.0; //kg/m3.Pa
 			
@@ -212,7 +212,7 @@ namespace TwoPhase
 			double p_g = (*p_gF)[i];
 
 			//当前基本物性参数参数为常数
-			(*rho_g)[i] = 800.0; //kg/m3
+			(*rho_g)[i] = 1000.0; //kg/m3
 			(*mu_g)[i] =	1e-3; //Pa.s
 			(*drho_g_dp)[i] = 0.0; //kg/m3.Pa
 

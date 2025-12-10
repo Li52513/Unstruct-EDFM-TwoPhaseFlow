@@ -10,15 +10,22 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
-#include "PressureEqSolver.h"
-#include "SaturationTransportEqAssemblerandSolver.h"
 #include "0_PhysicalParametesCalculateandUpdata.h"
-#include "PostProcess_.h"
-#include "FluxSplitterandSolver.h"
-#include "TwoPhaseWells_StrictRate.h"
+
 #include "Solver_TimeLoopUtils.h"
-#include "IMPES_PostProcessIO.h"
+#include "PressureEqSolver.h"
 #include "FaceMassRateCalculate.h"
+#include "FluxSplitterandSolver.h"
+#include "SaturationTransportEqAssemblerandSolver.h"
+
+#include "PostProcess_.h"
+#include "IMPES_PostProcessIO.h"
+
+#include "TwoPhaseWells_StrictRate.h"
+#include "IMPES_Iteration_WellHelpers.h"
+
+
+
 
 namespace IMPES_Iteration
 {
@@ -26,10 +33,10 @@ namespace IMPES_Iteration
     struct TimeStepControl
     {
         double dt_min = 1e-5;   ///< 允许的最小时间步 [s]
-        double dt_max = 10;   ///< 允许的最大时间步 [s]
+        double dt_max = 50;   ///< 允许的最大时间步 [s]
         double grow_factor = 5;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
-        double safety_factor = 0.9;    ///< 相对于 Redondo 建议步长的安全系数
+        double safety_factor = 0.9;    ///< 步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数
     };
     inline bool runTransient_IMPES_Iteration(
@@ -41,7 +48,7 @@ namespace IMPES_Iteration
         int                        nSteps,
         double                     dt_initial,
          PressureSolveControls& pressureCtrl,
-        const SaturationTransportConfig& satCfg,
+         SaturationTransportConfig& satCfg,
         const FluxSplitConfig& fluxCfg,
         const FaceMassRateConfig& FaceMassRateCfg,   //新增
         int                        writeEveryP = 0,
@@ -134,6 +141,9 @@ namespace IMPES_Iteration
             const size_t nCells = cells.size();
             reg.getOrCreate<volScalarField>(satCfg.water_source_field, nCells, 0.0);
         }
+        // 定义一个水相井源场名
+        constexpr const char* Qw_well_name = "Qw_well";
+
         //===========================================================================================//
 
 
@@ -319,6 +329,56 @@ namespace IMPES_Iteration
                 continue;           // 重新计算该时间段（step 不自增）
             }
 
+            if (accept_step)
+            {
+                // 遍历 wells，找出所有 Pressure 模式的生产井，依次打印
+                for (const auto& w : wells)
+                {
+                    if (w.role == WellDOF_TwoPhase::Role::Producer &&
+                        w.mode == WellDOF_TwoPhase::Mode::Pressure)
+                    {
+                        IMPES_Iteration::debugPrintPeacemanPIAndRate(
+                            mgr,
+                            reg,
+                            w,
+                            pressureCtrl.assembly.pressure_field  // 一般是 "p_w"
+                        );
+                    }
+                    if (w.role == WellDOF_TwoPhase::Role::Producer &&
+                        w.mode == WellDOF_TwoPhase::Mode::Rate)
+                    {
+                        IMPES_Iteration::debugPrintPeacemanPIAndRate(
+                            mgr,
+                            reg,
+                            w,
+                            pressureCtrl.assembly.pressure_field  // 一般是 "p_w"
+                        );
+                    }
+                    if (w.role == WellDOF_TwoPhase::Role::Injector &&
+                        w.mode == WellDOF_TwoPhase::Mode::Pressure)
+                    {
+                        IMPES_Iteration::debugPrintPeacemanPIAndRate(
+                            mgr,
+                            reg,
+                            w,
+                            pressureCtrl.assembly.pressure_field  // 一般是 "p_w"
+                        );
+                    }
+                    if (w.role == WellDOF_TwoPhase::Role::Injector &&
+                        w.mode == WellDOF_TwoPhase::Mode::Rate)
+                    {
+                        IMPES_Iteration::debugPrintPeacemanPIAndRate(
+                            mgr,
+                            reg,
+                            w,
+                            pressureCtrl.assembly.pressure_field  // 一般是 "p_w"
+                        );
+                    }
+
+                }
+            }
+
+
             /// 1.4 压力收敛后：构建面质量通量
             if (accept_step)
             {
@@ -327,6 +387,8 @@ namespace IMPES_Iteration
                     std::cerr << "[IMPES_Iteration] buildFaceMassRates failed after pressure convergence.\n";
                     accept_step = false;
                 }
+
+
             }
             /// 1.5 两相通量分配，mf_total -> mf_w / mf_g
             FluxSplitResult fluxRep; // 可选：用于收集诊断信息（max|fw-?, ...）
@@ -349,6 +411,12 @@ namespace IMPES_Iteration
                 );
             }
 
+            if (!IMPES_Iteration::buildWaterSourceFieldFromWells(mgr, reg, wells, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params, pressureCtrl.assembly.pressure_field, Qw_well_name))
+            {
+                std::cerr << "[IMPES][Well] failed to build water well sources, abort step.\n";
+                return false;
+            }
+            satCfg.water_source_field = Qw_well_name;
             /// 1.5 显式推进水相饱和度 S_w
             SaturationStepStats satStats;
             if (accept_step)

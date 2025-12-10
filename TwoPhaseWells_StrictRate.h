@@ -9,6 +9,7 @@
 #include "Solver_AssemblerCOO.h"
 #include "CapRelPerm.h"   // VGParams, RelPermParams, kr_Mualem_vG
 #include "WellConfig_TwoPhase.h"    // WellDOF_TwoPhase (mode, role, target, Tin, etc.)
+#include "0_PhysicalParametesCalculateandUpdata.h"
 
 namespace FVM {
     namespace TwoPhaseWellsStrict 
@@ -118,12 +119,9 @@ namespace FVM {
             // 0) 井自己的 DOF 行：Pressure 模式直接钉住 P_bh
             const bool isPressureMode = (well.mode == WellDOF_TwoPhase::Mode::Pressure);
             const bool isPureRateMode = (well.mode == WellDOF_TwoPhase::Mode::Rate);
-            const bool isHybridRateMode = (well.mode == WellDOF_TwoPhase::Mode::RateWithPressureBias);
-            const bool treatAsRateMode = (isPureRateMode || isHybridRateMode);
-            const double weak_penalty = treatAsRateMode ? std::max(0.0, well.weak_pressure_weight) : 0.0;
-            const double weak_rhs = weak_penalty * well.weak_pressure_target;
 
-            if (well.mode == WellDOF_TwoPhase::Mode::Pressure) {
+            if (well.mode == WellDOF_TwoPhase::Mode::Pressure) 
+            {
                 sys.addA(well_lid, well_lid, 1.0);
                 sys.addb(well_lid, well.target);   ///< P_bh = target (Pa)
             }
@@ -138,11 +136,11 @@ namespace FVM {
                 return;
             }
 
-            // 2) 储层相动度与密度场（用于 Producer / Pressure 模式）
-            auto lambda_w_field = reg.get<volScalarField>("lambda_w");
-            auto lambda_g_field = reg.get<volScalarField>("lambda_g");
-            auto rho_w_field = reg.get<volScalarField>("rho_w");
-            auto rho_g_field = reg.get<volScalarField>("rho_g");
+            // 2) 储层相动度与密度场（用于 Producer / Pressure 模式）代替换
+            auto lambda_w_field = reg.get<volScalarField>(TwoPhase::Water().lambda_w_tag);
+            auto lambda_g_field = reg.get<volScalarField>(TwoPhase::CO2().lambda_g_tag);
+            auto rho_w_field = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
+            auto rho_g_field = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
 
             if (!lambda_w_field || !lambda_g_field || !rho_w_field || !rho_g_field) {
                 std::cerr << "[TwoPhaseWellsStrict] Missing fields "
@@ -220,17 +218,11 @@ namespace FVM {
                     sys.addA(well_lid, cell_lid, -PI_mass_i);
                 }
             }
-
-            // 5) Rate 模式井行对角和 RHS
-            if (treatAsRateMode) {
-                double total_diag = rate_diag_sum + weak_penalty;
-                if (total_diag <= kTiny) {
-                    std::cerr << "[TwoPhaseWellsStrict] Rate-mode well " << well.name
-                        << " has zero total PI, skip.\n";
-                    return;
-                }
-                sys.addA(well_lid, well_lid, total_diag);
-                sys.addb(well_lid, well.target + weak_rhs);   ///< target ????? ??(dotM_i) = target (kg/s)
+            // 5) Rate 井：补井行对角和 RHS
+            if (isPureRateMode && rate_diag_sum > kTiny)
+            {
+                sys.addA(well_lid, well_lid, rate_diag_sum);
+                sys.addb(well_lid, well.target); // target 单位 kg/s
             }
         }
         //======================================================================//
@@ -263,6 +255,17 @@ namespace FVM {
          * @param[out] Mg_cell         单元气相质量流率（kg/s），流入单元为正
          */
 
+         /**
+          * \brief 基于已求解的井底压力与单元压力，计算完井单元上的相质量流率。
+          *
+          * Pressure 模式关键修复：
+          *  - 压力方程中，定压井采用 well.target 作为井底压力 P_bh 参与耦合；
+          *  - 为保持一致性，这里也应使用 P_bh = well.target 来计算质量流率，
+          *    而不能依赖可能未更新的 well.p_bh。
+          *
+          * Rate 模式：
+          *  - P_bh 来自线性系统解出的未知量 well.p_bh，维持原有设计。
+          */
         inline bool compute_well_phase_mass_rates_strict(
             MeshManager& mgr,
             const FieldRegistry& reg,
@@ -306,6 +309,9 @@ namespace FVM {
             Mg_cell.assign(Nc, 0.0);
 
             const bool isInjector = (well.role == WellDOF_TwoPhase::Role::Injector);
+            const bool isPressureMode = (well.mode == WellDOF_TwoPhase::Mode::Pressure);
+            const bool isRateMode = (well.mode == WellDOF_TwoPhase::Mode::Rate);
+
             InjectionMixtureProps injProps;
             if (isInjector) {
                 injProps = computeInjectionMixtureProps(well, vg_params, rp_params);
@@ -316,12 +322,24 @@ namespace FVM {
                 }
             }
 
-            const double p_bh = well.p_bh;  ///< 假定外层已用压力解更新 well.p_bh
+            // ---- 关键修复：定义“有效井底压力” p_bh_eff ----
+            // Pressure 模式：p_bh_eff = target (Pa)
+            // Rate    模式：p_bh_eff = well.p_bh（线性系统解出的未知量）
+            double p_bh_eff = 0.0;
+            if (isPressureMode) {
+                p_bh_eff = well.target;     // 这里的 target 单位为 Pa
+            }
+            else if (isRateMode) {
+                p_bh_eff = well.p_bh;       // 由压力求解器更新
+            }
+            else {
+                // 理论上不会到这里，兜个底
+                p_bh_eff = well.p_bh;
+            }
 
             const auto& id2idx = mesh.getCellId2Index();
 
-            // 用于总质量流量 check（可选）
-            double Mtot_well = 0.0;
+            double Mtot_well = 0.0; // 统计总质量流量（用于日志）
 
             for (int ic = 0; ic < Nc; ++ic)
             {
@@ -329,10 +347,10 @@ namespace FVM {
                 if (c.id < 0) continue;
                 const size_t i = id2idx.at(c.id);
 
-                if (i >= mask_field->data.size() ||
-                    i >= WI_field->data.size()) continue;
+                if (i >= mask_field->data.size() || i >= WI_field->data.size())
+                    continue;
 
-                if ((*mask_field)[i] <= 1e-12) continue; // 非完井
+                if ((*mask_field)[i] <= 1e-12) continue; // 非完井单元
 
                 const double WI_i = (*WI_field)[i];
                 if (WI_i <= 0.0) continue;
@@ -367,31 +385,57 @@ namespace FVM {
 
                 if (lambda_mass_i <= kTiny) continue;
 
-                double dotM_tot_i = WI_i * lambda_mass_i * (p_bh - p_cell);
+                // 使用 p_bh_eff，保证 Pressure 井与压力方程中用到的 BHP 一致
+                double dotM_tot_i = WI_i * lambda_mass_i * (p_bh_eff - p_cell);
 
                 if (isInjector) {
-                    // 注入井：只允许流入地层（流入为正）
+                    // 注入井：只允许流入地层（>0），流出则截断为 0
                     if (dotM_tot_i < 0.0) dotM_tot_i = 0.0;
                 }
                 else {
-                    // 生产井：dotM_tot_i 应为负（流出单元）
+                    // 生产井：只允许流出（<0），流入则截断为 0
                     if (dotM_tot_i > 0.0) dotM_tot_i = 0.0;
                 }
 
                 const double dotM_w_i = fw_mass_i * dotM_tot_i;
                 const double dotM_g_i = dotM_tot_i - dotM_w_i;
 
-                // 约定：流入单元为正，流出单元为负
                 Mw_cell[ic] += dotM_w_i;
                 Mg_cell[ic] += dotM_g_i;
 
                 Mtot_well += dotM_tot_i;
             }
 
-            // 可选：输出 check，特别在 Injector + Rate 模式下，Mtot_well 应接近 well.target
+            // ---- 日志输出：根据模式区分 target 的物理含义 ----
+            if (isRateMode) {
+                std::cout << "[TwoPhaseWellsStrict] Well '" << well.name
+                    << "' total mass rate (computed) = " << Mtot_well
+                    << " kg/s, target = " << well.target << " kg/s\n";
+            }
+            else {
+                std::cout << "[TwoPhaseWellsStrict] Well '" << well.name
+                    << "' total mass rate (computed) = " << Mtot_well
+                    << " kg/s, BHP target = " << well.target << " Pa\n";
+            }
+
+            double Mw_tot = 0.0;
+            double Mg_tot = 0.0;
+            for (int ic = 0; ic < Nc; ++ic) 
+            {
+                Mw_tot += Mw_cell[ic];
+                Mg_tot += Mg_cell[ic];
+            }
+
+            // 注意：对采出井，Mw_tot 和 Mg_tot 都是负数（流出单元）
+            // 用绝对值看比例更直观
+            double Mw_abs = std::abs(Mw_tot);
+            double Mg_abs = std::abs(Mg_tot);
+            double fw_mass_well = Mw_abs / (Mw_abs + Mg_abs + 1e-30);
+
             std::cout << "[TwoPhaseWellsStrict] Well '" << well.name
-                << "' total mass rate (computed) = " << Mtot_well
-                << " kg/s, target = " << well.target << " kg/s\n";
+                << "' Mw_tot = " << Mw_tot << " kg/s, "
+                << "Mg_tot = " << Mg_tot << " kg/s, "
+                << "fw_mass(well) = " << fw_mass_well << "\n";
 
             return true;
         }

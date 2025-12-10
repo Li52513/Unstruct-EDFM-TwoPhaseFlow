@@ -1,310 +1,212 @@
-#pragma once
+﻿#pragma once
 #include <algorithm>
-#include <numeric>
 #include <string>
 #include <vector>
 #include <iostream>
 
-#include "0_PhysicalParametesCalculateandUpdata.h"
-#include "IMPES_Iteration_Loop.h"
-#include "WellConfig_TwoPhase.h"
-#include "TwoPhaseWells_StrictRate.h"
-
-namespace
-{
-    template <typename T>
-    inline T clampValue(T value, T lo, T hi)
-    {
-        return std::max(lo, std::min(hi, value));
-    }
-}
-
-namespace WellDetail
-{
-    template <typename T>
-    inline T clampValue(T value, T lo, T hi)
-    {
-        return std::max(lo, std::min(hi, value));
-    }
-}
-
+#include    "0_PhysicalParametesCalculateandUpdata.h"
+#include    "IMPES_Iteration_Loop.h"
+#include    "WellConfig_TwoPhase.h"  
 /**
- * @brief Waterflood-style IMPES run: pure-water injector displaces reservoir CO2.
+ * @brief Two-phase IMPES test with Peaceman wells (1 injector + 1 producer).
  *
- * Scenario summary:
- *  - Domain size extended to 240 m (x) �� 60 m (y) so the flood front has travel distance.
- *  - Grid: 120 �� 30 quadrilateral sections, orthogonal correction enabled.
- *  - Boundaries: no-flow Neumann on all sides; flow is entirely well-driven.
- *  - Initial water saturation is only slightly above Swr, meaning the reservoir is mainly CO2.
- *  - Injector near the left boundary (30 m, 30 m) delivers 60 kg/s of almost pure water.
- *  - Producer on the right boundary (210 m, 30 m) is pressure-controlled at 8.8 MPa,
- *    so production is initially CO2 until the water front arrives.
+ * 工况：
+ *  - 域：1 m × 1 m，厚度 H = 1 m
+ *  - 网格：50 × 50
+ *  - 边界：上下左右 全部无流（Neumann，∂p/∂n = 0）
+ *  - 初始：p_w = 9 MPa，s_w = 0.2
+ *          VG: Swr = 0.1, Sgr = 0.15
+ *  - 井：
+ *      注入井 INJ：pos = (0.25, 0.25)，rw=0.001, H=1.0, maxHitCells=1
+ *                  Mode = Rate, target = 5 kg/s，总质量注入为纯水（s_w_bh=1）
+ *      采出井 PROD：pos = (0.75, 0.75)，rw=0.001, H=1.0, maxHitCells=1
+ *                  Mode = Pressure, target = 8 MPa
  */
-int run_IMPES_Iteration_TwoPhase_WithWell()
+
+int run_IMPES_Iteration_TwoPhase_WellCase()
 {
-    // ---------- 0. Geometry and mesh ----------
-    const double lengthX = 240.0;
-    const double lengthY = 60.0;
+    // ---------------- 0. 网格与场注册 ----------------
+    const double lengthX = 1.0;   // [m]
+    const double lengthY = 1.0;    // 几乎 1D
     const double lengthZ = 0.0;
 
-    const int sectionNumX = 120;
-    const int sectionNumY = 30;
+    const int sectionNumX = 50;    // 细一点，方便看前沿
+    const int sectionNumY = 50;
     const int sectionNumZ = 0;
 
     const bool usePrism = true;
     const bool useQuadBase = false;
 
-    std::cout << "\n===== [CASE] IMPES two-phase with rate-controlled wells =====\n";
-    std::cout << "--- IMPES: building mesh (240m x 60m, 120x30 sections) ---\n";
+    std::cout << "\n===== [TEST] IMPES two-phase (1D Buckley–Leverett, numerical only) =====\n";
+    std::cout << "--- IMPES: building mesh (1D BL test) ---\n";
 
     MeshManager mgr(lengthX, lengthY, lengthZ,
         sectionNumX, sectionNumY, sectionNumZ,
         usePrism, useQuadBase);
-    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OrthogonalCorrection);
+    mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OverRelaxed);
 
     FieldRegistry     reg;
     FaceFieldRegistry freg;
 
-    // ---------- 1. Primary field initialization ----------
+    // ---------- 1. 初始主变量场 ----------
+    std::cout << "--- IMPES: initializing primary fields ---\n";
+
+    // 4. VG / 相对渗透率参数：进一步减小 Pc
     VGParams vg_params;
-    vg_params.Swr = 0.12;
-    vg_params.Sgr = 0.1;
-    vg_params.alpha = 2.5e-4;
-    vg_params.n = 2.0;
-
+    vg_params.Swr = 0.1;  // 少量束缚水
+    vg_params.Sgr = 0.15;  // 适当残余气，避免气相端点过头
+    vg_params.alpha = 1e-4;   // 保持 Pc 小
+    vg_params.n = 2.0;   // 曲线更平缓，前沿不至于过陡
     RelPermParams rp_params;
-    rp_params.L = 0.4;
+    rp_params.L = 0.5;       // Mualem 默认，减缓相对渗透率陡峭度
 
+    // 初始场
     InitFields ic;
-    ic.p_w0 = 1.0e7;
+    ic.p_w0 = 9e6;      // 初始水相压力 9 MPa
     ic.dp_wdx = 0.0;
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
-    // Start just above Swr so the formation mainly contains CO2.
-    const double sw_background = WellDetail::clampValue(vg_params.Swr + 0.01, vg_params.Swr + 1e-5, 1.0 - vg_params.Sgr - 1e-5);
-    ic.s_w = sw_background;
+    ic.s_w = 0.2;      // 初始水相饱和度
 
-    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
-        mgr.mesh(), reg, "p_w", "s_w", "T");
-    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(
-        mgr.mesh(), reg, ic);
+    IMPES_Iteration::PressureEquation_String P_Eq;
+    IMPES_Iteration::SaturationEquation_String S_Eq;
+    IMPES_Iteration::FaceMassRate_String Mf_Eq;
+    IMPES_Iteration::FluxSplitConfig_String Fsp_Eq;
 
-    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
-    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    // 主变量场：水相压力 p_w、水相饱和度 s_w、温度 T
+    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, P_Eq.pressure_field, S_Eq.saturation, "T");
+    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+
+    // 时间层：old / prev（p_w、s_w、p_g 都准备好）
+    ensureTransientFields_scalar(mgr.mesh(), reg, P_Eq.pressure_field, P_Eq.pressure_old_field, P_Eq.pressure_prev_field);
+    ensureTransientFields_scalar(mgr.mesh(), reg, S_Eq.saturation, S_Eq.saturation_old, S_Eq.saturation_prev);
     ensureTransientFields_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
 
-    // ---------- 2. Rock/fluid preparation ----------
+    // ---------- 2. 基岩区域分类与固相物性 ----------
     PhysicalPropertiesManager ppm;
     ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
-    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateMatrixRockAt(mgr, reg, P_Eq.pressure_field, "T");
 
-    // ---------- 3. Boundary conditions (no-flow) ----------
+    // ---------- 3. 压力边界条件（左高右低，其他 no-flow） ----------
     const auto& bfaces = mgr.boundaryFaces();
     PressureBC::Registry pbc_pw;
-    PressureBC::BoundaryCoefficient noFlow{ 0.0, 1.0, 0.0 };
-    PressureBC::setBoxBCs2D(pbc_pw, bfaces, noFlow, noFlow, noFlow, noFlow);
+    PressureBC::BoundaryCoefficient P_Left{ 0.0, 1.0, 0.0 }; // ∂p/∂n = 0
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
+    PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
+
+    PressureBC::setBoxBCs2D(pbc_pw, bfaces,
+        P_Left, P_Right, P_Down, P_Up);
     PressureBCAdapter PbcA{ pbc_pw };
 
-    // ---------- 4. Well configurations ----------
+    // ---------- 4. 井配置（BL 测试：无井源） ----------
     std::vector<WellConfig_TwoPhase> wells_cfg;
+    // 4.1 注入井 INJ
+    {
+        WellConfig_TwoPhase inj;
+        inj.name = "INJ";
+        inj.role = WellDOF_TwoPhase::Role::Injector;
+        inj.mode = WellDOF_TwoPhase::Mode::Rate;    // 质量流量控制
+        inj.target = 0.03;                           // 5 kg/s 总质量注入
 
-    WellConfig_TwoPhase inj;
-    inj.name = "INJ_A";
-    inj.role = WellDOF_TwoPhase::Role::Injector;
-    inj.mode = WellDOF_TwoPhase::Mode::Rate;
-    inj.target = 60.0; // kg/s
-    inj.weak_pressure_target = 1.15e7; // Pa
-    inj.weak_pressure_weight = 5e-8;
-    inj.Tin = 330.0;
-    inj.s_w_bh = 0.999; // virtually pure water
-    inj.mu_w_inj = 1.0e-3;
-    inj.mu_g_inj = 5e-3;
-    inj.rho_w_inj = 1000.0;
-    inj.rho_g_inj = 800.0;
-    inj.cp_w_inj = 4200.0;
-    inj.cp_g_inj = 1400.0;
-    inj.geom.name = inj.name;
-    inj.geom.pos = Vector{ 30.0, 30.0, 0.0 };
-    inj.geom.rw = 0.1;
-    inj.geom.skin = 0.0;
-    inj.geom.H = 30.0;
-    inj.geom.perfRadius = 7.5;
-    inj.geom.maxHitCells = 6;
-    inj.pm_2p.reFactor = 0.28;
-    inj.pm_2p.fallbackKh = 2.0e-14;
-    wells_cfg.push_back(inj);
+        inj.Tin = 300.0;                            // 注入温度，随意设置一个值，占位
+        inj.s_w_bh = 1.0;                           // 纯水注入
 
-    WellConfig_TwoPhase prod;
-    prod.name = "PROD_B";
-    prod.role = WellDOF_TwoPhase::Role::Producer;
-    prod.mode = WellDOF_TwoPhase::Mode::Pressure;
-    prod.target = 8.8e6; // Pa
-    prod.Tin = 315.0;
-    prod.s_w_bh = 0.05;
-    prod.mu_w_inj = 1.0e-3;
-    prod.mu_g_inj = 5e-3;
-    prod.rho_w_inj = 1000.0;
-    prod.rho_g_inj = 800.0;
-    prod.cp_w_inj = 4200.0;
-    prod.cp_g_inj = 1400.0;
-    prod.geom.name = prod.name;
-    prod.geom.pos = Vector{ 210.0, 30.0, 0.0 };
-    prod.geom.rw = 0.1;
-    prod.geom.skin = 0.0;
-    prod.geom.H = 30.0;
-    prod.geom.perfRadius = 7.5;
-    prod.geom.maxHitCells = 6;
-    prod.pm_2p.reFactor = 0.28;
-    prod.pm_2p.fallbackKh = 2.0e-14;
-    wells_cfg.push_back(prod);
+        inj.geom.pos = Vector{ 0.25 * lengthX,0.25 * lengthY ,0.0 };
+        inj.geom.rw = 0.001;                        // 井筒半径
+        inj.geom.skin = 0.0;
+        inj.geom.H = 1.0;                           // 有效厚度
+        inj.geom.perfRadius = 0.0;                  // 0 => 用最近 maxHitCells 个单元
+        inj.geom.maxHitCells = 1;                   // 只完井最近的 1 个单元
+        
+        wells_cfg.push_back(inj);
+    }
 
+    //4.2 采出井
+    {
+        WellConfig_TwoPhase prod;
+        prod.name = "PROD";
+        prod.role = WellDOF_TwoPhase::Role::Producer;
+        prod.mode = WellDOF_TwoPhase::Mode::Rate; // BHP 控制
+        prod.target = -0.03;                             // 8 MPa
+
+        prod.Tin = 300.0;  // 对产井无实际意义，仅占位
+        prod.s_w_bh = 1.0;    // 占位
+
+        prod.geom.pos = Vector{ 0.75 * lengthX, 0.75 * lengthY, 0.0 };
+        prod.geom.rw = 0.001;
+        prod.geom.skin = 0.0;
+        prod.geom.H = 1.0;
+        prod.geom.perfRadius = 0.0;
+        prod.geom.maxHitCells = 1;
+
+        wells_cfg.push_back(prod);
+    }
+
+    // 4.3 基于几何构建完井掩码 + WI
     build_masks_and_WI_for_all(mgr, reg, wells_cfg);
 
     const int Ncells = static_cast<int>(mgr.mesh().getCells().size());
     std::vector<WellDOF_TwoPhase> wells_dof;
     register_well_dofs_for_all_TwoPhase(Ncells, wells_cfg, wells_dof);
 
-    // ---------- 5. Saturation transport configuration ----------
+    // ---------- 7. 饱和度方程配置 ----------
     IMPES_Iteration::SaturationTransportConfig satCfg;
-    satCfg.saturation = "s_w";
-    satCfg.saturation_old = "s_w_old";
-    satCfg.saturation_prev = "s_w_prev";
-    satCfg.water_source_field = "well_source_mass_w";
     satCfg.VG_Parameter.vg_params = vg_params;
     satCfg.VG_Parameter.relperm_params = rp_params;
-    satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::RedondoLike;
-    satCfg.CFL_safety = 0.6;
-    satCfg.dS_max = 0.05;
+    satCfg.dS_max = 0.1;
+    satCfg.CFL_safety = 0.8;
+    satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::SimpleCFL;
 
-    // ---------- 6. Pressure solver configuration ----------
+    // ---------- 8. 压力方程组装与求解控制参数 ----------   
     IMPES_Iteration::PressureSolveControls pCtrl;
-    pCtrl.max_outer = 2;
-    pCtrl.tol_abs = 1e-2;
+    //组装
+    pCtrl.assembly.VG_Parameter.vg_params = vg_params;
+    pCtrl.assembly.VG_Parameter.relperm_params = rp_params;
+    pCtrl.assembly.enable_buoyancy = false;
+    pCtrl.assembly.gradient_smoothing = 6;
+    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
+
+    pCtrl.max_outer = 1000;        // 常物性可保持很小
+    pCtrl.tol_abs = 1e8;
     pCtrl.tol_rel = 1e-4;
     pCtrl.under_relax = 1;
     pCtrl.verbose = true;
-    pCtrl.assembly.enable_buoyancy = false;
-    pCtrl.assembly.gradient_smoothing = 1;
-    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
-   // pCtrl.assembly.dirichlet_zero_flux_tol = 0.0;
 
-    // ---------- 7. Mass-flux splitting configuration ----------
+    // ----------- 9. 面通量计算配置---------------
+    IMPES_Iteration::FaceMassRateConfig m_FCtrl;
+    m_FCtrl.clamp_dirichlet_backflow = true;
+    m_FCtrl.dirichlet_zero_flux_tol = 1e-10;
+    m_FCtrl.enable_conservation_check = true;
+    m_FCtrl.flux_check_tol = 1e-10;
+
+    // ---------- 9. 两相通量拆分配置 ----------
     IMPES_Iteration::FluxSplitConfig fluxCfg;
+    fluxCfg.boundary_inflow_fw = 1;
+    fluxCfg.enforce_boundary_inflow_fw = true;
+    fluxCfg.flux_sign_epsilon = 1e-10;
     fluxCfg.pressure_bc = &PbcA;
 
-    // ---------- 8. Initialize Pc/p_g/old property layers ----------
-    {
-        TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, "s_w", vg_params, rp_params);
+    // ---------- 11. IMPES 主时间推进 ----------
+    const int    nSteps = 10000;
+    double       dt_initial = 1e-7;   // 更保守的初始时间步
 
-        auto p_w = reg.get<volScalarField>("p_w");
-        auto p_g = reg.get<volScalarField>("p_g");
-        auto p_w_old = reg.get<volScalarField>("p_w_old");
-        auto p_w_prev = reg.get<volScalarField>("p_w_prev");
-        auto p_g_old = reg.get<volScalarField>("p_g_old");
-        auto p_g_prev = reg.get<volScalarField>("p_g_prev");
-        auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
-        const auto& cells = mgr.mesh().getCells();
-        const auto& id2idx = mgr.mesh().getCellId2Index();
-        for (const auto& c : cells)
-        {
-            if (c.id < 0) continue;
-            const size_t i = id2idx.at(c.id);
-            const double pg = (*p_w)[i] + (*Pc)[i];
-            (*p_g)[i] = pg;
-            (*p_g_old)[i] = pg;
-            (*p_g_prev)[i] = pg;
-            (*p_w_old)[i] = (*p_w)[i];
-            (*p_w_prev)[i] = (*p_w)[i];
-        }
+    const int writeEveryP = 100;
+    const int writeEverySw = 100;
 
-        TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, "p_w", "T");
-        TwoPhase::updateCO2BasicPropertiesAtStep(mgr, reg, "p_g", "T");
-        TwoPhase::copyBasicPropertiesToOldLayer(reg);
-    }
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case9/p_impes_ps_withwell/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case9/s_impes_ps_withwell/s_ps";
+    const int snapshotEveryCsv = 100;
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case9/ps_state_withwell";
 
-    // ---------- 9. Time-stepping controls ----------
-    const int    nSteps = 4500;
-    double       dt_initial = 2.5e-3;
-
-    const int writeEveryP = 1;
-    const int writeEverySw = 1;
-
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case7/p_impes_ps_revised/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case7/s_impes_ps_revised/s_ps";
-    const int snapshotEveryCsv = 1;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case7/waterflood_ps_state";
-    std::vector<std::string> snapshotFields = { "p_w", "s_w" };
-
-    std::cout << "--- IMPES: start transient run (two-phase with wells) ---\n";
-
-    /*const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration
-    (
-        mgr,
-        reg,
-        freg,
-        PbcA,
-        wells_dof,
-        nSteps,
-        dt_initial,
-        pCtrl,
-        satCfg,
-        fluxCfg,
-        writeEveryP,
-        writeEverySw,
-        outPrefixP,
-        outPrefixSw,
-        snapshotEveryCsv,
-        snapshotPrefix,
-        snapshotFields
-    );
-
+    std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
+    const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);
     if (!ok)
     {
-        std::cerr << "[CASE] IMPES transient run with wells failed.\n";
+        std::cerr << "[BL-TEST] IMPES transient run failed.\n";
         return EXIT_FAILURE;
-    }*/
+    }
 
-    auto reportWellRates = [&]()
-    {
-        auto modeToString = [](WellDOF_TwoPhase::Mode mode)
-        {
-            switch (mode)
-            {
-            case WellDOF_TwoPhase::Mode::Pressure: return "Pressure";
-            case WellDOF_TwoPhase::Mode::Rate: return "Rate";
-            case WellDOF_TwoPhase::Mode::RateWithPressureBias: return "Rate+BHP";
-            default: return "Unknown";
-            }
-        };
-        std::cout << "\n[CASE] Well mass-flow summary (kg/s):\n";
-        std::vector<double> Mw_cell, Mg_cell;
-        for (const auto& well : wells_dof)
-        {
-            if (!FVM::TwoPhaseWellsStrict::compute_well_phase_mass_rates_strict(
-                mgr,
-                reg,
-                well,
-                satCfg.VG_Parameter.vg_params,
-                satCfg.VG_Parameter.relperm_params,
-                pCtrl.assembly.pressure_field,
-                Mw_cell,
-                Mg_cell))
-            {
-                std::cerr << "  * " << well.name << ": unable to evaluate rates.\n";
-                continue;
-            }
-            const double totalMw = std::accumulate(Mw_cell.begin(), Mw_cell.end(), 0.0);
-            const double totalMg = std::accumulate(Mg_cell.begin(), Mg_cell.end(), 0.0);
-            const double totalMass = totalMw + totalMg;
-            std::cout << "  * " << well.name
-                << " [" << (well.role == WellDOF_TwoPhase::Role::Injector ? "Injector" : "Producer")
-                << ", " << modeToString(well.mode)
-                << "] Mw=" << totalMw << ", Mg=" << totalMg << ", total=" << totalMass << "\n";
-        }
-    };
-
-    reportWellRates();
-
-    std::cout << "[CASE] IMPES wells case finished successfully.\n";
+    std::cout << "[BL-TEST] IMPES two-phase Buckley–Leverett numerical test finished successfully.\n";
     return EXIT_SUCCESS;
 }

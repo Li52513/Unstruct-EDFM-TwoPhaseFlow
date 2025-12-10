@@ -8,16 +8,14 @@
 /**
  * @namespace PeacemanTwoPhase
  * @brief Handles pre-computation for the Peaceman well model in a two-phase context.
- *        This module is fully independent of the single-phase well model.
  */
-namespace PeacemanTwoPhase {
+namespace PeacemanTwoPhase 
+{
 
     /**
      * @struct WellSpec
      * @brief Defines the geometric and physical specifications of a well.
      *
-     * This is a self-contained definition for the two-phase module, ensuring
-     * no dependency on the single-phase implementation.
      */
     struct WellSpec
     {

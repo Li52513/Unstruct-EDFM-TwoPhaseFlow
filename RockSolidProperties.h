@@ -11,7 +11,7 @@ namespace rock
     static constexpr double BASE_RHO = 2650.0;  // 密度
     static constexpr double BASE_CP = 1000.0;   // 比热容
     static constexpr double BASE_K = 2.5;       // 导热系数
-    static constexpr double BASE_COMP = 1e-9;   // 可压缩系数
+    static constexpr double BASE_COMP = 1e-8;   // 可压缩系数
 
     // 函数定义
     inline SolidProperties_RockMatrix computeSolidProperties(Cell::RegionType region, double P, double T)
@@ -28,7 +28,7 @@ namespace rock
         case Cell::RegionType::Low:
             s.phi_r = 0.3;  s.kxx = 1e-15; s.kyy = 1e-15; s.kzz = 1e-15;  break;
         case Cell::RegionType::Medium:
-            s.phi_r = 0.2;  s.kxx = 1e-14; s.kyy = 1e-14; s.kzz = 1e-14; break;
+            s.phi_r = 0.5;  s.kxx = 1e-14; s.kyy = 1e-14; s.kzz = 1e-14; break;
         case Cell::RegionType::High:
             s.phi_r = 0.3;  s.kxx = 1e-11; s.kyy = 1e-11; s.kzz = 1e-11; break;
         }

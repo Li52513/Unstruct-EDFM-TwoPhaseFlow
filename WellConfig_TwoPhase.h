@@ -8,7 +8,8 @@
  * @struct WellConfig_TwoPhase
  * @brief Unified configuration for a two-phase well, fully decoupled from single-phase modules.
  */
-struct WellConfig_TwoPhase {
+struct WellConfig_TwoPhase 
+{
     // --- Basic Identification ---
     std::string name;
     WellDOF_TwoPhase::Role role;
@@ -21,8 +22,6 @@ struct WellConfig_TwoPhase {
     // ... (rest of the struct is identical to the previous version) ...
     WellDOF_TwoPhase::Mode mode;
     double target;
-    double weak_pressure_target;
-    double weak_pressure_weight;
     double Tin;
     double s_w_bh;
     double mu_w_inj;
@@ -41,7 +40,7 @@ struct WellConfig_TwoPhase {
     WellConfig_TwoPhase() :
         role(WellDOF_TwoPhase::Role::Injector),
         mode(WellDOF_TwoPhase::Mode::Pressure),
-        target(0.0), weak_pressure_target(0.0), weak_pressure_weight(0.0), Tin(0.0), s_w_bh(1.0), mu_w_inj(3e-4), mu_g_inj(1.5e-5), rho_w_inj(980.0), rho_g_inj(700.0), cp_w_inj(4200.0), cp_g_inj(1200.0), lid(-1) {
+        target(0.0), Tin(0.0), s_w_bh(1.0), mu_w_inj(3e-4), mu_g_inj(1.5e-5), rho_w_inj(980.0), rho_g_inj(700.0), cp_w_inj(4200.0), cp_g_inj(1200.0), lid(-1) {
     }
 
     void derive_names_if_empty() {
@@ -50,14 +49,13 @@ struct WellConfig_TwoPhase {
         if (pw_name.empty())   pw_name = "p_w_" + name;
     }
 
-    WellDOF_TwoPhase toWellDOF() const {
+    WellDOF_TwoPhase toWellDOF() const 
+    {
         WellDOF_TwoPhase w;
         w.name = pw_name;
         w.role = role;
         w.mode = mode;
         w.target = target;
-        w.weak_pressure_target = weak_pressure_target;
-        w.weak_pressure_weight = weak_pressure_weight;
         w.Tin = Tin;
         w.s_w_bh = s_w_bh;
         w.mu_w_inj = mu_w_inj;
@@ -87,7 +85,8 @@ inline void build_masks_and_WI_for_all(
     std::cout << "--- Building Masks and Well Indices for all Two-Phase Wells ---\n";
     for (auto& well : wells) {
         well.derive_names_if_empty();
-        PeacemanTwoPhase::build_well_mask_and_WI(
+        PeacemanTwoPhase::build_well_mask_and_WI
+        (
             mgr, reg, well.geom, well.pm_2p,
             well.mask_name, well.WI_name
         );
@@ -113,14 +112,16 @@ inline int register_well_dofs_for_all_TwoPhase(
 {
     wells_dof.clear();
     wells_dof.reserve(wells_cfg.size());
-    for (const auto& cfg : wells_cfg) {
+    for (const auto& cfg : wells_cfg) 
+    {
         wells_dof.push_back(cfg.toWellDOF());
     }
 
     const int N_total = register_well_unknowns_TwoPhase(Nc, wells_dof);
 
     // Back-fill the lid into the config structure for convenience
-    for (size_t i = 0; i < wells_cfg.size(); ++i) {
+    for (size_t i = 0; i < wells_cfg.size(); ++i) 
+    {
         wells_cfg[i].lid = wells_dof[i].lid;
     }
 

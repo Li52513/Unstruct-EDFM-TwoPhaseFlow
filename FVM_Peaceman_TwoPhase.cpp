@@ -8,7 +8,8 @@
 #include <iostream> // For std::cout and std::cerr
 
 // An anonymous namespace to keep helper functions local to this file.
-namespace {
+namespace
+{
 
     constexpr double kPI = 3.14159265358979323846;
 
@@ -37,10 +38,17 @@ namespace {
         // Prioritize anisotropic permeabilities if available
         const double kxx = cellScalar(reg, mesh, "kxx", cid, std::numeric_limits<double>::quiet_NaN());
         const double kyy = cellScalar(reg, mesh, "kyy", cid, std::numeric_limits<double>::quiet_NaN());
-        if (std::isfinite(kxx) && std::isfinite(kyy) && kxx > 0.0 && kyy > 0.0) {
+        const double kzz = cellScalar(reg, mesh, "kzz", cid, std::numeric_limits<double>::quiet_NaN());
+
+        if (std::isfinite(kxx) && std::isfinite(kyy) && std::isfinite(kzz) &&
+            kxx > 0.0 && kyy > 0.0 && kzz > 0.0) 
+        {
+            return std::cbrt(kxx * kyy * kzz); // 三维几何平均：立方根
+        }
+        if (std::isfinite(kxx) && std::isfinite(kyy) && kxx > 0.0 && kyy > 0.0)
+        {
             return std::sqrt(kxx * kyy); // Geometric mean for effective permeability
         }
-
         // Fallback to isotropic permeability
         const double k = cellScalar(reg, mesh, "k", cid, std::numeric_limits<double>::quiet_NaN());
         if (std::isfinite(k) && k > 0.0) {
@@ -64,7 +72,8 @@ namespace {
             for (int i = 0; i < Nc; ++i) {
                 const Vector cc = cell_center(mesh, i);
                 const double d2 = (cc.m_x - spec.pos.m_x) * (cc.m_x - spec.pos.m_x) + (cc.m_y - spec.pos.m_y) * (cc.m_y - spec.pos.m_y);
-                if (d2 <= R2) {
+                if (d2 <= R2)
+                {
                     hit.push_back(i);
                 }
             }
@@ -78,7 +87,8 @@ namespace {
         // Strategy 2: Find the N nearest cells to the well position
         struct Item { int idx; double d2; };
         std::vector<Item> all_distances(Nc);
-        for (int i = 0; i < Nc; ++i) {
+        for (int i = 0; i < Nc; ++i)
+        {
             const Vector cc = cell_center(mesh, i);
             const double d2 = (cc.m_x - spec.pos.m_x) * (cc.m_x - spec.pos.m_x) + (cc.m_y - spec.pos.m_y) * (cc.m_y - spec.pos.m_y);
             all_distances[i] = { i, d2 };
@@ -89,7 +99,8 @@ namespace {
             [](const Item& a, const Item& b) { return a.d2 < b.d2; });
 
         hit.resize(take);
-        for (int j = 0; j < take; ++j) {
+        for (int j = 0; j < take; ++j) 
+        {
             hit[j] = all_distances[j].idx;
         }
         return hit;

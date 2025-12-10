@@ -152,10 +152,10 @@ int run_IMPES_Iteration_TwoPhase_BL_Numerical()
     const int writeEveryP = 1;
     const int writeEverySw = 1;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case6/p_impes_ps_revised/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case6/s_impes_ps_revised/s_ps";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case7/p_impes_ps_revised/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case7/s_impes_ps_revised/s_ps";
     const int snapshotEveryCsv = 50;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case6/ps_state_reviesed";
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case7/ps_state_reviesed";
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
     const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);

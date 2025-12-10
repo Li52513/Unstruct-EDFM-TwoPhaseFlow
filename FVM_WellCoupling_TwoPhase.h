@@ -56,10 +56,6 @@ namespace FVM {
 
             const bool isPressureMode = (well.mode == WellDOF_TwoPhase::Mode::Pressure);
             const bool isPureRateMode = (well.mode == WellDOF_TwoPhase::Mode::Rate);
-            const bool isHybridRateMode = (well.mode == WellDOF_TwoPhase::Mode::RateWithPressureBias);
-            const bool treatAsRateMode = (isPureRateMode || isHybridRateMode);
-            const double weak_penalty = treatAsRateMode ? std::max(0.0, well.weak_pressure_weight) : 0.0;
-            const double weak_rhs = weak_penalty * well.weak_pressure_target;
 
             // --- Part 1: Handle the well's own constraint row ---
             if (isPressureMode) {
@@ -113,15 +109,6 @@ namespace FVM {
                     rate_diag_sum += PI_total_i;
                     sys.addA(well_lid, cell_lid, -PI_total_i);
                 }
-            }
-
-            // --- Part 3: Finalize the well's row for rate-controlled mode ---
-            if (treatAsRateMode) {
-                double total_diag = rate_diag_sum + weak_penalty;
-                if (total_diag != 0.0) {
-                    sys.addA(well_lid, well_lid, total_diag);
-                }
-                sys.addb(well_lid, well.target + weak_rhs);
             }
         }
         /**
