@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 #include <vector>
 #include <cassert>
 #include <string>
@@ -112,8 +111,6 @@ inline std::vector<int> buildUnknownMap(Mesh& mesh, int& nUnknowns)
 		lid_of_cell[i] = nUnknowns++;
 		//cout << "  方程自由度编号: " << lid_of_cell[i] << endl;
 	}
-
-
 	return lid_of_cell;
 }
 
@@ -244,19 +241,6 @@ inline bool assemble_COO
 //   时间项：cell i: A_ii+=aC[i], b_i+=bC[i]
 // ======================================================================
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 inline bool assemblePressure_singlePhase_COO
 (
 	MeshManager& mgr,
@@ -319,8 +303,6 @@ inline bool assemblePressure_singlePhase_COO
 			out->addA(rN, rP, -af);
 			out->addb(rN, -sf);
 		}
-
-	
 	}
 
 	//2 ) 时间项贡献 → 对角 & RHS
@@ -336,10 +318,6 @@ inline bool assemblePressure_singlePhase_COO
 	return true;
 
 }
-
-//
-
-
 // 水相/CO2 两个薄封装（字段名统一在这儿）
 inline bool assemblePressure_water_singlePhase_COO
 (
@@ -365,9 +343,6 @@ inline bool assemblePressure_CO2_singlePhase_COO( MeshManager& mgr, const FieldR
         out
     );
 }
-
-
-
 
 // ======================================================================
 //  温度方程（单相，基于达西速度）：装配  A T = b

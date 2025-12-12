@@ -62,3 +62,15 @@ namespace IMPES_Iteration
 
 }
 
+namespace SinglePhase {
+    
+    struct PressureEquation_String
+    {
+        std::string operator_tag = "p_g_singlePhase"; // pressure operator tag for nm
+        std::string pressure_field = "p_g";    // current eval pressure field
+        std::string pressure_old_field = "p_g_old";
+        std::string pressure_prev_field = "p_g_prev";
+    };
+
+}
+

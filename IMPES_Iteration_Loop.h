@@ -34,8 +34,8 @@ namespace IMPES_Iteration
     struct TimeStepControl
     {
         double dt_min = 1e-5;   ///< 允许的最小时间步 [s]
-        double dt_max = 50;   ///< 允许的最大时间步 [s]
-        double grow_factor = 5;    ///< 接受时间步后，最大放大倍数
+        double dt_max = 100;   ///< 允许的最大时间步 [s]
+        double grow_factor = 100;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
         double safety_factor = 0.9;    ///< 步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数
@@ -422,17 +422,46 @@ namespace IMPES_Iteration
             SaturationStepStats satStats;
             if (accept_step)
             {
-                if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, fluxCfg, dt, satStats))
+                bool sat_ok = false;
+
+                switch (satCfg.time_integration_scheme)
                 {
-                    std::cerr << "[IMPES][Iteration] advanceSaturationExplicit_Euler failed at step "
-                        << stepId << ".\n";
-                    if (!rollback_after_failure("saturation")) return false;
+                case SatTimeIntegrationScheme::ExplicitEuler:
+                    sat_ok = advanceSaturationExplicit_Euler(
+                        mgr, reg, freg, satCfg, fluxCfg, dt, satStats);
+                    break;
+
+                case SatTimeIntegrationScheme::HeunRK2:
+                    sat_ok = advanceSaturationHeun_RK2(
+                        mgr, reg, freg, satCfg, fluxCfg, dt, satStats);
+                    break;
+
+                default:
+                    std::cerr << "[IMPES][Saturation] Unknown time integration scheme.\n";
+                    sat_ok = false;
+                    break;
+                }
+
+                if (!sat_ok)
+                {
+                    std::cerr << "[IMPES][Iteration] advanceSaturation("
+                        << (satCfg.time_integration_scheme ==
+                            SatTimeIntegrationScheme::HeunRK2
+                            ? "Heun_RK2" : "Explicit_Euler")
+                        << ") failed at step " << stepId << ".\n";
+
+                    if (!rollback_after_failure("saturation"))
+                        return false;
+
                     accept_step = false;
                 }
                 else
                 {
                     std::cout << "[IMPES][Saturation] step " << stepId
-                        << ": max_CFL=" << satStats.max_CFL
+                        << " (" << (satCfg.time_integration_scheme ==
+                            SatTimeIntegrationScheme::HeunRK2
+                            ? "Heun/RK2" : "Euler")
+                        << "): max_CFL=" << satStats.max_CFL
                         << ", max_dS=" << satStats.max_dS
                         << ", dt_suggest=" << satStats.suggested_dt << "\n";
                 }
@@ -606,8 +635,8 @@ namespace IMPES_Iteration
                 }
 
                 // =======================================================================
-    // [BEGIN] 井 + 边界 时间序列 CSV 输出
-    // =======================================================================
+                // [BEGIN] 井 + 边界 时间序列 CSV 输出
+                // =======================================================================
                 using IMPES_Iteration::WellMassReport;
                 using IMPES_Iteration::BoundaryMassReport;
                 using IMPES_Iteration::WellBoundaryCSVRow;
@@ -788,92 +817,3 @@ namespace IMPES_Iteration
     }
 
 } // namespace IMPES_Iteration
-
-//
-//
-//
-// // 此时，freg 中应已生成：
-//            //  - fluxCfg.water_mass_flux 对应的面场：m_w
-//            //  - fluxCfg.gas_mass_flux   对应的面场：m_g
-//            //  - （可选）fluxCfg.fractional_flow_face：fw_mass
-//            //  - fluxCfg.capillary_correction_flux：毛细修正（已加到水、从气中减去）
-//            //  - fluxCfg.gravity_correction_flux：重力修正（同样规则）
-//            //
-//            // 后续饱和度方程只需要使用 water_mass_flux / gas_mass_flux 即可。
-//
-//
-//            /*if (!satCfg.water_source_field.empty())
-//            {
-//                auto qField = reg.getOrCreate<volScalarField>(
-//                    satCfg.water_source_field,
-//                    cells.size(), 0.0);
-//                if (!wells.empty())
-//                {
-//                    std::vector<double> wellSources;
-//                    if (!FVM::TwoPhaseWellsStrict::build_saturation_well_sources_strict(
-//                        mgr,
-//                        reg,
-//                        wells,
-//                        satCfg.VG_Parameter.vg_params,
-//                        satCfg.VG_Parameter.relperm_params,
-//                        pressureCtrl.assembly.pressure_field,
-//                        wellSources))
-//                    {
-//                        std::cerr << "[IMPES][Iteration] failed to evaluate saturation well sources at time step "
-//                            << stepId << ".\n";
-//                        if (!rollback_after_failure("well source update"))
-//                        {
-//                            return false;
-//                        }
-//                        continue;
-//                    }
-//                    if (wellSources.size() != qField->data.size())
-//                    {
-//                        qField->data.assign(cells.size(), 0.0);
-//                    }
-//                    const size_t nWrite = std::min(qField->data.size(), wellSources.size());
-//                    for (size_t ic = 0; ic < nWrite; ++ic)
-//                    {
-//                        (*qField)[ic] = wellSources[ic];
-//                    }
-//                    for (size_t ic = nWrite; ic < qField->data.size(); ++ic)
-//                    {
-//                        (*qField)[ic] = 0.0;
-//                    }
-//                }
-//                else
-//                {
-//                    qField->data.assign(qField->data.size(), 0.0);
-//                }
-//            }*/
-//            // -------- 4.3 显式饱和度步（Euler） + Redondo / SimpleCFL 时间控制 --------
-//SaturationStepStats satStats;
-///*if (!advanceSaturationExplicit_Euler(mgr, reg, freg, satCfg, dt, satStats))
-//{
-//    std::cerr << "[IMPES][Iteration] splitTwoPhaseMassFlux failed at time step "
-//        << stepId << ".\n";
-//    if (!rollback_after_failure("saturation update failure"))
-//    {
-//        return false;
-//    }
-//    continue;
-//}*/
-
-//
-//    // -------- 4.6 接受时间步，更新时间和 dt --------
-//time += dt;
-//++step;
-//
-//// 使用 Redondo / SimpleCFL 建议的 dt 作为主要约束，
-//// 并允许适度增长（dt_growth_factor）
-//double dt_target = satStats.suggested_dt;
-//if (!(dt_target > 0.0)) {
-//    dt_target = dt; // 容错：如果算法返回了非正值，就保持原 dt
-//}
-//// 不能比当前 dt 增长太多，但也不超过建议值
-//double dt_candidate = std::min({ dt_target, Tsc.grow_factor * dt, Tsc.dt_max });
-//dt = dt_candidate;
-//
-//std::cout << "[IMPES][Iteration] step " << stepId
-//<< " accepted. Next dt = " << dt << " s, simTime = "
-//<< time << " s\n";

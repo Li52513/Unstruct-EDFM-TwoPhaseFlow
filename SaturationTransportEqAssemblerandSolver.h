@@ -13,6 +13,13 @@
 
 namespace IMPES_Iteration
 {
+    /// 饱和度时间积分格式
+    enum class SatTimeIntegrationScheme
+    {
+        ExplicitEuler,  ///< 一阶显式 Euler
+        HeunRK2         ///< 二阶 Heun / RK2
+    };
+
     /**
      * \brief 配置两相饱和度输运所需的场名称与 VG/相对渗透率参数。
      *
@@ -34,6 +41,8 @@ namespace IMPES_Iteration
 
         TwoPhase_VG_Parameters              VG_Parameter;
 
+        /// 时间积分格式（新加）
+        SatTimeIntegrationScheme time_integration_scheme = SatTimeIntegrationScheme::HeunRK2;
         /// 时间步控制开关：SimpleCFL / RedondoLike
         SatTimeControlScheme time_control_scheme = SatTimeControlScheme::RedondoLike;
 
@@ -299,9 +308,279 @@ namespace IMPES_Iteration
     *
     * 具体实现将结合现有 assemblePressureTwoPhase 与 splitTwoPhaseMassFlux。
     */
-    inline bool advanceSaturation_RK2_placeholder()
+    /**
+        * \brief Heun / RK2 形式推进水相饱和度（单一步长），
+        *        需要在两个 stage 之间重建水相质量通量 mf_w。
+        *
+        * 形式上：
+        *   dS/dt = R(S),  R(S) = (Qw - div Fw) / (phi V rho_w)
+        *   k1    = R(S^n)
+        *   S*    = S^n + dt * k1
+        *   k2    = R(S*)
+        *   S^{n+1} = S^n + dt/2 * (k1 + k2)
+        *
+        * 使用约定：
+        *  - 调用本函数前，调用者应基于当前 S_w 构建好 mf_w（FluxCfg.water_mass_flux）。
+        *  - rebuildFlux(stageId) 会在 stage=1 时被调用一次，此时 cfg.saturation
+        *    中已经保存了预测场 S*；rebuildFlux 负责：
+        *      * 更新相对渗透率/动度等物性；
+        *      * 拆分两相通量，更新 water_mass_flux 面场；
+        *      * 如需，可同步更新水相体源项 q_w（例如井源 Qw_well）。
+        *
+        * @tparam FluxRebuilder  可调用对象，签名为 bool(int stageId)
+        */
+   
+    inline bool advanceSaturationHeun_RK2(
+        MeshManager& mgr,
+        FieldRegistry& reg,
+        FaceFieldRegistry& freg,
+        const SaturationTransportConfig& cfg,
+        const FluxSplitConfig& FluxCfg,
+        double dt,
+        SaturationStepStats& stats)
     {
-        std::cerr << "[Saturation] advanceSaturation_RK2: not implemented yet.\n";
-        return false;
+        stats = SaturationStepStats{};
+
+        if (dt <= 0.0) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: dt <= 0.\n";
+            return false;
+        }
+
+        // --- 0) 基本场访问与尺寸检查 --- //
+        auto s_w = reg.get<volScalarField>(cfg.saturation);
+        auto s_w_old = reg.get<volScalarField>(cfg.saturation_old);   // 仅作尺寸检查/回滚用
+        auto s_w_prev = reg.get<volScalarField>(cfg.saturation_prev);  // 可选：存储 S^n
+
+        if (!s_w || !s_w_old) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: missing saturation fields '"
+                << cfg.saturation << "' or '" << cfg.saturation_old << "'.\n";
+            return false;
+        }
+
+        auto phi = reg.get<volScalarField>(TwoPhase::Rock().phi_tag);
+        auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
+        if (!phi || !rho_w) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: missing porosity or rho_w.\n";
+            return false;
+        }
+
+        auto mf_w = freg.get<faceScalarField>(FluxCfg.water_mass_flux);
+        if (!mf_w) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: missing water mass flux field '"
+                << FluxCfg.water_mass_flux << "'.\n";
+            return false;
+        }
+
+        std::shared_ptr<volScalarField> q_w;
+        if (!cfg.water_source_field.empty()) {
+            q_w = reg.get<volScalarField>(cfg.water_source_field.c_str());
+            if (!q_w) {
+                std::cerr << "[Saturation] advanceSaturationHeun_RK2: requested water source field '"
+                    << cfg.water_source_field << "' not found.\n";
+                return false;
+            }
+        }
+
+        Mesh& mesh = mgr.mesh();
+        const auto& cells = mesh.getCells();
+        const auto& faces = mesh.getFaces();
+        const auto& id2idx = mesh.getCellId2Index();
+
+        const size_t nCells = cells.size();
+        const size_t nFaces = faces.size();
+
+        if (s_w->data.size() != nCells || s_w_old->data.size() != nCells) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: saturation size mismatch.\n";
+            return false;
+        }
+        if (phi->data.size() != nCells || rho_w->data.size() != nCells) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: porosity/rho_w size mismatch.\n";
+            return false;
+        }
+        if (mf_w->data.size() != nFaces) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: mf_w size mismatch.\n";
+            return false;
+        }
+        if (q_w && q_w->data.size() != nCells) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: q_w size mismatch.\n";
+            return false;
+        }
+
+        // --- 0.1) 备份当前 S^n（到局部数组 + 可选的 saturation_prev） --- //
+        std::vector<double> S_old(nCells, 0.0);
+        for (size_t ic = 0; ic < nCells; ++ic) {
+            S_old[ic] = (*s_w)[ic];
+        }
+        if (s_w_prev) {
+            s_w_prev->data = S_old; // 方便外部需要访问 S^n 时使用
+        }
+
+        // --- 通用小工具：从当前 mf_w 构建 F_div --- //
+        auto build_div_from_mf = [&](faceScalarField& mf, volScalarField& F_div) {
+            std::fill(F_div.data.begin(), F_div.data.end(), 0.0);
+            for (const auto& F : faces) {
+                const int iF = F.id - 1;
+                if (iF < 0 || static_cast<size_t>(iF) >= nFaces) continue;
+
+                const double Fw_face = mf[iF];
+                const int ownerId = F.ownerCell;
+                const int neighId = F.neighborCell;
+
+                if (ownerId >= 0) {
+                    const size_t iOwner = id2idx.at(ownerId);
+                    F_div[iOwner] += Fw_face;  // owner->neighbor 为正，视为 owner 的“流出”
+                }
+                if (neighId >= 0) {
+                    const size_t iNeigh = id2idx.at(neighId);
+                    F_div[iNeigh] -= Fw_face;  // 对 neighbor 则为“流入”
+                }
+            }
+            };
+
+        const double CFL_safety = cfg.CFL_safety;
+        const double dS_target = cfg.dS_max;
+        const double tiny = 1e-30;
+        const auto& vg = cfg.VG_Parameter.vg_params;
+
+        // --- Stage 1: 基于 S^n 和 mf_w^n 计算 k1 并得到预测 S* --- //
+        volScalarField F_div_stage1("div_mf_w_stage1", nCells, 0.0);
+        build_div_from_mf(*mf_w, F_div_stage1);
+
+        std::vector<double> k1(nCells, 0.0);
+
+        double max_CFL = 0.0;
+        double max_dS_stage1 = 0.0;
+        double min_dt_dS = 1e100;
+        double min_dt_CFL = 1e100;
+
+        for (size_t ic = 0; ic < nCells; ++ic)
+        {
+            const auto& cell = cells[ic];
+            if (cell.id < 0) continue;
+
+            const double V = cell.volume;
+            if (V <= tiny) {
+                std::cerr << "[Saturation] advanceSaturationHeun_RK2: cell volume too small at id="
+                    << cell.id << "\n";
+                continue;
+            }
+
+            const double phi_i = std::max((*phi)[ic], 1e-12);
+            const double rho_i = std::max((*rho_w)[ic], 1e-12);
+            const double Sw_n = S_old[ic];
+
+            const double F_div_i = F_div_stage1[ic];
+            const double Qw_i = q_w ? (*q_w)[ic] : 0.0;
+
+            const double mass_coeff = phi_i * V * rho_i;
+            const double RHS1 = (Qw_i - F_div_i);
+            const double rate1 = RHS1 / std::max(mass_coeff, tiny); // dS/dt
+            k1[ic] = rate1;
+
+            // 预测 S*
+            double S_star = Sw_n + dt * rate1;
+            S_star = std::max(0.0, std::min(1.0, S_star));
+            S_star = detail::clampSw(S_star, vg);
+
+            (*s_w)[ic] = S_star;
+
+            // ΔS_stage1 仅用于诊断，不是最终 ΔS
+            const double dS_stage1 = std::fabs(S_star - Sw_n);
+            if (dS_stage1 > max_dS_stage1) max_dS_stage1 = dS_stage1;
+
+            // dt_dS 约束：基于 |RHS1|
+            const double denom_loc = std::fabs(RHS1);
+            if (denom_loc > tiny) {
+                const double dt_loc = dS_target * mass_coeff / denom_loc;
+                if (dt_loc < min_dt_dS) min_dt_dS = dt_loc;
+            }
+
+            // CFL 约束：基于 |F_div|
+            const double CFL_i = std::fabs(F_div_i) * dt / std::max(mass_coeff, tiny);
+            if (CFL_i > max_CFL) max_CFL = CFL_i;
+
+            const double adv_denom = std::fabs(F_div_i);
+            if (adv_denom > tiny) {
+                const double dt_CFL_i = CFL_safety * mass_coeff / adv_denom;
+                if (dt_CFL_i < min_dt_CFL) min_dt_CFL = dt_CFL_i;
+            }
+        }
+        mf_w = freg.get<faceScalarField>(FluxCfg.water_mass_flux);
+        if (!mf_w || mf_w->data.size() != nFaces) {
+            std::cerr << "[Saturation] advanceSaturationHeun_RK2: mf_w after rebuild invalid.\n";
+            return false;
+        }
+
+        // --- Stage 2: 基于 S* 和 mf_w^* 计算 k2，并合成 S^{n+1} --- //
+        volScalarField F_div_stage2("div_mf_w_stage2", nCells, 0.0);
+        build_div_from_mf(*mf_w, F_div_stage2);
+
+        std::vector<double> k2(nCells, 0.0);
+
+        double max_dS_final = 0.0;  // 最终 |S^{n+1} - S^n|
+        double min_dt_dS2 = 1e100;
+        double min_dt_CFL2 = 1e100;
+        double max_CFL2 = 0.0;
+
+        for (size_t ic = 0; ic < nCells; ++ic)
+        {
+            const auto& cell = cells[ic];
+            if (cell.id < 0) continue;
+
+            const double V = cell.volume;
+            if (V <= tiny) continue;
+
+            const double phi_i = std::max((*phi)[ic], 1e-12);
+            const double rho_i = std::max((*rho_w)[ic], 1e-12);
+            const double Sw_n = S_old[ic];
+
+            const double F_div_i2 = F_div_stage2[ic];
+            const double Qw_i = q_w ? (*q_w)[ic] : 0.0;
+
+            const double mass_coeff = phi_i * V * rho_i;
+            const double RHS2 = (Qw_i - F_div_i2);
+            const double rate2 = RHS2 / std::max(mass_coeff, tiny);
+            k2[ic] = rate2;
+
+            // Heun 合成：S^{n+1} = S^n + dt/2 * (k1 + k2)
+            double S_new = Sw_n + 0.5 * dt * (k1[ic] + k2[ic]);
+            S_new = std::max(0.0, std::min(1.0, S_new));
+            S_new = detail::clampSw(S_new, vg);
+
+            (*s_w)[ic] = S_new;
+
+            const double dS_final = std::fabs(S_new - Sw_n);
+            if (dS_final > max_dS_final) max_dS_final = dS_final;
+
+            const double denom_loc = std::max(std::fabs(RHS2), tiny);
+            const double dt_loc = dS_target * mass_coeff / denom_loc;
+            if (dt_loc < min_dt_dS2) min_dt_dS2 = dt_loc;
+
+            const double CFL_i2 = std::fabs(F_div_i2) * dt / std::max(mass_coeff, tiny);
+            if (CFL_i2 > max_CFL2) max_CFL2 = CFL_i2;
+
+            const double adv_denom2 = std::fabs(F_div_i2);
+            if (adv_denom2 > tiny) {
+                const double dt_CFL_i2 = CFL_safety * mass_coeff / adv_denom2;
+                if (dt_CFL_i2 < min_dt_CFL2) min_dt_CFL2 = dt_CFL_i2;
+            }
+        }
+
+        // --- 3) 汇总 CFL / ΔS / dt 建议 --- //
+        stats.max_CFL = std::max(max_CFL, max_CFL2);
+        stats.max_dS = max_dS_final;
+
+        double dt_suggest = 1e100;
+        if (min_dt_dS < dt_suggest) dt_suggest = min_dt_dS;
+        if (min_dt_dS2 < dt_suggest) dt_suggest = min_dt_dS2;
+        if (min_dt_CFL < dt_suggest) dt_suggest = min_dt_CFL;
+        if (min_dt_CFL2 < dt_suggest) dt_suggest = min_dt_CFL2;
+
+        if (!(dt_suggest > 0.0 && dt_suggest < 1e90)) {
+            dt_suggest = dt; // 回退：无有效约束时保持当前 dt
+        }
+        stats.suggested_dt = dt_suggest;
+
+        return true;
     }
 }

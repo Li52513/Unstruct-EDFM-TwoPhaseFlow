@@ -90,8 +90,8 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     // ---------- 3. 压力边界条件（左高右低，其他 no-flow） ----------
     const auto& bfaces = mgr.boundaryFaces();
     PressureBC::Registry pbc_pw;
-    PressureBC::BoundaryCoefficient P_Left{ 1.0, 0.0, 9e6 }; // ∂p/∂n = 0
-    PressureBC::BoundaryCoefficient P_Right{ 1.0, 0.0, 9e6 };
+    PressureBC::BoundaryCoefficient P_Left{ 0.0, 1.0, 0.0 }; // ∂p/∂n = 0
+    PressureBC::BoundaryCoefficient P_Right{ 0.0, 1.0, 0.0 };
     PressureBC::BoundaryCoefficient P_Down{ 0.0, 1.0, 0.0 };
     PressureBC::BoundaryCoefficient P_Up{ 0.0, 1.0, 0.0 };
 
@@ -112,7 +112,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         inj.Tin = 300.0;                            // 注入温度，随意设置一个值，占位
         inj.s_w_bh = 1.0;                           // 纯水注入
 
-        inj.geom.pos = Vector{ 0.01 * lengthX,0.01 * lengthY ,0.0 };
+        inj.geom.pos = Vector{ 0.4 * lengthX,0.4 * lengthY ,0.0 };
         inj.geom.rw = 0.001;                        // 井筒半径
         inj.geom.skin = 0.0;
         inj.geom.H = 1.0;                           // 有效厚度
@@ -133,7 +133,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         prod.Tin = 300.0;  // 对产井无实际意义，仅占位
         prod.s_w_bh = 1.0;    // 占位
 
-        prod.geom.pos = Vector{ 0.99 * lengthX, 0.99 * lengthY, 0.0 };
+        prod.geom.pos = Vector{ 0.43 * lengthX, 0.43 * lengthY, 0.0 };
         prod.geom.rw = 0.001;
         prod.geom.skin = 0.0;
         prod.geom.H = 1.0;
@@ -154,9 +154,10 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     IMPES_Iteration::SaturationTransportConfig satCfg;
     satCfg.VG_Parameter.vg_params = vg_params;
     satCfg.VG_Parameter.relperm_params = rp_params;
-    satCfg.dS_max = 0.1;
-    satCfg.CFL_safety = 0.8;
+    satCfg.dS_max = 0.15;
+    satCfg.CFL_safety = 0.9;
     satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::SimpleCFL;
+    satCfg.time_integration_scheme = IMPES_Iteration::SatTimeIntegrationScheme::HeunRK2;
 
     // ---------- 8. 压力方程组装与求解控制参数 ----------   
     IMPES_Iteration::PressureSolveControls pCtrl;
@@ -188,7 +189,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     fluxCfg.pressure_bc = &PbcA;
 
     // ---------- 11. IMPES 主时间推进 ----------
-    const int    nSteps = 100;
+    const int    nSteps = 500;
     double       dt_initial = 1e-7;   // 更保守的初始时间步
 
     const int writeEveryP = 10;

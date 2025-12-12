@@ -4,7 +4,7 @@
 #include <utility>
 #include "Cell.h"  // for Cell::RegionType
 #include "PropertiesSummary.h"
-#include"FractureSolidProperties.h"
+#include  "FractureSolidProperties.h"
 #include "WaterPropertyTable.h"
 #include "CO2PropertyTable.h"
 #include "UserDefineVarType.h"  // for Vector

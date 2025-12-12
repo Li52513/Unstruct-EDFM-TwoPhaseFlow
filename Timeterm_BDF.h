@@ -43,11 +43,7 @@ namespace FVM {
             const std::string& Ceff_name,     // C_eff
             const std::string& T_old_name,    // T^n
             const std::string& aC_name,       // 输出：对角
-            const std::string& bC_name,       // 输出：右端
-            // 可选：对 Dirichlet 单元做强制钉扎
-            const std::vector<char>* strong_mask_cells = nullptr,   // 1=强制
-            const std::vector<double>* T_target_cells = nullptr,   // 目标 T_b（若空则用 T_old）
-            double pin_weight = 0.0                                      // 钉扎强度（0 表示不用）
+            const std::string& bC_name
         ) {
             if (dt <= 0.0) { std::cerr << "[TimeTerm_T] invalid dt.\n"; return false; }
 
@@ -70,8 +66,6 @@ namespace FVM {
             const double inv_dt = 1.0 / dt;
             const double epsC = 0.0;
 
-            const bool use_pin = (strong_mask_cells && pin_weight > 0.0);
-
             for (const auto& c : cells) {
                 if (c.id < 0) continue;
                 const size_t i = id2idx.at(c.id);
@@ -83,13 +77,6 @@ namespace FVM {
                 // 常规时间项
                 double a = V * inv_dt * Ceff_star;
                 double b = V * inv_dt * Ceff_star * T_old;
-
-                // ——强制钉扎：把行改成 (a + W)*T_P = b + W*T_target —— //
-                if (use_pin && (*strong_mask_cells)[i]) {
-                    const double Ttar = (T_target_cells ? (*T_target_cells)[i] : T_old);
-                    a += pin_weight;
-                    b += pin_weight * Ttar;
-                }
 
                 (*aC)[i] = a;
                 (*bC)[i] = b;
@@ -113,9 +100,7 @@ namespace FVM {
             const std::string& drdp_lin_name,       // (∂ρ/∂p)^⋆
             // ——输出——
             const std::string& aC_name,             // 时间项对角
-            const std::string& bC_name,             // 时间项常数项
-            // ——可选：强边界单元屏蔽——
-            const std::vector<char>* strongBCmask = nullptr
+            const std::string& bC_name            // 时间项常数项
         )
         {
             auto& mesh = mgr.mesh();
@@ -140,8 +125,6 @@ namespace FVM {
             for (const auto& c : cells) {
                 if (c.id < 0) continue;
                 const size_t i = id2idx.at(c.id);
-                if (strongBCmask && (*strongBCmask)[i]) continue;   // ★ 强边界单元不写时间项
-
                 const double V = std::max(0.0, c.volume);
                 const double ph = (*phi)[i];
                 const double pn = (*p_n)[i];

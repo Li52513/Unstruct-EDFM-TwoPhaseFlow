@@ -507,7 +507,8 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed_withWell
 		// ======================================================
 
 		// a 扩散项
-		if (!FVM::Diffusion::build_FaceCoeffs_Central(mgr,reg,freg,nmP.a_f_diff,nmP.s_f_diff,"p_g" ,{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },"rho_g", FVM::Diffusion::RhoFaceMethod::Linear, g, Pbc,false,0 )) return false;
+		if (!FVM::Diffusion::build_FaceCoeffs_Central(mgr,reg,freg,nmP.a_f_diff,nmP.s_f_diff,"p_g" ,
+			{ "kxx:kxx","kyy:kyy","kzz:kzz","/mu_g","rho:rho_g" },"rho_g", FVM::Diffusion::RhoFaceMethod::Linear, g, Pbc,false,0 )) return false;
 
 		// b 时间项 
 		if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(mgr, reg, dt, "c_phi", "phi_r", "p_g_old", "rho_g", "p_g_prev", "rho_g", "Drho_Dp_g", nmP.a_time, nmP.b_time)) return false;

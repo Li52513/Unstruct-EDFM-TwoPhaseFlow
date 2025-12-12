@@ -38,7 +38,7 @@ inline void add_peaceman_coupling_cell_rows(
     const std::string& mask_name,
     const std::vector<int>& lid_cell,  // cell index -> unknown id
     int well_lid,
-    bool scaleByCellMeasure = true
+    bool scaleByCellMeasure = false
 ) {
     const int Nc = (int)lid_cell.size();
     for (int cidx = 0; cidx < Nc; ++cidx) {
@@ -69,7 +69,7 @@ inline void add_well_row(
     const std::string& PI_name, const std::string& mask_name,
     const std::vector<int>& lid_cell, int well_lid,
     WellDOF::Mode mode, double target,
-    bool scaleByCellMeasure = true
+    bool scaleByCellMeasure = false
 ) {
     if (mode == WellDOF::Mode::Pressure) {
         sys.addA(well_lid, well_lid, 1.0);

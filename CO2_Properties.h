@@ -10,6 +10,7 @@ namespace CO2_in_rock
 	static constexpr double BASE_k_g = 0.05;
 	static constexpr double BASE_mu_g = 1.48e-5;
 	static constexpr double BASE_Drho_Dp_g = 0;
+	static constexpr double BASE_c_g = 0;
 
 	inline bool computeCO2inROCKProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_g_field,const std::string& T_field)  //这里传入基岩的压力和温度 但是对于IMPES来说，不会更新这里的参数
 	{
@@ -41,8 +42,7 @@ namespace CO2_in_rock
 			(*k_gF)[i]   = BASE_k_g;
 			(*mu_gF)[i]  = BASE_mu_g;
 			(*Drho_Dp_gF)[i] = BASE_Drho_Dp_g;
-			//(*c_gF)[i] = 1 / p_g; //假设可压缩系数为1/p
-			(*c_gF)[i] = 1e-5; //假设可压缩系数为1/p
+			(*c_gF)[i] = BASE_c_g; //假设可压缩系数为1/p
 		}
 
 		return true;

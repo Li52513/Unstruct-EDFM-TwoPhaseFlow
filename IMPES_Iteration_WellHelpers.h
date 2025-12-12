@@ -100,7 +100,6 @@ inline void debugPrintPeacemanPIAndRate(
     }
 
     const double p_bh = well.p_bh; // Pressure 模式下应等于 well.target
-
     double sum_PI_mass = 0.0;
     double sum_dotM    = 0.0;
     double sum_deltap  = 0.0;
@@ -148,11 +147,11 @@ inline void debugPrintPeacemanPIAndRate(
     const double avg_dp = sum_deltap / static_cast<double>(nPerf);
 
     std::cout << "[DebugPI] Well '" << well.name << "' (mode=Pressure)\n"
-              << "  p_bh       = " << p_bh << " Pa\n"
-              << "  nPerf      = " << nPerf << "\n"
-              << "  Sum PI_mass= " << sum_PI_mass << " (kg/(s·Pa))\n"
-              << "  Avg Δp     = " << avg_dp << " Pa\n"
-              << "  Est Q_mass = " << sum_dotM << " kg/s\n";
+        << "  p_bh       = " << p_bh << " Pa\n"
+        << "  nPerf      = " << nPerf << "\n"
+        << "  Sum PI_mass= " << sum_PI_mass << " (kg/(s·Pa))\n"
+        << "  Avg Δp     = " << avg_dp << " Pa\n"
+        << "  Est Q_mass = " << sum_dotM << " kg/s\n";
 }
 
 } // namespace IMPES_Iteration
