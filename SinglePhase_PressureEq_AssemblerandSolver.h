@@ -37,7 +37,7 @@ namespace SinglePhase {
 		double under_relax = 1.0;		///< 欠松弛系数 (0<urf<=1, 建议 0.3~0.7)
 		double tol_abs = 1e-5;			///绝对残差
 		double tol_rel = 1e-6;			///相对残差
-		int max_outer = 20;				///最大外迭代次数
+		int max_outer = 40;				///最大外迭代次数
 		bool   verbose = true;			///< 是否打印每轮外迭代的 dp_inf / linRes
 	};
 	/**

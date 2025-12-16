@@ -7,6 +7,7 @@
 #include  "FractureSolidProperties.h"
 #include "WaterPropertyTable.h"
 #include "CO2PropertyTable.h"
+
 #include "UserDefineVarType.h"  // for Vector
 #include "Initializer.h"
 #include "FracIndex.h"   // 新增
@@ -37,14 +38,27 @@ public:
         std::size_t maxPrint = 20) const;
 
     // ===== 统一的“按字段名更新”方法（推荐在外迭代/时间步里用） =====
-    //基岩-固相
+    //基岩-固相参数更新
      void UpdateMatrixRockAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
+	 bool UpdateRockProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field); //调用之前需要对基岩区域进行划分，不冉默认是Medium区域
 
-    ////基岩-流体相：phase ∈ {"water","co2","both"}
-    //void UpdateMatrixFluidAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field, const std::string& phase);
+     //基岩-水相物性参数更新
+	 bool UpdateWaterProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
 
-    ////基岩-单相有效热物性：严格单相不依赖Sw/pg;
-    //void ComputeMatrixEffectiveThermalsAt(MeshManager& mgr, FieldRegistry& reg,const std::string& p_field, const std::string& T_field,const std::string& phase = "water", double Ceff_floor = 1e-12);
+	 //基岩-二氧化碳物性参数更新
+	 bool UpdateCO2Properties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
+
+	 //单相有效热物性参数更新
+     //水相
+     bool ComputeEffectiveThermalProperties_Water(MeshManager& mgr, FieldRegistry& reg);
+	 //二氧化碳相
+	 bool ComputeEffectiveThermalProperties_CO2(MeshManager& mgr, FieldRegistry& reg);
+
+	 //单相密度对压力导数更新
+	 //水相
+	 bool ComputeDrho_dp_Water(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
+	 //二氧化碳相
+	 bool ComputeDrho_dp_CO2(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
 
 
 	//裂缝-固相
@@ -52,26 +66,7 @@ public:
 
 	//裂缝-流体相：phase ∈ {"water","co2","both"}
 	void UpdateFractureFluidAt(MeshManager& mgr, FieldRegistry& reg_fr, FieldRegistry& reg, const std::string& pf_field, const std::string& Tf_field, const std::string& phase);
-
-	//裂缝-单相有效热物性：严格单相不依赖Sw/pg;
-    void ComputeFractureEffectiveThermalsAt(MeshManager& mgr, FieldRegistry& reg_fr,FieldRegistry& reg, const std::string& p_field_fr, const std::string& T_field_fr, const std::string& phase = "water", double Ceff_floor = 1e-12);
-
-    //裂缝-双相有效热物性：依赖Sw/pg (后面补上);
-
-   // 单相-CO2-常物性-温度扩散试算补充函数
-    void RockProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
-	void CO2Properties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
-    void ComputeEffectiveThermalProperties_test_constProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg);
-
-    //单相-CO2变物性-温度扩散试算补充函数
-	void CO2Properties_test_varProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg, const std::string& Tf_field);
-	void ComputeEffectiveThermalProperties_test_varProperties_singlePhase_CO2_T_diffusion(MeshManager& mgr, FieldRegistry& reg, const std::string& Tf_field);
-
-    void RockProperties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg);
-	void CO2Properties_test_constProperties_singlePhase_CO2(MeshManager& mgr, FieldRegistry& reg);
-
-    //单相-CO2常物性-渗流传热补充函数
-    void ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(MeshManager & mgr, FieldRegistry & reg);
+ 
 
 
 

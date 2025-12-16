@@ -50,7 +50,7 @@ int run_IMPES_Iteration_TimeTerm_AnalyticalTest()
     // 区域分类（这里只用一个 RegionType::Medium）
     PhysicalPropertiesManager ppm;
     ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
-    ppm.UpdateMatrixRockAt(mgr, reg, "p_w", "T");
+    ppm.UpdateRockProperties(mgr, reg, "p_w", "T");
 
     // VG / 相对渗透率参数
     VGParams vg_params;

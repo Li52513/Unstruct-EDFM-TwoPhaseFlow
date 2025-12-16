@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 #include <iostream>
-
 #include "Solver_Loop.h"
 
 int SinglePhase_CO2_TH_withWell_reviese()
@@ -39,9 +38,6 @@ int SinglePhase_CO2_TH_withWell_reviese()
 
     //3）物性参数设置,当前给定常物性参数
     PhysicalPropertiesManager ppm;
-    ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
-    ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
-    ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
 
     //4) 边界条件设置
     const auto& bfaces = mgr.boundaryFaces();

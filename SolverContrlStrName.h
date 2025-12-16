@@ -1,7 +1,77 @@
 ﻿#pragma once
 #include <string>
 #include "CapRelPerm.h"
-#include "0_PhysicalParametesCalculateandUpdata.h"
+
+
+namespace PhysicalProperties_string
+{
+    struct Water
+    {
+        // Basic properties
+        std::string rho_tag = "rho_w";
+        std::string mu_tag = "mu_w";
+        std::string k_tag = "k_w";
+        std::string cp_tag = "cp_w";
+        std::string drho_w_dp_tag = "drho_wdp";
+        std::string c_w_tag = "c_w";
+        // old timen layer
+        std::string rho_old_tag = "rho_w_old";
+        std::string mu_old_tag = "mu_w_old";
+        std::string k_old_tag = "k_w_old";
+        std::string cp_old_tag = "cp_w_old";
+        std::string drho_w_dp_old_tag = "drho_wdp_old";
+        std::string c_w_old_tag = "c_w_old";
+        // Two-phase properties
+        std::string k_rw_tag = "k_rw";				//relative permeability of water
+        std::string lambda_w_tag = "lambda_w";		//mobility of water
+        std::string k_rw_old_tag = "k_rw_old";				//relative permeability of water
+        std::string lambda_w_old_tag = "lambda_w_old";		//mobility of water
+    };
+
+    struct CO2
+    {
+        // Basic properties
+        std::string rho_tag = "rho_g";
+        std::string mu_tag = "mu_g";
+        std::string k_tag = "k_g";
+        std::string cp_tag = "cp_g";
+        std::string drho_g_dp_tag = "drho_gdp";
+        std::string c_g_tag = "c_g";
+        // old timen layer
+        std::string rho_old_tag = "rho_g_old";
+        std::string mu_old_tag = "mu_g_old";
+        std::string k_old_tag = "k_g_old";
+        std::string cp_old_tag = "cp_g_old";
+        std::string drho_g_dp_old_tag = "drho_gdp_old";
+        std::string c_g_old_tag = "c_g_old";
+        // Two-phase properties
+        std::string k_rg_tag = "k_rg";				        //relative permeability 
+        std::string lambda_g_tag = "lambda_g";		        //mobility
+		std::string k_rg_old_tag = "k_rg_old";				//relative permeability
+		std::string lambda_g_old_tag = "lambda_g_old";		//mobility
+    };
+
+    struct Rock
+    {
+        // Bsic properties
+        std::string phi_tag = "phi_r";				//porosity
+        std::string rho_tag = "rho_r";				//rock density
+        std::string cp_tag = "cp_r";				//rock specific heat capacity
+        std::string lambda_tag = "lambda_r";				//rock thermal conductivity
+        std::string k_xx_tag = "kxx";
+        std::string k_yy_tag = "kyy";
+        std::string k_zz_tag = "kzz";
+        std::string c_r_tag = "c_r";				//rock compressibility
+    };
+
+    struct SinglePhase_case
+    {
+        std::string C_eff_tag = "C_eff";
+        std::string lambda_eff_tag = "lambda_eff";
+        std::string C_eff_old_tag = "C_eff_old";
+        std::string lambda_eff_old_tag = "lambda_eff_old";
+    };
+}
 
 namespace IMPES_Iteration
 {
@@ -63,21 +133,22 @@ namespace IMPES_Iteration
 
 }
 
+
 namespace SinglePhase 
 {
     struct PhysicalParameters_String
     {
         //Fluid in matrix
-        std::string rho_fluid_field = "rho_g";         
-        std::string rho_fluid_old_field = "rho_g_old";  
-        std::string drho_dp_tag = "Drho_Dp_g";
-        std::string cp_fluid_field = "cp_g"; 
-        std::string C_eff_field = "C_eff";
-        std::string C_eff_old_field = "C_eff_old";
+        std::string rho_fluid_field = PhysicalProperties_string::CO2().rho_tag;
+        std::string rho_fluid_old_field = PhysicalProperties_string::CO2().rho_old_tag;
+        std::string drho_dp_tag = PhysicalProperties_string::CO2().drho_g_dp_tag;
+        std::string cp_fluid_field = PhysicalProperties_string::CO2().cp_tag;
+        std::string C_eff_field = PhysicalProperties_string::SinglePhase_case().C_eff_tag;
+        std::string C_eff_old_field = PhysicalProperties_string::SinglePhase_case().C_eff_old_tag;
 
         //Matrix Rock
-        std::string phi_tag = "phi_r";				//porosity
-        std::string c_r_tag = "c_r";				//rock compressibility
+        std::string phi_tag = PhysicalProperties_string::Rock().phi_tag;				//porosity
+        std::string c_r_tag = PhysicalProperties_string::Rock().c_r_tag;				//rock compressibility
     };
     
     struct PressureEquation_String
@@ -105,63 +176,7 @@ namespace SinglePhase
     };
 }
 
-namespace PhysicalProperties_string
-{
-    struct Water
-    {
-        // Basic properties
-        std::string rho_tag = "rho_w";
-        std::string mu_tag = "mu_w";
-        std::string k_tag = "k_w";
-        std::string cp_tag = "cp_w";
-        std::string drho_w_dp_tag = "drho_wdp";
-		std::string c_w_tag = "c_w";             
-        // old timen layer
-        std::string rho_old_tag = "rho_w_old";
-        std::string mu_old_tag = "mu_w_old";
-        std::string k_old_tag = "k_w_old";
-        std::string cp_old_tag = "cp_w_old";
-        std::string drho_w_dp_old_tag = "drho_wdp_old";
-		std::string c_w_old_tag = "c_w_old";      
-        // Two-phase properties
-        std::string k_rw_tag = "k_rw";				//relative permeability of water
-        std::string lambda_w_tag = "lambda_w";		//mobility of water
-    };
 
-    struct CO2
-    {
-        // Basic properties
-        std::string rho_tag = "rho_g";
-        std::string mu_tag = "mu_g";
-        std::string k_tag = "k_g";
-        std::string cp_tag = "cp_g";
-        std::string drho_g_dp_tag = "drho_gdp";
-        std::string c_g_tag = "c_g";
-        // old timen layer
-        std::string rho_old_tag = "rho_g_old";
-        std::string mu_old_tag = "mu_g_old";
-        std::string k_old_tag = "k_g_old";
-        std::string cp_old_tag = "cp_g_old";
-        std::string drho_g_dp_old_tag = "drho_gdp_old";
-        std::string c_g_old_tag = "c_g_old";
-        // Two-phase properties
-        std::string k_rg_tag = "k_rg";				//relative permeability 
-        std::string lambda_g_tag = "lambda_g";		//mobility
-    };
-
-    struct Rock
-    {
-		// Bsic properties
-		std::string phi_tag = "phi_r";				//porosity
-		std::string rho_tag = "rho_r";				//rock density
-		std::string cp_tag = "cp_r";				//rock specific heat capacity
-		std::string lambda_tag = "lambda_r";				//rock thermal conductivity
-        std::string k_xx_tag = "kxx";
-		std::string k_yy_tag = "kyy";
-		std::string k_zz_tag = "kzz";
-		std::string c_r_tag = "c_r";				//rock compressibility
-    };
-}
 
 
 

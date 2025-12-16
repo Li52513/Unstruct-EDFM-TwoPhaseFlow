@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include "PropertiesSummary.h" // 里面定义 水所需要的物性参数
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "SolverContrlStrName.h"
@@ -14,6 +13,17 @@ namespace Water_Prop
 	static constexpr double BASE_Drho_Dp_w = 0;
 	static constexpr double BASE_c_w = 0; //压缩系数
 
+	///为常物性参数工况外部修改提供接口
+	struct waterProperties
+	{
+		double rho = 900;
+		double mu = 1.48e-5;
+		double cp = 1100;
+		double k = 0.03;
+		double dRho_dP = 0.0;
+		double c = 0.0;
+	};
+
 	inline bool ensure_WaterProp_Fields(FieldRegistry& reg, std::size_t n)
 	{
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().rho_tag, n, BASE_rho_w);				//rho，kg/m³
@@ -22,6 +32,8 @@ namespace Water_Prop
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().k_tag, n, BASE_k_w);					//k，W/(m·K)
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag, n, BASE_Drho_Dp_w);	//drho_dp，kg/(m³·Pa)
 		reg.getOrCreate <volScalarField>(PhysicalProperties_string::Water().c_w_tag, n, BASE_c_w);				//水的可压缩系数，1/Pa
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag, n, 0);					// Mobility of Water
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().k_rw_tag, n, 0);						// Relative permeability of Water
 
 		//old time layer
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().rho_old_tag, n, BASE_rho_w);
@@ -30,6 +42,8 @@ namespace Water_Prop
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().k_old_tag, n, BASE_k_w);
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_old_tag, n, BASE_Drho_Dp_w);
 		reg.getOrCreate <volScalarField>(PhysicalProperties_string::Water().c_w_old_tag, n, BASE_c_w);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().lambda_w_old_tag, n, 0);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().k_rw_old_tag, n, 0);
 
 		return true;
 	}
@@ -42,12 +56,17 @@ namespace Water_Prop
 		auto TF = reg.get<volScalarField>(T_field);
 		auto p_wF = reg.get<volScalarField>(p_w_field);
 
+		ensure_WaterProp_Fields(reg, n);
+
 		auto rho_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
 		auto cp_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);
 		auto k_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_tag);
 		auto mu_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);
 		auto Drho_Dp_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag);
 		auto c_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().c_w_tag);
+		auto lambda_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+		auto k_rwF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_rw_tag);
+
 
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
@@ -58,12 +77,15 @@ namespace Water_Prop
 			double p_w = (*p_wF)[i];
 
 			//当前传入Base参数，开展常物性测试，但是提供温度和压力接口
-			(*rho_wF)[i] = BASE_rho_w;
-			(*cp_wF)[i] = BASE_cp_w;
-			(*k_wF)[i] = BASE_k_w;
-			(*mu_wF)[i] = BASE_mu_w;
-			(*Drho_Dp_wF)[i] = BASE_Drho_Dp_w;
-			(*c_wF)[i] = BASE_c_w;
+			(*rho_wF)[i] = waterProperties().rho;
+			(*cp_wF)[i] = waterProperties().cp;
+			(*k_wF)[i] = waterProperties().k;
+			(*mu_wF)[i] = waterProperties().mu;
+			(*Drho_Dp_wF)[i] = waterProperties().dRho_dP;
+			(*c_wF)[i] = waterProperties().c;
+			//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
+			(*lambda_wF)[i] = (*k_rwF)[i] / std::max((*mu_wF)[i], 1e-20);
+
 		}
 		return true;
 	}
@@ -87,6 +109,8 @@ namespace Water_Prop
 		auto cp_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);
 		auto k_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_tag);
 		auto mu_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);
+		auto lambda_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+		auto k_rwF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_rw_tag);
 
 		auto wt = WaterPropertyTable::instance();
 
@@ -99,18 +123,20 @@ namespace Water_Prop
 			try { const auto W = wt.getProperties(p, T); rho = W.rho; mu = W.mu; cp = W.cp; k = W.k; }
 			catch (...) {  }
 			(*rho_wF)[i] = rho; (*mu_wF)[i] = mu; (*cp_wF)[i] = cp; (*k_wF)[i] = k;
+			//流度计算
+			(*lambda_wF)[i] = (*k_rwF)[i] / std::max((*mu_wF)[i], 1e-20);
+		
 		}
 		return true;
 	}
 
 	// 在 (p_eval, T_eval) 处评估 ρ 与 ∂ρ/∂p
-	inline bool compute_water_DrhoDpAt
+	inline bool compute_water_DrhoDp
 	(
 		MeshManager& mgr, FieldRegistry& reg,
 		const std::string& p_eval_name,
 		const std::string& T_eval_name,
-		const std::string& drhodp_out ,
-		double dp_rel = 1e-4, double dp_abs_min = 10.0
+		double dp_rel = 1e-4, double dp_abs_min = 1.0
 	)
 	{
 		auto& mesh = mgr.mesh();
@@ -122,11 +148,11 @@ namespace Water_Prop
 		auto TE = reg.get<volScalarField>(T_eval_name);
 		if (!pE || !TE) 
 		{
-			std::cerr << "[computeRhoAndDrhoDpAt] missing eval fields '"
+			std::cerr << "[computeRhoAndDrhoDp] missing eval fields '"
 				<< p_eval_name << "' or '" << T_eval_name << "'\n";
 			return false;
 		}
-		auto dF = reg.getOrCreate<volScalarField>(drhodp_out, cells.size(), 0.0);
+		auto dF = reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag, cells.size(), 0.0);
 		auto& wt = WaterPropertyTable::instance();
 		for (const auto& c : cells)
 		{
@@ -146,6 +172,42 @@ namespace Water_Prop
 			}
 			catch (...) { /* 出界兜底：rp/rm 用 rho_lin */ }
 			(*dF)[i] = (rp - rm) / std::max(2.0 * dpa, 1e-12);
+		}
+		return true;
+	}
+
+	// 计算当水为基岩中唯一流体时，的有效热物性参数 是否为常数取决于compute_water_properties_const还是computer_water_properties_LAPWS
+	inline bool computer_effectiveThermalProperties(MeshManager& mgr, FieldRegistry& reg)
+	{
+		auto& mesh = mgr.mesh();
+		const auto& cells = mesh.getCells();
+		const size_t n = cells.size();
+
+		ensure_WaterProp_Fields(reg, n);
+
+		// 岩石参数（必须存在）
+		auto phiF = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
+		auto rrF = reg.get<volScalarField>(PhysicalProperties_string::Rock().rho_tag);
+		auto cprF = reg.get<volScalarField>(PhysicalProperties_string::Rock().cp_tag);
+		auto lamrF = reg.get<volScalarField>(PhysicalProperties_string::Rock().lambda_tag);
+
+
+		//流体物性参数
+		auto rho_gF = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+		auto cp_gF = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);
+		auto k_gF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_tag);
+
+		// 有效热参数场
+		auto Ceff = reg.getOrCreate<volScalarField>(PhysicalProperties_string::SinglePhase_case().C_eff_tag, n, 0.0);
+		auto lame = reg.getOrCreate<volScalarField>(PhysicalProperties_string::SinglePhase_case().lambda_eff_tag, n, 0.0);
+		for (size_t ic = 0; ic < cells.size(); ++ic)
+		{
+			const auto& c = cells[ic];
+			if (c.id < 0) continue;
+			const size_t i = mesh.getCellId2Index().at(c.id);
+
+			(*Ceff)[i] = (1.0 - (*phiF)[i]) * (*rrF)[i] * (*cprF)[i] + (*phiF)[i] * (*rho_gF)[i] * (*cp_gF)[i];
+			(*lame)[i] = (1.0 - (*phiF)[i]) * (*lamrF)[i] + (*phiF)[i] * (*k_gF)[i];
 		}
 		return true;
 	}

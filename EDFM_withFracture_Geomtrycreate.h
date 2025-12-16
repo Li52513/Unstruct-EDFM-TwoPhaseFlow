@@ -156,13 +156,7 @@ int EDFM_withFracture_Geomtry()
 
     //8）基岩物性参数设置
     //   a.固相参数
-    ppm.UpdateMatrixRockAt(mgr, reg, "p_g", "T");
-
-    //   b.流体参数
-    ppm.UpdateMatrixFluidAt(mgr, reg, "p_g", "T", "CO2");
-
-    //   c.有效热物性参数
-    ppm.ComputeMatrixEffectiveThermalsAt(mgr, reg, "p_g", "T", "CO2", 1e-12);
+    ppm.UpdateRockProperties(mgr, reg, "p_g", "T");
 
     //9）裂缝物性参数设置
     //   a.固相参数

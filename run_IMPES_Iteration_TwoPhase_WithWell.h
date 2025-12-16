@@ -85,7 +85,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     // ---------- 2. 基岩区域分类与固相物性 ----------
     PhysicalPropertiesManager ppm;
     ppm.classifyRockRegionsByGeometry(mgr, {}, Cell::RegionType::Medium);
-    ppm.UpdateMatrixRockAt(mgr, reg, P_Eq.pressure_field, "T");
+    ppm.UpdateRockProperties(mgr, reg, P_Eq.pressure_field, "T");
 
     // ---------- 3. 压力边界条件（左高右低，其他 no-flow） ----------
     const auto& bfaces = mgr.boundaryFaces();

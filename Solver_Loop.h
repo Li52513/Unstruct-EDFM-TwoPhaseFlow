@@ -106,9 +106,21 @@ namespace SinglePhase {
 		{
 				// 你当前用的是“常物性模块”，这里保持接口不变；
 				// 后续切换变物性，只替换这三行即可。
-				ppm.CO2Properties_test_constProperties_singlePhase_CO2(mgr, reg);
-				ppm.RockProperties_test_constProperties_singlePhase_CO2(mgr, reg);
-				ppm.ComputeEffectiveThermalProperties_constProperties_singlePhase_CO2_T_H(mgr, reg);
+				if (!ppm.UpdateCO2Properties(mgr, reg, p_name, T_name))
+				{
+					std::cerr << "[SinglePhase-HT] update CO2 properties failed.\n";
+					return false;
+				};
+				if (!ppm.UpdateRockProperties(mgr, reg, p_name, T_name))
+				{
+					std::cerr << "[SinglePhase-HT] update rock properties failed.\n";
+					return false;
+				};
+				if (!ppm.ComputeEffectiveThermalProperties_CO2(mgr, reg))
+				{
+					std::cerr << "[SinglePhase-HT] compute effective thermal properties failed.\n";
+					return false;
+				}
 				return true;
 		};
 		// 初始物性更新一次（确保 rho / Ceff 等场已存在）

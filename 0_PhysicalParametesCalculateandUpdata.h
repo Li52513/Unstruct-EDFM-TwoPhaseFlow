@@ -4,6 +4,12 @@
 #include "InitConfig.h"					// Where VGParams and RelPermParams are defined
 #include "CapRelPerm_Simple.h"         // Simplified Pc/kr model (linear Pc + Corey kr)
 #include "Solver_TimeLoopUtils.h"		// CopyField here
+#include "SolverContrlStrName.h"
+#include "PhysicalPropertiesManager.h"
+#include "CO2_Properties.h"
+#include "Water_Properties.h"
+#include "RockSolidProperties.h"
+
 
 
 namespace TwoPhase
@@ -71,53 +77,21 @@ namespace TwoPhase
 	*/
 	inline void ensureCO2inRockFields(FieldRegistry& reg, std::size_t n)
 	{
-		// Ensure CO2 properties fields exist 
-		// If they do not exist, create them with default constant values
-		//Basic properties
-		
-		
-		reg.getOrCreate<volScalarField>(CO2().rho_tag, n, 800.0);// Density of CO2 
-		reg.getOrCreate<volScalarField>(CO2().mu_tag, n, 1.48e-5);// Viscosity of CO2
-		reg.getOrCreate<volScalarField>(CO2().drho_g_dp_tag, n, 0.0);// Derivative of density of CO2 to pressure
-
-		reg.getOrCreate<volScalarField>(CO2().rho_old_tag, n, 800.0);// Density of CO2 old
-		reg.getOrCreate<volScalarField>(CO2().mu_old_tag, n, 1.48e-5);// Viscosity of CO2 old
-		reg.getOrCreate<volScalarField>(CO2().drho_g_dp_old_tag, n, 0.0);// Derivative of density of CO2 to pressure old
-		
-		// Two-phase properties
-		reg.getOrCreate<volScalarField>(CO2().k_rg_tag, n, 0.0);// Relative permeability of CO2
-		reg.getOrCreate<volScalarField>(CO2().lambda_g_tag, n, 0.0);// Mobility of CO2
+		CO2_Prop::ensure_CO2Prop_Fields(reg, n);
 	}
 	/**
 	* To ensure the Water properties fields exist in the FieldRegistry
 	*/
 	inline void ensureWaterinRockFields(FieldRegistry& reg, std::size_t n)
 	{
-		// Ensure Water properties fields exist 
-		// If they do not exist, create them with default constant values
-		//Basic properties
-		reg.getOrCreate<volScalarField>(Water().rho_tag, n, 1000.0);// Density of Water 
-		reg.getOrCreate<volScalarField>(Water().mu_tag, n, 1.0e-3);// Viscosity of Water
-		reg.getOrCreate<volScalarField>(Water().drho_w_dp_tag, n, 0.0);// Derivative of density of Water to pressure
-
-		reg.getOrCreate<volScalarField>(Water().rho_old_tag, n, 1000.0);// Density of Water old
-		reg.getOrCreate<volScalarField>(Water().mu_old_tag, n, 1.0e-3);// Viscosity of Water old
-		reg.getOrCreate<volScalarField>(Water().drho_w_dp_old_tag, n, 0.0);// Derivative of density of Water to pressure old
-		
-		// Two-phase properties
-		reg.getOrCreate<volScalarField>(Water().k_rw_tag, n, 0.0);// Relative permeability of Water
-		reg.getOrCreate<volScalarField>(Water().lambda_w_tag, n, 0.0);// Mobility of Water
+		Water_Prop::ensure_WaterProp_Fields(reg, n);
 	}
 	/**
 	* To ensure the Rock properties fields exist in the FieldRegistry
 	*/
 	inline void ensureRockFields(FieldRegistry& reg, std::size_t n)
 	{
-		// Ensure Rock properties fields exist 
-		// If they do not exist, create them with default constant values
-		auto Rock_props = Rock();
-		reg.getOrCreate<volScalarField>(Rock_props.phi_tag, n, 0.2);// Porosity
-		reg.getOrCreate<volScalarField>(Rock_props.c_r_tag, n, 1.0e-9);// Rock compressibility
+		rock::ensure_RockProp_Fields(reg, n);
 	}
 	/**
 	* To ensure the Auxiliary parameters fields exist in the FieldRegistry
@@ -137,44 +111,42 @@ namespace TwoPhase
 
 	inline void computeWaterBasicPropertiesAtStep(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_inputfield, const std::string& T_inputfield)
 	{
-		auto& mesh = mgr.mesh();
-		const auto& cells = mesh.getCells();
-		const size_t n = cells.size();
-		auto TF = reg.get<volScalarField>(T_inputfield);
-		auto p_wF = reg.get<volScalarField>(p_w_inputfield);
-		if (!TF || !p_wF)
-		{
-			std::cerr << "[TwoPhase][Water] Missing temperature or pressure field for water property calculation.\n";
-			return;
-		}
-		auto rho_w = reg.get<volScalarField>(Water().rho_tag);
-		auto mu_w = reg.get<volScalarField>(Water().mu_tag);
-		auto drho_w_dp = reg.get<volScalarField>(Water().drho_w_dp_tag);
-		auto lambda_w = reg.get<volScalarField>(Water().lambda_w_tag);
-		auto k_rw = reg.get<volScalarField>(Water().k_rw_tag);
-		if (!rho_w || !mu_w || !drho_w_dp)
-		{
-			std::cerr << "[TwoPhase][Water] Missing water property fields for calculation at time step.\n";
-			return;
-		}
-
-		for (size_t ic = 0; ic < n; ++ic)
-		{
-			const auto& c = cells[ic];
-			if (c.id < 0) continue;
-			const size_t i = mesh.getCellId2Index().at(c.id);
-			double T = (*TF)[i];
-			double p_w = (*p_wF)[i];
-
-			//当前基本物性参数参数为常数
-			(*rho_w)[i] = 800.0; //kg/m3
-			(*mu_w)[i] = 1.0e-3; //Pa.s
-			(*drho_w_dp)[i] = 0.0; //kg/m3.Pa
-			
-			//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
-			(*lambda_w)[i] = (*k_rw)[i] / std::max((*mu_w)[i], 1e-20);
-
-		}
+		//auto& mesh = mgr.mesh();
+		//const auto& cells = mesh.getCells();
+		//const size_t n = cells.size();
+		//auto TF = reg.get<volScalarField>(T_inputfield);
+		//auto p_wF = reg.get<volScalarField>(p_w_inputfield);
+		//if (!TF || !p_wF)
+		//{
+		//	std::cerr << "[TwoPhase][Water] Missing temperature or pressure field for water property calculation.\n";
+		//	return;
+		//}
+		//auto rho_w = reg.get<volScalarField>(Water().rho_tag);
+		//auto mu_w = reg.get<volScalarField>(Water().mu_tag);
+		//auto drho_w_dp = reg.get<volScalarField>(Water().drho_w_dp_tag);
+		//auto lambda_w = reg.get<volScalarField>(Water().lambda_w_tag);
+		//auto k_rw = reg.get<volScalarField>(Water().k_rw_tag);
+		//if (!rho_w || !mu_w || !drho_w_dp)
+		//{
+		//	std::cerr << "[TwoPhase][Water] Missing water property fields for calculation at time step.\n";
+		//	return;
+		//}
+		//for (size_t ic = 0; ic < n; ++ic)
+		//{
+		//	const auto& c = cells[ic];
+		//	if (c.id < 0) continue;
+		//	const size_t i = mesh.getCellId2Index().at(c.id);
+		//	double T = (*TF)[i];
+		//	double p_w = (*p_wF)[i];
+		//	//当前基本物性参数参数为常数
+		//	(*rho_w)[i] = 800.0; //kg/m3
+		//	(*mu_w)[i] = 1.0e-3; //Pa.s
+		//	(*drho_w_dp)[i] = 0.0; //kg/m3.Pa
+		//	
+		//	//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
+		//	(*lambda_w)[i] = (*k_rw)[i] / std::max((*mu_w)[i], 1e-20);
+		//}
+		Water_Prop::compute_water_properties_const(mgr, reg, p_w_inputfield, T_inputfield);
 	}
 	/**
 	*  To calculate the CO2 basic properties at a certain step to get a output step  计算当前时刻CO2的基本物性参数   // old层的物性不需要计算  在进入迭代层前将计算后的基本物性参数复制存储到*_old中
@@ -182,44 +154,41 @@ namespace TwoPhase
 
 	inline void computeCO2BasicPropertiesAtStep(MeshManager& mgr, FieldRegistry& reg, const std::string& p_g_inputfield, const std::string& T_inputfield)
 	{
-		auto& mesh = mgr.mesh();
-		const auto& cells = mesh.getCells();
-		const size_t n = cells.size();
-		auto TF = reg.get<volScalarField>(T_inputfield);
-		auto p_gF = reg.get<volScalarField>(p_g_inputfield);
-		if (!TF || !p_gF)
-		{
-			std::cerr << "[TwoPhase][CO2] Missing temperature or pressure field for water property calculation.\n";
-			return;
-		}
-		auto rho_g = reg.get<volScalarField>(CO2().rho_tag);
-		auto mu_g = reg.get<volScalarField>(CO2().mu_tag);
-		auto drho_g_dp = reg.get<volScalarField>(CO2().drho_g_dp_tag);
-		auto lambda_g = reg.get<volScalarField>(CO2().lambda_g_tag);
-		auto k_rg = reg.get<volScalarField>(CO2().k_rg_tag);
-		if (!rho_g || !mu_g || !drho_g_dp)
-		{
-			std::cerr << "[TwoPhase][CO2] Missing water property fields for calculation at time step.\n";
-			return;
-		}
-
-		for (size_t ic = 0; ic < n; ++ic)
-		{
-			const auto& c = cells[ic];
-			const size_t i = mesh.getCellId2Index().at(c.id);
-			if (c.id < 0) continue;
-			double T = (*TF)[i];
-			double p_g = (*p_gF)[i];
-
-			//当前基本物性参数参数为常数
-			(*rho_g)[i] = 1000.0; //kg/m3
-			(*mu_g)[i] =	1e-3; //Pa.s
-			(*drho_g_dp)[i] = 0.0; //kg/m3.Pa
-
-			//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
-			(*lambda_g)[i] = (*k_rg)[i] / std::max((*mu_g)[i], 1e-20);
-
-		}
+		//auto& mesh = mgr.mesh();
+		//const auto& cells = mesh.getCells();
+		//const size_t n = cells.size();
+		//auto TF = reg.get<volScalarField>(T_inputfield);
+		//auto p_gF = reg.get<volScalarField>(p_g_inputfield);
+		//if (!TF || !p_gF)
+		//{
+		//	std::cerr << "[TwoPhase][CO2] Missing temperature or pressure field for water property calculation.\n";
+		//	return;
+		//}
+		//auto rho_g = reg.get<volScalarField>(CO2().rho_tag);
+		//auto mu_g = reg.get<volScalarField>(CO2().mu_tag);
+		//auto drho_g_dp = reg.get<volScalarField>(CO2().drho_g_dp_tag);
+		//auto lambda_g = reg.get<volScalarField>(CO2().lambda_g_tag);
+		//auto k_rg = reg.get<volScalarField>(CO2().k_rg_tag);
+		//if (!rho_g || !mu_g || !drho_g_dp)
+		//{
+		//	std::cerr << "[TwoPhase][CO2] Missing water property fields for calculation at time step.\n";
+		//	return;
+		//}
+		//for (size_t ic = 0; ic < n; ++ic)
+		//{
+		//	const auto& c = cells[ic];
+		//	const size_t i = mesh.getCellId2Index().at(c.id);
+		//	if (c.id < 0) continue;
+		//	double T = (*TF)[i];
+		//	double p_g = (*p_gF)[i];
+		//	//当前基本物性参数参数为常数
+		//	(*rho_g)[i] = 1000.0; //kg/m3
+		//	(*mu_g)[i] =	1e-3; //Pa.s
+		//	(*drho_g_dp)[i] = 0.0; //kg/m3.Pa
+		//	//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
+		//	(*lambda_g)[i] = (*k_rg)[i] / std::max((*mu_g)[i], 1e-20);
+		//}
+		CO2_Prop::compute_CO2_properties_const(mgr, reg, p_g_inputfield, T_inputfield);
 	}
 	/**
 	* 
@@ -249,8 +218,8 @@ namespace TwoPhase
 		}
 
 		// ===== Step 3: Get or Create All OUTPUT Fields =====
-		auto k_rw = reg.get<volScalarField>(Water().k_rw_tag);
-		auto k_rg = reg.get<volScalarField>(CO2().k_rg_tag);
+		auto k_rw = reg.get<volScalarField>(PhysicalProperties_string::Water().k_rw_tag);
+		auto k_rg = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_rg_tag);
 		auto Pc = reg.get<volScalarField>(Auxiliaryparameters().Pc_tag);
 		auto dPc_dSw = reg.get<volScalarField>(Auxiliaryparameters().dPc_dSw_tag);
 
@@ -311,43 +280,61 @@ namespace TwoPhase
 	inline bool copyBasicPropertiesToOldLayer(FieldRegistry& reg)
 	{
 		// Water properties
-		auto Water_props = Water();
-		auto rho_w = reg.get<volScalarField>(Water_props.rho_tag);
-		auto mu_w = reg.get<volScalarField>(Water_props.mu_tag);
-		auto drho_w_dp = reg.get<volScalarField>(Water_props.drho_w_dp_tag);
-
-
-		auto rho_w_old = reg.get<volScalarField>(Water_props.rho_old_tag);
-		auto mu_w_old = reg.get<volScalarField>(Water_props.mu_old_tag);
-		auto drho_w_dp_old = reg.get<volScalarField>(Water_props.drho_w_dp_old_tag);
 		
-		if (!rho_w || !mu_w || !drho_w_dp || !rho_w_old || !mu_w_old || !drho_w_dp_old)
+		auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+		auto mu_w = reg.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);
+		auto cp_w = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);
+		auto k_w = reg.get<volScalarField>(PhysicalProperties_string::Water().k_tag);
+		auto c_w = reg.get<volScalarField>(PhysicalProperties_string::Water().c_w_tag);
+		auto drho_w_dp = reg.get<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag);
+
+		auto rho_w_old = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_old_tag);
+		auto mu_w_old = reg.get<volScalarField>(PhysicalProperties_string::Water().mu_old_tag);
+		auto cp_w_old = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_old_tag);
+		auto k_w_old = reg.get<volScalarField>(PhysicalProperties_string::Water().k_old_tag);
+		auto c_w_old = reg.get<volScalarField>(PhysicalProperties_string::Water().c_w_old_tag);
+		auto drho_w_dp_old = reg.get<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_old_tag);
+
+		
+		if (!rho_w || !mu_w || !drho_w_dp || !rho_w_old || !mu_w_old || !drho_w_dp_old || !cp_w || !k_w || !c_w || !cp_w_old || !k_w_old || !c_w_old)
 		{
 			std::cerr << "[TwoPhase][Water] Missing water property fields for copying to old layer.\n";
 			return false;
 		}
-		copyField(reg, Water_props.rho_tag, Water_props.rho_old_tag);
-		copyField(reg, Water_props.mu_tag, Water_props.mu_old_tag);
-		copyField(reg, Water_props.drho_w_dp_tag, Water_props.drho_w_dp_old_tag);
+		copyField(reg, PhysicalProperties_string::Water().rho_tag, PhysicalProperties_string::Water().rho_old_tag);
+		copyField(reg, PhysicalProperties_string::Water().mu_tag, PhysicalProperties_string::Water().mu_old_tag);
+		copyField(reg, PhysicalProperties_string::Water().cp_tag, PhysicalProperties_string::Water().cp_old_tag);
+		copyField(reg, PhysicalProperties_string::Water().k_tag, PhysicalProperties_string::Water().k_old_tag);
+		copyField(reg, PhysicalProperties_string::Water().c_w_tag, PhysicalProperties_string::Water().c_w_old_tag);
+		copyField(reg, PhysicalProperties_string::Water().drho_w_dp_tag, PhysicalProperties_string::Water().drho_w_dp_old_tag);
 
 		// CO2 properties
-		auto CO2_props = CO2();
-		auto rho_g = reg.get<volScalarField>(CO2_props.rho_tag);
-		auto mu_g = reg.get<volScalarField>(CO2_props.mu_tag);
-		auto drho_g_dp = reg.get<volScalarField>(CO2_props.drho_g_dp_tag);
+		auto rho_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
+		auto mu_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().mu_tag);
+		auto cp_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().cp_tag);
+		auto k_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_tag);
+		auto c_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().c_g_tag);
+		auto drho_g_dp = reg.get<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag);
 
-		auto rho_g_old = reg.get<volScalarField>(CO2_props.rho_old_tag);
-		auto mu_g_old = reg.get<volScalarField>(CO2_props.mu_old_tag);
-		auto drho_g_dp_old = reg.get<volScalarField>(CO2_props.drho_g_dp_old_tag);
+		auto rho_g_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_old_tag);
+		auto mu_g_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().mu_old_tag);
+		auto cp_g_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().cp_old_tag);
+		auto k_g_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_old_tag);
+		auto c_g_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().c_g_old_tag);
+		auto drho_g_dp_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_old_tag);
 
-		if (!rho_g || !mu_g || !drho_g_dp || !rho_g_old || !mu_g_old || !drho_g_dp_old)
+		if (!rho_g || !mu_g || !drho_g_dp || !rho_g_old || !mu_g_old || !drho_g_dp_old || !cp_g || !k_g || !c_g || !cp_g_old || !k_g_old || !c_g_old)
 		{
 			std::cerr << "[TwoPhase][CO2] Missing CO2 property fields for copying to old layer.\n";
 			return false;
 		}
-		copyField(reg, CO2_props.rho_tag, CO2_props.rho_old_tag);
-		copyField(reg, CO2_props.mu_tag, CO2_props.mu_old_tag);
-		copyField(reg, CO2_props.drho_g_dp_tag, CO2_props.drho_g_dp_old_tag);
+		copyField(reg, PhysicalProperties_string::CO2().rho_tag, PhysicalProperties_string::CO2().rho_old_tag);
+		copyField(reg, PhysicalProperties_string::CO2().mu_tag, PhysicalProperties_string::CO2().mu_old_tag);
+		copyField(reg, PhysicalProperties_string::CO2().cp_tag, PhysicalProperties_string::CO2().cp_old_tag);
+		copyField(reg, PhysicalProperties_string::CO2().k_tag, PhysicalProperties_string::CO2().k_old_tag);
+		copyField(reg, PhysicalProperties_string::CO2().c_g_tag, PhysicalProperties_string::CO2().c_g_old_tag);
+		copyField(reg, PhysicalProperties_string::CO2().drho_g_dp_tag, PhysicalProperties_string::CO2().drho_g_dp_old_tag);
+
 		return true;
 	}
 
@@ -357,10 +344,10 @@ namespace TwoPhase
 		const auto& cells = mesh.getCells();
 		const size_t n = cells.size();
 		auto lambda_mass = reg.getOrCreate<volScalarField>(Auxiliaryparameters().lambda_mass_tag, n, 0.0);
-		auto lambda_w = reg.get<volScalarField>(Water().lambda_w_tag);
-		auto lambda_g = reg.get<volScalarField>(CO2().lambda_g_tag);
-		auto rho_w = reg.get<volScalarField>(Water().rho_tag);
-		auto rho_g = reg.get<volScalarField>(CO2().rho_tag);
+		auto lambda_w = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+		auto lambda_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
+		auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+		auto rho_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
 		if (!lambda_w || !lambda_g || !rho_w || !rho_g)
 		{
 			std::cerr << "[TwoPhase] Missing fields for calculating total mobility.\n";
