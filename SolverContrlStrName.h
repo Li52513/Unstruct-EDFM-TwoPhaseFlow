@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <string>
 #include "CapRelPerm.h"
+#include "0_PhysicalParametesCalculateandUpdata.h"
 
 namespace IMPES_Iteration
 {
@@ -62,15 +63,105 @@ namespace IMPES_Iteration
 
 }
 
-namespace SinglePhase {
+namespace SinglePhase 
+{
+    struct PhysicalParameters_String
+    {
+        //Fluid in matrix
+        std::string rho_fluid_field = "rho_g";         
+        std::string rho_fluid_old_field = "rho_g_old";  
+        std::string drho_dp_tag = "Drho_Dp_g";
+        std::string cp_fluid_field = "cp_g"; 
+        std::string C_eff_field = "C_eff";
+        std::string C_eff_old_field = "C_eff_old";
+
+        //Matrix Rock
+        std::string phi_tag = "phi_r";				//porosity
+        std::string c_r_tag = "c_r";				//rock compressibility
+    };
     
     struct PressureEquation_String
     {
-        std::string operator_tag = "p_g_singlePhase"; // pressure operator tag for nm
-        std::string pressure_field = "p_g";    // current eval pressure field
+        std::string operator_tag = "p_g_singlePhase";   // pressure operator tag for nm
+        std::string pressure_field = "p_g";             // current eval pressure field
         std::string pressure_old_field = "p_g_old";
         std::string pressure_prev_field = "p_g_prev";
     };
 
+    struct TemperatureEquation_String
+    {
+        std::string operator_tag = "T_singlePhase";   // Temperature operator tag for nm
+        std::string temperatue_field = "T";
+        std::string temperatue_old_field = "T_old";
+        std::string temperatue_prev_field = "T_prev";
+    };
+
+    struct FaceMassRate_String
+    {
+        ///储存通量名称的场
+        std::string total_mass_flux_name = "mf_total";
+        std::string total_vol_flux_name = "Qf_total";
+        std::string total_velocity_name = "ufn_total";
+    };
 }
+
+namespace PhysicalProperties_string
+{
+    struct Water
+    {
+        // Basic properties
+        std::string rho_tag = "rho_w";
+        std::string mu_tag = "mu_w";
+        std::string k_tag = "k_w";
+        std::string cp_tag = "cp_w";
+        std::string drho_w_dp_tag = "drho_wdp";
+		std::string c_w_tag = "c_w";             
+        // old timen layer
+        std::string rho_old_tag = "rho_w_old";
+        std::string mu_old_tag = "mu_w_old";
+        std::string k_old_tag = "k_w_old";
+        std::string cp_old_tag = "cp_w_old";
+        std::string drho_w_dp_old_tag = "drho_wdp_old";
+		std::string c_w_old_tag = "c_w_old";      
+        // Two-phase properties
+        std::string k_rw_tag = "k_rw";				//relative permeability of water
+        std::string lambda_w_tag = "lambda_w";		//mobility of water
+    };
+
+    struct CO2
+    {
+        // Basic properties
+        std::string rho_tag = "rho_g";
+        std::string mu_tag = "mu_g";
+        std::string k_tag = "k_g";
+        std::string cp_tag = "cp_g";
+        std::string drho_g_dp_tag = "drho_gdp";
+        std::string c_g_tag = "c_g";
+        // old timen layer
+        std::string rho_old_tag = "rho_g_old";
+        std::string mu_old_tag = "mu_g_old";
+        std::string k_old_tag = "k_g_old";
+        std::string cp_old_tag = "cp_g_old";
+        std::string drho_g_dp_old_tag = "drho_gdp_old";
+        std::string c_g_old_tag = "c_g_old";
+        // Two-phase properties
+        std::string k_rg_tag = "k_rg";				//relative permeability 
+        std::string lambda_g_tag = "lambda_g";		//mobility
+    };
+
+    struct Rock
+    {
+		// Bsic properties
+		std::string phi_tag = "phi_r";				//porosity
+		std::string rho_tag = "rho_r";				//rock density
+		std::string cp_tag = "cp_r";				//rock specific heat capacity
+		std::string lambda_tag = "lambda_r";				//rock thermal conductivity
+        std::string k_xx_tag = "kxx";
+		std::string k_yy_tag = "kyy";
+		std::string k_zz_tag = "kzz";
+		std::string c_r_tag = "c_r";				//rock compressibility
+    };
+}
+
+
 

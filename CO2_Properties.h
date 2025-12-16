@@ -1,9 +1,11 @@
-#pragma once
-#include "PropertiesSummary.h" // ÀïÃæ¶¨Òå CO2ËùĞèÒªµÄÎïĞÔ²ÎÊı
+ï»¿#pragma once
+#include "PropertiesSummary.h" // é‡Œé¢å®šä¹‰ CO2æ‰€éœ€è¦çš„ç‰©æ€§å‚æ•°
 #include "MeshManager.h"
 #include "FieldRegistry.h"
+#include "SolverContrlStrName.h"
+#include "CO2PropertyTable.h"
 
-namespace CO2_in_rock
+namespace CO2_Prop
 {
 	static constexpr double BASE_rho_g = 800;
 	static constexpr double BASE_cp_g = 1200;
@@ -12,7 +14,26 @@ namespace CO2_in_rock
 	static constexpr double BASE_Drho_Dp_g = 0;
 	static constexpr double BASE_c_g = 0;
 
-	inline bool computeCO2inROCKProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_g_field,const std::string& T_field)  //ÕâÀï´«Èë»ùÑÒµÄÑ¹Á¦ºÍÎÂ¶È µ«ÊÇ¶ÔÓÚIMPESÀ´Ëµ£¬²»»á¸üĞÂÕâÀïµÄ²ÎÊı
+	inline bool ensure_CO2Prop_Fields(FieldRegistry& reg, std::size_t n)
+	{
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().rho_tag, n, BASE_rho_g);				//rhoï¼Œkg/mÂ³
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().mu_tag, n, BASE_mu_g);				//muï¼ŒPaÂ·s
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().cp_tag, n, BASE_cp_g);				//Cpï¼ŒJ/(kgÂ·K)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().k_tag, n, BASE_k_g);					//kï¼ŒW/(mÂ·K)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag, n, BASE_Drho_Dp_g);	//drho_dpï¼Œkg/(mÂ³Â·Pa)
+		reg.getOrCreate <volScalarField>(PhysicalProperties_string::CO2().c_g_tag, n, BASE_c_g);				//äºŒæ°§åŒ–ç¢³çš„å¯å‹ç¼©ç³»æ•°ï¼Œ1/Pa
+
+		//old time layer
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().rho_old_tag, n, BASE_rho_g);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().mu_old_tag, n, BASE_mu_g);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().cp_old_tag, n, BASE_cp_g);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().k_old_tag, n, BASE_k_g);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_old_tag, n, BASE_Drho_Dp_g);
+		reg.getOrCreate <volScalarField>(PhysicalProperties_string::CO2().c_g_old_tag, n, BASE_c_g);
+		return true;
+
+	}
+	inline bool compute_CO2_properties_const(MeshManager& mgr, FieldRegistry& reg, const std::string& p_g_field,const std::string& T_field)  //è¿™é‡Œä¼ å…¥åŸºå²©çš„å‹åŠ›å’Œæ¸©åº¦ ä½†æ˜¯å¯¹äºIMPESæ¥è¯´ï¼Œä¸ä¼šæ›´æ–°è¿™é‡Œçš„å‚æ•°
 	{
 		auto& mesh = mgr.mesh();
 		const auto& cells = mesh.getCells();
@@ -20,14 +41,12 @@ namespace CO2_in_rock
 		auto TF = reg.get<volScalarField>(T_field);
 		auto p_gF= reg.get<volScalarField>(p_g_field);
 
-		auto rho_gF = reg.get<volScalarField>("rho_g");
-		auto cp_gF = reg.get<volScalarField>("cp_g");
-		auto k_gF = reg.get<volScalarField>("k_g");
-		auto mu_gF = reg.get<volScalarField>("mu_g");
-		auto Drho_Dp_gF = reg.get<volScalarField>("Drho_Dp_g");
-		auto c_gF = reg.get<volScalarField>("c_g");
-
-
+		auto rho_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
+		auto cp_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().cp_tag);
+		auto k_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_tag);
+		auto mu_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().mu_tag);
+		auto Drho_Dp_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag);
+		auto c_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().c_g_tag);
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
 			const auto& c = cells[ic];
@@ -36,61 +55,50 @@ namespace CO2_in_rock
 			double T = (*TF)[i];
 			double p_g = (*p_gF)[i];
 
-			//µ±Ç°´«ÈëBase²ÎÊı£¬¿ªÕ¹³£ÎïĞÔ²âÊÔ£¬µ«ÊÇÌá¹©ÎÂ¶ÈºÍÑ¹Á¦½Ó¿Ú
+			//å½“å‰ä¼ å…¥Baseå‚æ•°ï¼Œå¼€å±•å¸¸ç‰©æ€§æµ‹è¯•ï¼Œä½†æ˜¯æä¾›æ¸©åº¦å’Œå‹åŠ›æ¥å£
 			(*rho_gF)[i] = BASE_rho_g;
 			(*cp_gF)[i]  = BASE_cp_g;
 			(*k_gF)[i]   = BASE_k_g;
 			(*mu_gF)[i]  = BASE_mu_g;
 			(*Drho_Dp_gF)[i] = BASE_Drho_Dp_g;
-			(*c_gF)[i] = BASE_c_g; //¼ÙÉè¿ÉÑ¹ËõÏµÊıÎª1/p
+			(*c_gF)[i] = BASE_c_g; //å‡è®¾å¯å‹ç¼©ç³»æ•°ä¸º1/p
 		}
-
 		return true;
 	}
-}
 
-namespace CO2_in_fracture
-{
-	static constexpr double BASE_rho_g = 800;
-	static constexpr double BASE_cp_g = 1200;
-	static constexpr double BASE_k_g = 0.05;
-	static constexpr double BASE_mu_g = 1.48e-5;
-	static constexpr double BASE_Drho_Dp_g = 0;
-
-	inline bool computerCO2inFractureProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& p_field_fr, const std::string& T_field_fr)
+	inline bool computer_CO2_propertier_Span_Wagner(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field)
 	{
+		// TO DO åŸºäºSpan-WagnerçŠ¶æ€æ–¹ç¨‹è®¡ç®—CO2çš„ç‰©æ€§å‚æ•°
 		auto& mesh = mgr.mesh();
-		// Í³¼ÆÁÑ·ì¶Î×ÜÊı
-		size_t Nseg = 0;
-		for (auto& F : mgr.fracture_network().fractures) Nseg += F.elements.size();
+		const auto& cells = mesh.getCells();
+		const size_t n = cells.size();
+		ensure_CO2Prop_Fields (reg, n);
+		auto TF = reg.get<volScalarField>(T_field);
+		auto pF = reg.get<volScalarField>(p_field);
+		if (!pF || !TF) {
+			std::cerr << "[PPM][Fluid] missing fields '" << p_field << "' or '" << T_field << "'.\n";
+			return false;
+		}
+		auto rho_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
+		auto cp_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().cp_tag);
+		auto k_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_tag);
+		auto mu_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().mu_tag);
 
-		auto pF = reg_fr.get<volScalarField>(p_field_fr);
-		auto TF = reg_fr.get<volScalarField>(T_field_fr);
-		if (!pF || !TF) { std::cerr << "[PPM][FrFluid] missing fields.\n"; }
-
-		auto fr_rho_g = reg_fr.get<volScalarField>("fr_rho_g");
-		auto fr_mu_g = reg_fr.get<volScalarField>("fr_mu_g");
-		auto fr_cp_g = reg_fr.get<volScalarField>("fr_cp_g");
-		auto fr_k_g = reg_fr.get<volScalarField>("fr_k_g");
-		auto fr_Drho_Dp_g = reg_fr.get<volScalarField>("fr_Drho_Dp_g");
-		auto fr_c_w_g = reg_fr.get<volScalarField>("fr_c_g"); // CO2 ¿ÉÑ¹ËõÏµÊı
-
-		size_t gid = 0;
-		for (auto& F : mgr.fracture_network().fractures) 
+		auto gt = CO2PropertyTable::instance();
+		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
-			for (auto& E : F.elements) 
-			{
-				(*fr_rho_g)[gid] = BASE_rho_g;
-				(*fr_mu_g)[gid] = BASE_mu_g;
-				(*fr_cp_g)[gid] = BASE_cp_g;
-				(*fr_k_g)[gid] = BASE_k_g;
-				(*fr_Drho_Dp_g)[gid] = BASE_Drho_Dp_g;
-				double p_g = (*pF)[gid];
-				(*fr_c_w_g)[gid] = 1 / p_g; //¼ÙÉè¿ÉÑ¹ËõÏµÊıÎª1/p
-				++gid;
-			}
+			const auto& c = cells[ic];
+			if (c.id < 0) continue;
+			const size_t i = mesh.getCellId2Index().at(c.id);
+			double p = (*pF)[i], T = (*TF)[i];
+			double rho = BASE_rho_g, mu = BASE_mu_g, cp = BASE_cp_g, k = BASE_k_g;
+			try { const auto G = gt.getProperties(p, T); rho = G.rho; mu = G.mu; cp = G.cp; k = G.k; }
+			catch (...) {}
+			(*rho_gF)[i] = rho; (*mu_gF)[i] = mu; (*cp_gF)[i] = cp; (*k_gF)[i] = k;
 		}
 		return true;
-
 	}
+
 }
+
+

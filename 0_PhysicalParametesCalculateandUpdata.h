@@ -1,9 +1,9 @@
 #pragma once
 #include "MeshManager.h"
 #include "FieldRegistry.h"
-#include "InitConfig.h"         // Where VGParams and RelPermParams are defined
+#include "InitConfig.h"					// Where VGParams and RelPermParams are defined
 #include "CapRelPerm_Simple.h"         // Simplified Pc/kr model (linear Pc + Corey kr)
-#include "Solver_TimeLoopUtils.h" // CopyField here
+#include "Solver_TimeLoopUtils.h"		// CopyField here
 
 
 namespace TwoPhase

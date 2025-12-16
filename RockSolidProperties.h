@@ -1,37 +1,112 @@
-#pragma once
+ï»¿#pragma once
 #include "Cell.h"
+#include "MeshManager.h"
+#include "FieldRegistry.h"
 #include"PropertiesSummary.h"
+#include "SolverContrlStrName.h"
 
 namespace rock
 {
-    /// ¸ù¾İ cell.region ºÍ (P,T) ·µ»Ø»ùÑÒ¹ÌÏàÎïĞÔ
+    struct Rock_heterogeneous_Parameters
+    {
+
+        double phi_r_high = 0.4;         // å­”éš™åº¦
+        double kxx_high = 1e-13;           // æ¸—é€ç‡ï¼ŒmÂ²
+        double kyy_high = 1e-13;
+        double kzz_high = 1e-13;
+
+        double phi_r_medium = 0.3;         // å­”éš™åº¦
+        double kxx_medium = 1e-14;           // æ¸—é€ç‡ï¼ŒmÂ²
+        double kyy_medium = 1e-14;
+        double kzz_medium = 1e-14;
+
+        double phi_r_low = 0.2;         // å­”éš™åº¦
+        double kxx_low = 1e-15;           // æ¸—é€ç‡ï¼ŒmÂ²
+        double kyy_low = 1e-15;
+        double kzz_low = 1e-15;
+    };
+
+
+    /// æ ¹æ® cell.region å’Œ (P,T) è¿”å›åŸºå²©å›ºç›¸ç‰©æ€§
     SolidProperties_RockMatrix computeSolidProperties(Cell::RegionType region, double P, double T);
 
-    // ¾ßÌå³£Êı»ò¾­Ñé¹«Ê½
-    static constexpr double BASE_RHO = 2650.0;  // ÃÜ¶È
-    static constexpr double BASE_CP = 1000.0;   // ±ÈÈÈÈİ
-    static constexpr double BASE_K = 2.5;       // µ¼ÈÈÏµÊı
-    static constexpr double BASE_COMP = 1e-8;   // ¿ÉÑ¹ËõÏµÊı
+    // å…·ä½“å¸¸æ•°æˆ–ç»éªŒå…¬å¼
+    static constexpr double BASE_RHO = 2650.0;  // å¯†åº¦
+    static constexpr double BASE_CP = 1000.0;   // æ¯”çƒ­å®¹
+    static constexpr double BASE_K = 2.5;       // å¯¼çƒ­ç³»æ•°
+    static constexpr double BASE_COMP = 1e-8;   // å¯å‹ç¼©ç³»æ•°
 
-    // º¯Êı¶¨Òå
+    inline bool ensure_RockProp_Fields(FieldRegistry& reg, std::size_t n)
+    {
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().rho_tag, n, BASE_RHO);        // rhoï¼Œkg/mÂ³
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().cp_tag, n, BASE_CP);          // Cpï¼ŒJ/(kgÂ·K)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().lambda_tag, n, BASE_K);       // kï¼ŒW/(mÂ·K)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().c_r_tag, n, BASE_COMP);       // å¯å‹ç¼©ç³»æ•°ï¼Œ1/Pa
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().phi_tag, n, 0.2);            // å­”éš™åº¦
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().k_xx_tag, n, 1e-14);          // æ¸—é€ç‡ï¼ŒmÂ²
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().k_yy_tag, n, 1e-14);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().k_zz_tag, n, 1e-14);
+		return true;
+    }
+
+	// æŒ‰åŒºåŸŸåˆ’åˆ†åï¼Œè®¡ç®—æ¯ä¸ªcellçš„åŸºå²©ç‰©æ€§å‚æ•°
     inline SolidProperties_RockMatrix computeSolidProperties(Cell::RegionType region, double P, double T)
     {
+        Rock_heterogeneous_Parameters r;
         SolidProperties_RockMatrix s;
         s.rho_r = BASE_RHO;
         s.cp_r = BASE_CP;
         s.k_r = BASE_K;
         s.compressibility = BASE_COMP;
 
-        // ÏÖÔÚ¾ùÊÇ³£Êı£¬ºóÆÚ¿ÉÒÔÓÅ»¯·ÅÈë²»Í¬µÄ·½³Ì
+        // ç°åœ¨å‡æ˜¯å¸¸æ•°ï¼ŒåæœŸå¯ä»¥ä¼˜åŒ–æ”¾å…¥ä¸åŒçš„æ–¹ç¨‹
         switch (region)
         {
         case Cell::RegionType::Low:
-            s.phi_r = 0.3;  s.kxx = 1e-15; s.kyy = 1e-15; s.kzz = 1e-15;  break;
+            s.phi_r = r.phi_r_low;  s.kxx = r.kxx_low; s.kyy = r.kyy_low; s.kzz = r.kzz_low;  break;
         case Cell::RegionType::Medium:
-            s.phi_r = 0.5;  s.kxx = 1e-14; s.kyy = 1e-14; s.kzz = 1e-14; break;
+            s.phi_r = r.phi_r_medium;  s.kxx = r.kxx_medium; s.kyy = r.kyy_medium; s.kzz = r.kzz_medium; break;
         case Cell::RegionType::High:
-            s.phi_r = 0.3;  s.kxx = 1e-11; s.kyy = 1e-11; s.kzz = 1e-11; break;
+            s.phi_r = r.phi_r_high;  s.kxx = r.kxx_high; s.kyy = r.kyy_high; s.kzz = r.kzz_high; break;
         }
         return s;
     }
+
+	inline bool computer_rock_properties (MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field)
+	{
+
+		auto& mesh = mgr.mesh();
+		const auto& cells = mesh.getCells();
+		const size_t n = cells.size();
+		auto TF = reg.get<volScalarField>(T_field);
+		auto pF = reg.get<volScalarField>(p_field);
+
+		ensure_RockProp_Fields(reg, n);
+
+		auto rho_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().rho_tag);
+		auto cp_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().cp_tag);
+		auto k_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().lambda_tag);
+		auto c_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().c_r_tag);
+		auto phi_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
+		auto kxx_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().k_xx_tag);
+		auto kyy_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().k_yy_tag);
+		auto kzz_rF = reg.get<volScalarField>(PhysicalProperties_string::Rock().k_zz_tag);
+		for (size_t ic = 0; ic < cells.size(); ++ic)
+		{
+			const auto& c = cells[ic];
+			const size_t i = mesh.getCellId2Index().at(c.id);
+			double T = (*TF)[i];
+			double P = (*pF)[i];
+			const auto sp = computeSolidProperties(c.region, P, T);
+			(*rho_rF)[i] = sp.rho_r;
+			(*cp_rF)[i] = sp.cp_r;
+			(*k_rF)[i] = sp.k_r;
+			(*c_rF)[i] = sp.compressibility;
+			(*phi_rF)[i] = sp.phi_r;
+			(*kxx_rF)[i] = sp.kxx;
+			(*kyy_rF)[i] = sp.kyy;
+			(*kzz_rF)[i] = sp.kzz;
+		}
+		return true;
+	}
 }

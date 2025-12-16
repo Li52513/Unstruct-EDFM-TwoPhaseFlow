@@ -8,7 +8,7 @@
 namespace GeneralTools
 {
     //  复制标量场：dst <- src
-    inline bool copyField
+    inline bool copyField1
     (
         FieldRegistry& reg, // 需要确保 src 和 dst 都存在
         const std::string& src_name, //被复制的场
@@ -22,6 +22,69 @@ namespace GeneralTools
         std::copy(src->data.begin(), src->data.end(), dst->data.begin()); // 复制
         return true;
     }
+
+    inline bool ensureTransientFields_scalar1
+    (
+        Mesh& mesh,
+        FieldRegistry& reg,
+        const std::string& var_name,
+        const std::string& var_old_name,
+        const std::string& var_prev_name
+    )
+    {
+        const auto& cells = mesh.getCells();
+        const auto& id2idx = mesh.getCellId2Index();
+        const size_t n = cells.size();
+
+        // —— 基础场：若不存在就创建，若尺寸不符就调整 —— //
+        auto var = reg.get<volScalarField>(var_name);
+        bool base_created_or_resized = false;
+        if (!var) {
+            var = reg.getOrCreate<volScalarField>(var_name, n, 0.0);
+            base_created_or_resized = true;
+        }
+        else if (var->data.size() != n) {
+            var->data.resize(n, 0.0);
+            base_created_or_resized = true;
+        }
+
+        // 小工具：确保某个场存在且尺寸为 n
+        auto ensureSized = [&](const std::string& name, std::shared_ptr<volScalarField>& out)->bool {
+            out = reg.get<volScalarField>(name);
+            bool changed = false;
+            if (!out) { out = reg.getOrCreate<volScalarField>(name, n, 0.0); changed = true; }
+            else if (out->data.size() != n) { out->data.resize(n, 0.0); changed = true; }
+            return changed;
+            };
+
+        std::shared_ptr<volScalarField> var_old, var_prev;
+        const bool need_init_old = ensureSized(var_old_name, var_old);
+        const bool need_init_prev = ensureSized(var_prev_name, var_prev);
+
+        // 若新建/尺寸变化（包括基础场）→ 用当前 var 值初始化 *_old/*_prev
+        if (need_init_old || need_init_prev || base_created_or_resized) {
+            for (const auto& c : cells) {
+                if (c.id < 0) continue; // 跳过 ghost
+                const size_t i = id2idx.at(c.id);
+                if (need_init_old || base_created_or_resized) (*var_old)[i] = (*var)[i];
+                if (need_init_prev || base_created_or_resized) (*var_prev)[i] = (*var)[i];
+            }
+        }
+        return true;
+    }
+
+    /// 时间步迭代开始
+    inline bool startTimeStep_scalar(Mesh& mesh, FieldRegistry& reg, const std::string& x_name, const std::string& x_old_name, const std::string& x_prev_name)
+    {
+        if (!ensureTransientFields_scalar1(mesh, reg, x_name, x_old_name, x_prev_name)) return false;
+        // x^n
+        if (!copyField1(reg, x_name, x_old_name)) return false; //将x 复制到_old
+        // prev ← old (给 k=0 的外迭代作为初值)
+        if (!copyField1(reg, x_old_name, x_prev_name)) return false; //将x_old 复制到 x_prev
+        return true;
+    }
+
+
     //  外迭代步开始
     inline bool startOuterIteration_scatter
     (
@@ -31,7 +94,7 @@ namespace GeneralTools
     )
     {
         bool ok = true;
-        ok = ok && copyField(reg, x_prev_name, x_name);
+        ok = ok && copyField1(reg, x_prev_name, x_name);
         return ok;
 
     }
@@ -120,7 +183,7 @@ namespace GeneralTools
     {
         bool ok = true;
         for (const auto& pr : pairs) {
-            ok = ok && copyField(reg, pr.first, pr.second);
+            ok = ok && copyField1(reg, pr.first, pr.second);
         }
         return ok;
     }

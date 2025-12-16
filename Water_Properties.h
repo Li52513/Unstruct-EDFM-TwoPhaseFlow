@@ -1,18 +1,40 @@
-#pragma once
-#include "PropertiesSummary.h" // ÀïÃæ¶¨Òå Ë®ËùĞèÒªµÄÎïĞÔ²ÎÊı
+ï»¿#pragma once
+#include "PropertiesSummary.h" // é‡Œé¢å®šä¹‰ æ°´æ‰€éœ€è¦çš„ç‰©æ€§å‚æ•°
 #include "MeshManager.h"
 #include "FieldRegistry.h"
+#include "SolverContrlStrName.h"
+#include "WaterPropertyTable.h"
 
-namespace Water_in_rock
+namespace Water_Prop
 {
 	static constexpr double BASE_rho_w = 980;
 	static constexpr double BASE_cp_w = 4300;
 	static constexpr double BASE_k_w = 0.05;
 	static constexpr double BASE_mu_w = 3e-54;
 	static constexpr double BASE_Drho_Dp_w = 0;
-	static constexpr double BASE_c_w = 4.5e-10; //Ñ¹ËõÏµÊı
+	static constexpr double BASE_c_w = 0; //å‹ç¼©ç³»æ•°
 
-	inline bool computeWATERinROCKProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_field, const std::string& T_field)  //ÕâÀï´«Èë»ùÑÒµÄÑ¹Á¦ºÍÎÂ¶È µ«ÊÇ¶ÔÓÚIMPESÀ´Ëµ£¬²»»á¸üĞÂÕâÀïµÄ²ÎÊı
+	inline bool ensure_WaterProp_Fields(FieldRegistry& reg, std::size_t n)
+	{
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().rho_tag, n, BASE_rho_w);				//rhoï¼Œkg/mÂ³
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().mu_tag, n, BASE_mu_w);				//muï¼ŒPaÂ·s
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().cp_tag, n, BASE_cp_w);				//Cpï¼ŒJ/(kgÂ·K)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().k_tag, n, BASE_k_w);					//kï¼ŒW/(mÂ·K)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag, n, BASE_Drho_Dp_w);	//drho_dpï¼Œkg/(mÂ³Â·Pa)
+		reg.getOrCreate <volScalarField>(PhysicalProperties_string::Water().c_w_tag, n, BASE_c_w);				//æ°´çš„å¯å‹ç¼©ç³»æ•°ï¼Œ1/Pa
+
+		//old time layer
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().rho_old_tag, n, BASE_rho_w);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().mu_old_tag, n, BASE_mu_w);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().cp_old_tag, n, BASE_cp_w);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().k_old_tag, n, BASE_k_w);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_old_tag, n, BASE_Drho_Dp_w);
+		reg.getOrCreate <volScalarField>(PhysicalProperties_string::Water().c_w_old_tag, n, BASE_c_w);
+
+		return true;
+	}
+
+	inline bool compute_water_properties_const(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_field, const std::string& T_field)  //è¿™é‡Œä¼ å…¥åŸºå²©çš„å‹åŠ›å’Œæ¸©åº¦ ä½†æ˜¯å¯¹äºIMPESæ¥è¯´ï¼Œä¸ä¼šæ›´æ–°è¿™é‡Œçš„å‚æ•°
 	{
 		auto& mesh = mgr.mesh();
 		const auto& cells = mesh.getCells();
@@ -20,13 +42,12 @@ namespace Water_in_rock
 		auto TF = reg.get<volScalarField>(T_field);
 		auto p_wF = reg.get<volScalarField>(p_w_field);
 
-		auto rho_wF = reg.get<volScalarField>("rho_w");
-		auto cp_wF = reg.get<volScalarField>("cp_w");
-		auto k_wF = reg.get<volScalarField>("k_w");
-		auto mu_wF = reg.get<volScalarField>("mu_w");
-		auto Drho_Dp_wF = reg.get<volScalarField>("Drho_Dp_w");
-
-		auto c_wF = reg.get<volScalarField>("c_w"); //Ñ¹ËõÏµÊı
+		auto rho_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+		auto cp_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);
+		auto k_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_tag);
+		auto mu_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);
+		auto Drho_Dp_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag);
+		auto c_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().c_w_tag);
 
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
@@ -36,7 +57,7 @@ namespace Water_in_rock
 			double T = (*TF)[i];
 			double p_w = (*p_wF)[i];
 
-			//µ±Ç°´«ÈëBase²ÎÊı£¬¿ªÕ¹³£ÎïĞÔ²âÊÔ£¬µ«ÊÇÌá¹©ÎÂ¶ÈºÍÑ¹Á¦½Ó¿Ú
+			//å½“å‰ä¼ å…¥Baseå‚æ•°ï¼Œå¼€å±•å¸¸ç‰©æ€§æµ‹è¯•ï¼Œä½†æ˜¯æä¾›æ¸©åº¦å’Œå‹åŠ›æ¥å£
 			(*rho_wF)[i] = BASE_rho_w;
 			(*cp_wF)[i] = BASE_cp_w;
 			(*k_wF)[i] = BASE_k_w;
@@ -46,52 +67,88 @@ namespace Water_in_rock
 		}
 		return true;
 	}
-}
 
-namespace Water_in_fracture
-{
-	static constexpr double BASE_rho_w = 980;
-	static constexpr double BASE_cp_w = 4300;
-	static constexpr double BASE_k_w = 0.05;
-	static constexpr double BASE_mu_w = 3e-4;
-	static constexpr double BASE_Drho_Dp_w = 0;
-	static constexpr double BASE_c_w = 1; //Ñ¹ËõÏµÊı
-
-	inline bool computerWaterinFractureProperties(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& p_field_fr, const std::string& T_field_fr)
+	//åŸºäºLAPWSæ¨¡å‹ï¼Œåˆ©ç”¨æ’å€¼è¡¨è®¡ç®—æ°´çš„ç‰©æ€§å‚æ•°
+	inline bool computer_water_properties_LAPWS(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field)
 	{
 		auto& mesh = mgr.mesh();
-		// Í³¼ÆÁÑ·ì¶Î×ÜÊı
-		size_t Nseg = 0;
-		for (auto& F : mgr.fracture_network().fractures) Nseg += F.elements.size();
+		const auto& cells = mesh.getCells();
+		const size_t n = cells.size();
 
-		auto pF = reg_fr.get<volScalarField>(p_field_fr);
-		auto TF = reg_fr.get<volScalarField>(T_field_fr);
-		if (!pF || !TF) { std::cerr << "[PPM][FrFluid] missing fields.\n"; }
+		ensure_WaterProp_Fields(reg, n);
 
-		auto fr_rho_w = reg_fr.get<volScalarField>("fr_rho_w");
-		auto fr_mu_w = reg_fr.get<volScalarField>("fr_mu_w");
-		auto fr_cp_w = reg_fr.get<volScalarField>("fr_cp_w");
-		auto fr_k_w = reg_fr.get<volScalarField>("fr_k_w");
-		auto fr_Drho_Dp_w = reg_fr.get<volScalarField>("fr_Drho_Dp_w");
-		auto fr_c_w = reg_fr.get<volScalarField>("fr_c_w"); //Ñ¹ËõÏµÊı
-
-		size_t gid = 0;
-		for (auto& F : mgr.fracture_network().fractures)
-		{
-			for (auto& E : F.elements)
-			{
-				(*fr_rho_w)[gid] = BASE_rho_w;
-				(*fr_mu_w)[gid] = BASE_mu_w;
-				(*fr_cp_w)[gid] = BASE_cp_w;
-				(*fr_k_w)[gid] = BASE_k_w;
-				(*fr_Drho_Dp_w)[gid] = BASE_Drho_Dp_w;
-				(*fr_c_w)[gid] = BASE_c_w;
-				++gid;
-			}
+		auto pF = reg.get<volScalarField>(p_field);
+		auto TF = reg.get<volScalarField>(T_field);
+		if (!pF || !TF) {
+			std::cerr << "[PPM][Fluid] missing fields '" << p_field << "' or '" << T_field << "'.\n";
+			return false;
 		}
+		auto rho_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+		auto cp_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);
+		auto k_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_tag);
+		auto mu_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);
 
+		auto wt = WaterPropertyTable::instance();
+
+		for (size_t ic = 0; ic < cells.size(); ++ic)
+		{
+			const auto& c = cells[ic];
+			const size_t i = mesh.getCellId2Index().at(c.id);
+			double p = (*pF)[i], T = (*TF)[i]; 
+			double rho = 1000, mu = 1e-3, cp = 4200, k = 0.6;
+			try { const auto W = wt.getProperties(p, T); rho = W.rho; mu = W.mu; cp = W.cp; k = W.k; }
+			catch (...) {  }
+			(*rho_wF)[i] = rho; (*mu_wF)[i] = mu; (*cp_wF)[i] = cp; (*k_wF)[i] = k;
+		}
 		return true;
-
 	}
-}
+
+	// åœ¨ (p_eval, T_eval) å¤„è¯„ä¼° Ï ä¸ âˆ‚Ï/âˆ‚p
+	inline bool compute_water_DrhoDpAt
+	(
+		MeshManager& mgr, FieldRegistry& reg,
+		const std::string& p_eval_name,
+		const std::string& T_eval_name,
+		const std::string& drhodp_out ,
+		double dp_rel = 1e-4, double dp_abs_min = 10.0
+	)
+	{
+		auto& mesh = mgr.mesh();
+		const auto& cells = mesh.getCells();
+		const auto& id2idx = mesh.getCellId2Index();
+		if (cells.empty()) return false;
+
+		auto pE = reg.get<volScalarField>(p_eval_name);
+		auto TE = reg.get<volScalarField>(T_eval_name);
+		if (!pE || !TE) 
+		{
+			std::cerr << "[computeRhoAndDrhoDpAt] missing eval fields '"
+				<< p_eval_name << "' or '" << T_eval_name << "'\n";
+			return false;
+		}
+		auto dF = reg.getOrCreate<volScalarField>(drhodp_out, cells.size(), 0.0);
+		auto& wt = WaterPropertyTable::instance();
+		for (const auto& c : cells)
+		{
+			const size_t i = id2idx.at(c.id);
+			double p = (*pE)[i], T = (*TE)[i];
+			double rho_lin = 1000.0;
+			try { rho_lin = wt.getProperties(p, T).rho; }
+			catch (...) { /* å‡ºç•Œå…œåº•ï¼šä¿æŒ rho_lin é»˜è®¤ */ }
+			// å¯¹ç§°å·®åˆ†ï¼šdrho/dp â‰ˆ [Ï(p+dp,T) - Ï(p-dp,T)] / (2dp)
+			const double dpa = std::max(dp_abs_min, std::abs(p) * dp_rel);
+			double rp = rho_lin, rm = rho_lin;
+			try 
+			{
+				double pp = p + dpa, pm = p - dpa;
+				rp = wt.getProperties(pp, T).rho;
+				rm = wt.getProperties(pm, T).rho;
+			}
+			catch (...) { /* å‡ºç•Œå…œåº•ï¼šrp/rm ç”¨ rho_lin */ }
+			(*dF)[i] = (rp - rm) / std::max(2.0 * dpa, 1e-12);
+		}
+		return true;
+	}
+
+} //namespace Water_Prop
 

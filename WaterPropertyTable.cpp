@@ -6,7 +6,8 @@
 #include <algorithm>
 #include <experimental/filesystem>
 
-namespace {
+namespace 
+{
     // 在 axis（升序）里定位 x 所在的小区间 [i0,i1] 以及分数 frac
     inline void bracket2(const std::vector<double>& axis, double x,
         size_t& i0, size_t& i1, double& frac)
@@ -44,10 +45,7 @@ namespace {
         return bilerp_linear(v00, v10, v01, v11, a, b);
     }
 }
-
-
 namespace fs = std::experimental::filesystem;
-
 
 // 单例的定义
 WaterPropertyTable& WaterPropertyTable::instance()
@@ -55,7 +53,6 @@ WaterPropertyTable& WaterPropertyTable::instance()
     static WaterPropertyTable inst("D:/dataBase_MatrialProperties/Water_LAPWS-95.txt");
     return inst;
 }
-
 
 // 构造时自动加载
 WaterPropertyTable::WaterPropertyTable(const std::string& filename)
@@ -125,7 +122,6 @@ void WaterPropertyTable::load(const std::string& filename)
             rows.push_back(r);
         }
     }
-
     // 构造升序唯一 pressures_
     {
         std::vector<double> tmp;
@@ -146,7 +142,6 @@ void WaterPropertyTable::load(const std::string& filename)
         tmp.erase(std::unique(tmp.begin(), tmp.end()), tmp.end());
         temps_ = std::move(tmp);
     }
-
     // 填充 data_
     size_t np = pressures_.size(), nt = temps_.size();
     data_.assign(np, std::vector<WaterProperties>(nt));
@@ -155,7 +150,6 @@ void WaterPropertyTable::load(const std::string& filename)
         size_t iT = std::lower_bound(temps_.begin(), temps_.end(), r.T) - temps_.begin();
         data_[iP][iT] = r.w;
     }
-
     // 3) 写入二进制缓存
     {
         std::ofstream binOut(cacheFile, std::ios::binary);

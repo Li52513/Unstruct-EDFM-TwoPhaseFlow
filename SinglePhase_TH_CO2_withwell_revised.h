@@ -5,15 +5,9 @@
 #include <vector>
 #include <iostream>
 
-#include "PhysicalPropertiesManager.h"
-#include "BCAdapter.h"
-#include "TemperatureBCAdapter.h"
-#include "Solver_TimeLoopUtils.h" 
-#include "Solver_TimeLoopDriver.h"
-#include "WellConfig.h"
 #include "Solver_Loop.h"
 
-int SinglePhase_CO2_TH_withWell()
+int SinglePhase_CO2_TH_withWell_reviese()
 {
     //定义几何区域参数
     double lengthX = 1, lengthY = 1, lengthZ = 0;
@@ -86,11 +80,11 @@ int SinglePhase_CO2_TH_withWell()
     inj1.role = WellDOF::Role::Injector;
     inj1.geom.name = inj1.name;               // 便于日志
     inj1.geom.pos = Vector(0.25, 0.8, 0.0);
-    inj1.geom.rw = 0.1;
+    inj1.geom.rw = 0.001;
     inj1.geom.skin = 0.0;
     inj1.geom.H = 1.0;
-    inj1.geom.perfRadius = 0.21*lengthX/sectionNumX;
-    inj1.geom.maxHitCells = 5;
+    inj1.geom.perfRadius =0;
+    inj1.geom.maxHitCells = 8;
     inj1.pm = prm;                           // 拷贝全局 Peaceman 参数
     inj1.mode = WellDOF::Mode::Rate;       // 固定井底压
     inj1.target = 2;                         // BHP
@@ -104,11 +98,11 @@ int SinglePhase_CO2_TH_withWell()
     inj2.role = WellDOF::Role::Injector;
     inj2.geom.name = inj2.name;
     inj2.geom.pos = Vector(0.25, 0.2, 0.0);
-    inj2.geom.rw = 0.1;
+    inj2.geom.rw = 0.001;
     inj2.geom.skin = 0.0;
     inj2.geom.H = 1.0;
-    inj2.geom.perfRadius = 0.21*lengthX/sectionNumX;
-    inj2.geom.maxHitCells = 5;
+    inj2.geom.perfRadius = 0;
+    inj2.geom.maxHitCells = 8;
     inj2.pm = prm;
     inj2.mode = WellDOF::Mode::Rate; //Rate Pressure
     inj2.target = 2;
@@ -130,92 +124,29 @@ int SinglePhase_CO2_TH_withWell()
     prod1.pm = prm;
     prod1.mode = WellDOF::Mode::Pressure;
     prod1.target = 5e6;
-    prod1.Tin = 0.0;
+    prod1.Tin = 0.0;                       
     prod1.derive_names_if_empty();             // mask_prod_1 / PI_prod_1 / p_w_prod_1
     wellsCfg.push_back(prod1);
-
-    // —— 生成掩码与 PI（每井一组字段） —— //
-    build_masks_and_PI_for_all(mgr, reg, wellsCfg);
-
-    // —— 注册 DoF —— //
-    const int Nc = (int)mgr.mesh().getCells().size();
-    std::vector<WellDOF> wells;
-    const int Ntot = register_well_dofs_for_all(Nc, wellsCfg, wells);
 
     // 6) 求解器与时间推进设置
     Vector g = { 0.0, 0.0, 0.0 };
 
-    SolverControls sc;
-    sc.maxOuter = 200;              // 允许的最大外迭代
-    sc.useJacobi = false;
+    SinglePhase::FaceMassRateConfig mf_ctrl;
+    SinglePhase::PressureSolveControls p_sol_ctrl;
+    SinglePhase::TemperatureSolveControls T_sol_ctrl;
+    const int writeEveryP = 1;
+    const int writeEveryT = 1;
 
-    // —— 压力收敛与线性求解 —— //
-    sc.tol_p_abs = 1e-6;
-    sc.tol_p_rel = 1e-6;
-    sc.urf_p =1;
-
-    sc.lin_p.type = LinearSolverOptions::Type::BiCGSTAB;
-    sc.lin_p.maxIters = 4000;
-    sc.lin_p.tol = sc.tol_p_abs;
-    sc.lin_p.iluFill = 15;
-    sc.lin_p.iluDrop = 5e-5;
-
-    // —— 温度收敛与线性求解 —— //
-    sc.tol_T_abs = 1e-8;
-    sc.tol_T_rel = 1e-6;
-    sc.urf_T = 1;
-
-    sc.lin_T.type = LinearSolverOptions::Type::BiCGSTAB;
-    sc.lin_T.maxIters = 4000;
-    sc.lin_T.tol = sc.tol_T_abs;
-    sc.lin_T.iluFill = 25;
-    sc.lin_T.iluDrop = 1e-5;
-
-    // —— Step 1/3: 压力子循环与增量通量控制 —— //
-    sc.NsweepP_max = 3;       // 每次外迭代内的压力子扫上限
-    sc.tol_p_inner = 2e-7;    // 子扫提前退出阈值
-    sc.enable_incremental_convection = false;
-    sc.kappa_p_for_flux_update = 0.5;   // 压力进度阈值
-    sc.incremental_flip_ratio = 0.02;    // 面符号翻转占比阈值
-    sc.flux_sign_epsilon = 1e-14;
-
-    // —— Step 4: Aitken 加速 —— //
-    sc.enable_Aitken_p = true;
-    sc.enable_Aitken_T = true;
-    sc.aitken_omega_min = 0.05;
-    sc.aitken_omega_max = 1.10;
-
-    // —— Step 5: 线性求解器复用 —— //
-    sc.reuse_linear_pattern = true;
-    sc.rebuild_precond_every = 3;    // 每 3 次子扫刷新一次 ILUT 预条件器
-
-    // —— Step 6: CFL Guard —— //
-    sc.enable_CFL_guard = true;
-    sc.CFL_T_threshold = 0.8;      // 若 maxCFL_T > 0.8 即触发子步
-    sc.CFL_dt_scale_min = 0.25;     // 子步时间不得小于 0.25*dt
+    const std::string outPrefixP = "./Postprocess_Data/SinglePhase_revised/Case1/P";
+    const std::string outPrefixT = "./Postprocess_Data/SinglePhase_revised/Case1/T";
+    const int snapshotEveryCsv = 1;
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case13/pT_state";
 
     // —— 时间步 —— //
     const int    nSteps = 100;
     const double dt = 1000.0 / nSteps;
 
-    bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell(mgr, reg, freg, ppm, TbcA, PbcA, g, nSteps, dt, sc, wellsCfg, 1, 1, "./Postprocess_Data/P_CO2_withWell_rate_withoutUr/p", "./Postprocess_Data/T_CO2_withWell_rate_withoutUr/T");
-    // —— 调用加速版时间推进 —— //
-    //bool ok = runTransient_constProperties_singlePhase_CO2_T_H_withWell_accel(
-    //    mgr, reg, freg, ppm,
-    //    TbcA, PbcA, g,
-    //    nSteps, dt,
-    //    sc, wellsCfg,
-    //    /*writeEveryP*/ 1,
-    //    /*writeEveryT*/ 1,
-    //    "./Postprocess_Data/P_CO2_accel/p",
-    //    "./Postprocess_Data/T_CO2_accel/T",
-    //    /*runtimeIn*/ nullptr   // 若想跨步复用，可传入持久化的 OuterIterRuntime
-    //);
-
-    if (!ok) {
-        std::cerr << "[MAIN] Accelerated transient run failed.\n";
-        return 1;
-    }
+    bool ok = SinglePhase::runTransient_SinglePhase_HT_Iteration(mgr, reg, freg, ppm, TbcA, PbcA, wellsCfg, p_sol_ctrl, mf_ctrl, T_sol_ctrl, dt, nSteps, g, writeEveryP, writeEveryT, outPrefixP, outPrefixT, snapshotEveryCsv, snapshotPrefix);
 
     std::cout << "[MAIN] Accelerated run finished.\n";
     return 0;

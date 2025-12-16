@@ -84,6 +84,59 @@ namespace FVM {
             return true;
         }
 
+        inline bool TimeTerm_FullyImplicit_SinglePhase_Temperature_revised(
+            MeshManager& mgr,
+            FieldRegistry& reg,
+            double dt,
+            const std::string& Ceff_star_name,   // C_eff^*  (current iterate)
+            const std::string& Ceff_old_name,    // C_eff^n  (frozen at step start)
+            const std::string& T_old_name,       // T^n      (frozen at step start)
+            const std::string& aC_name,          // output diagonal
+            const std::string& bC_name           // output RHS constant
+        ) {
+            if (dt <= 0.0 || !std::isfinite(dt)) {
+                std::cerr << "[TimeTerm_T] invalid dt.\n";
+                return false;
+            }
+
+            auto& mesh = mgr.mesh();
+            const auto& cells = mesh.getCells();
+            const auto& id2idx = mesh.getCellId2Index();
+
+            auto Cstar = reg.get<volScalarField>(Ceff_star_name.c_str());
+            auto Cold = reg.get<volScalarField>(Ceff_old_name.c_str());
+            auto Told = reg.get<volScalarField>(T_old_name.c_str());
+            if (!Cstar || !Cold || !Told) {
+                std::cerr << "[TimeTerm_T] missing fields: "
+                    << Ceff_star_name << " or " << Ceff_old_name
+                    << " or " << T_old_name << "\n";
+                return false;
+            }
+
+            auto aC = reg.getOrCreate<volScalarField>(aC_name.c_str(), cells.size(), 0.0);
+            auto bC = reg.getOrCreate<volScalarField>(bC_name.c_str(), cells.size(), 0.0);
+            std::fill(aC->data.begin(), aC->data.end(), 0.0);
+            std::fill(bC->data.begin(), bC->data.end(), 0.0);
+
+            const double inv_dt = 1.0 / dt;
+            const double epsC = 0.0; // 可设为小正数避免极端病态
+
+            for (const auto& c : cells) {
+                if (c.id < 0) continue;
+                const size_t i = id2idx.at(c.id);
+
+                const double V = std::max(0.0, c.volume);
+                const double C_s = std::max(epsC, (*Cstar)[i]); // C_eff^*
+                const double C_n = std::max(epsC, (*Cold)[i]); // C_eff^n
+                const double T_n = (*Told)[i];                  // T^n
+
+                // Backward Euler + Picard:
+                // (V/dt) * ( C^* T^{n+1} - C^n T^n )
+                (*aC)[i] = V * inv_dt * C_s;
+                (*bC)[i] = V * inv_dt * C_n * T_n;
+            }
+            return true;
+        }
 
 
         inline bool TimeTerm_FullyImplicit_SinglePhase_Flow(

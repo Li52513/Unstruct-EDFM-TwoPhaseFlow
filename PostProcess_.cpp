@@ -215,4 +215,81 @@ bool outputTecplot_cellToFaceToNode_BC(
     return true;
 }
 
+// 4) 一条龙：cell→face(含ABC+梯度缓冲)→node→Tecplot(三角)
+bool outputTecplot_cellToFaceToNode_BC_P(
+    MeshManager& mgr,
+    const FieldRegistry& reg,
+    FaceFieldRegistry& freg,
+    const TemperatureBCAdapter* Tbc,
+    const PressureBCAdapter* Pbc,
+    const std::string& cellFieldName,
+    const std::string& faceFieldName,
+    const std::vector<Vector>* gradBuf,
+    const std::string& outFilename
+) {
+    // 1) cell -> face
+    bool ok = false;
+    if (Tbc) ok = getFaceValueFromCellValue_T(mgr, reg, freg, *Tbc, cellFieldName, faceFieldName, gradBuf);
+    else if (Pbc) ok = getFaceValueFromCellValue_P(mgr, reg, freg, *Pbc, cellFieldName, faceFieldName, gradBuf);
+    else ok = getFaceValueFromCellValue_plain(mgr, reg, freg, cellFieldName, faceFieldName);
+    if (!ok) return false;
+
+    // 2) face -> node
+    std::vector<double> nodeVals;
+    if (!getNodeValueFromFaceValue(mgr, freg, faceFieldName, nodeVals)) return false;
+
+    // 3) 写 Tecplot（关键修补：将 CellNodeIDs 的“节点ID”映射为 1-based 顺序下标）
+    Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
+    const auto& nodes = mesh.getNodes();
+    const auto& cells = mesh.getCells();
+
+    if (nodeVals.size() != nodes.size()) {
+        std::cerr << "[Tecplot] node value size mismatch.\n";
+        return false;
+    }
+
+    // —— 建立 nodeId -> 顺序下标（0-based），然后写连通时 +1 —— //
+    //    nodes[i].id  可能是任意 ID； Tecplot 需要的是 “第 i 行” 的 1-based 下标
+    std::unordered_map<int, int> nodeId2Seq;
+    nodeId2Seq.reserve(nodes.size());
+    for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
+        nodeId2Seq[nodes[i].id] = i;  // 0-based
+    }
+
+    std::ofstream ofs(outFilename, std::ios::out);
+    if (!ofs) { std::cerr << "[Tecplot] cannot open file: " << outFilename << "\n"; return false; }
+
+    ofs << "Variables = x, y, P\n";
+    ofs << "Zone  n=" << nodes.size()
+        << "  e=" << cells.size()
+        << "  f=fepoint  et=triangle\n";
+
+    // 写节点表：坐标 + 节点值（与 nodes 的顺序一致）
+    for (size_t in = 0; in < nodes.size(); ++in) {
+        // 你的 Vector 成员可能是 x/y 或 m_x/m_y；按你工程里一致的那个来：
+        // 如果是 .x/.y 就改成 nodes[in].coord.x / .y
+        ofs << nodes[in].coord.m_x << "  " << nodes[in].coord.m_y << "  " << nodeVals[in] << "\n";
+    }
+
+    // 写单元连通：将 “节点ID” 转换为 “顺序下标 + 1（Tecplot 1-based）”
+    for (const auto& c : cells) {
+        for (size_t k = 0; k < c.CellNodeIDs.size(); ++k) {
+            const int nodeId = c.CellNodeIDs[k];
+            auto it = nodeId2Seq.find(nodeId);
+            if (it == nodeId2Seq.end()) {
+                std::cerr << "[Tecplot] cell " << c.id << " references unknown nodeId " << nodeId << "\n";
+                ofs.close();
+                return false;
+            }
+            const int tecIndex = it->second + 1; // 1-based
+            ofs << tecIndex << (k + 1 == c.CellNodeIDs.size() ? '\n' : ' ');
+        }
+    }
+
+    ofs.close();
+    return true;
+}
+
+
+
 

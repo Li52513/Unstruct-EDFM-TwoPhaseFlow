@@ -25,6 +25,8 @@ namespace FVM {
             const char* p_cell,
             const char* cp_field,
             double thickness,
+            const char* a_src_name,
+            const char* b_src_name,
             bool accumulate,
             bool verbose = false)
         {
@@ -42,10 +44,10 @@ namespace FVM {
                 return false;
             }
 
-            auto aT = reg.get<volScalarField>("a_src_T");
-            auto bT = reg.get<volScalarField>("b_src_T");
-            if (!aT) aT = reg.create<volScalarField>("a_src_T", Nc, 0.0);
-            if (!bT) bT = reg.create<volScalarField>("b_src_T", Nc, 0.0);
+            auto aT = reg.get<volScalarField>(a_src_name);
+            auto bT = reg.get<volScalarField>(b_src_name);
+            if (!aT) aT = reg.create<volScalarField>(a_src_name, Nc, 0.0);
+            if (!bT) bT = reg.create<volScalarField>(b_src_name, Nc, 0.0);
             if (!accumulate) {
                 for (int i = 0; i < Nc; ++i) { (*aT)[i] = 0.0; (*bT)[i] = 0.0; }
             }

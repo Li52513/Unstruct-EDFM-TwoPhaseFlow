@@ -18,6 +18,8 @@ namespace FVM {
             const char* p_cell,
             const char* cp_field,
             double thickness,
+            const char* a_src_name,
+            const char* b_src_name,
             bool accumulate,
             bool verbose);   // --- new ---
     } // namespace SourceTerm

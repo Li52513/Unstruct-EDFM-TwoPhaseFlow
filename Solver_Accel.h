@@ -876,6 +876,8 @@ inline bool solveTemperatureStage(
                     Tin,
                     "p_g", "cp_g",
                     1.0,
+                nmT.a_src.c_str(),
+                nmT.b_src.c_str(),
                     !first,
                     false))
                 return false;

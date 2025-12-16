@@ -1,5 +1,4 @@
 ﻿#pragma once
-#pragma once
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -19,13 +18,11 @@
 #include"ConvectionUpwind_Flux.h"
 #include"ConvectionUpwind.h"
 #include"Timeterm_BDF.h"
-#include "FVM_BuildinSourceTerm.h"
-#include "FVM_SourceTerm_ProdWellOps.h"
 #include "FVM_WellCoupling.h"
 #include "FVM_WellDOF.h"
 #include "FVM_SourceTerm_WellHeat.h"
 #include "WellConfig.h"
-#include "InflowPatch.h"
+
 
 
 //==================== 欠松弛应用 ====================//
@@ -684,6 +681,8 @@ inline bool doOneOutert_constProperties_singlePhase_CO2_T_H_closed_withWell
 				Tin,
 				/*p*/ "p_g", /*cp*/ "cp_g",
 				/*thickness*/ 1.0,
+				nmT.a_src.c_str(),
+				nmT.b_src.c_str(),
 				/*accumulate*/ !first,
 				/*verbose*/ false))                                  // <- new argument
 				return false;

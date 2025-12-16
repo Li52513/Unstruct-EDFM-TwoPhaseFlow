@@ -12,7 +12,6 @@
 #include "Timeterm_BDF.h"
 
 #include "LinearSolver_Eigen.h"
-#include "PhysicalPropertiesManager.h"
 #include "WellConfig.h"
 #include "FVM_WellCoupling.h"
 
@@ -20,6 +19,7 @@ namespace SinglePhase {
 
 	struct PressureAssemblyConfig 
 	{
+		PhysicalParameters_String					pmm_str;
 		PressureEquation_String						P_Eq_str;
 		std::string operator_tag =					P_Eq_str.operator_tag;                   // pressure operator tag for nm
 		std::string pressure_field =				P_Eq_str.pressure_field;                 // current eval pressure field
@@ -35,10 +35,10 @@ namespace SinglePhase {
 		PressureAssemblyConfig assembly;
 		LinearSolverOptions    linear;
 		double under_relax = 1.0;		///< 欠松弛系数 (0<urf<=1, 建议 0.3~0.7)
-		double tol_abs = 1e-6;			///绝对残差
+		double tol_abs = 1e-5;			///绝对残差
 		double tol_rel = 1e-6;			///相对残差
-		int max_outer = 10;				///最大外迭代次数
-		bool   verbose = false;			///< 是否打印每轮外迭代的 dp_inf / linRes
+		int max_outer = 20;				///最大外迭代次数
+		bool   verbose = true;			///< 是否打印每轮外迭代的 dp_inf / linRes
 	};
 	/**
 	 * \brief 单次压力组装 + 线性求解 的报告
@@ -63,7 +63,6 @@ namespace SinglePhase {
 		MeshManager& mgr,
 		FieldRegistry& reg,
 		FaceFieldRegistry& freg,
-		PhysicalPropertiesManager& ppm,
 		PressureAssemblyConfig& ctrl,
 		PressureAssemblyResult& result,
 		PressureSolveControls& sol_ctrl,
@@ -72,9 +71,7 @@ namespace SinglePhase {
 		double dt,
 		const std::vector<WellConfig>& wellsCfg_in,
 		// per-outer 输出量：
-		double& dp_inf,
-		double& lin_residual,
-		int& lin_iterations
+		std::vector<WellDOF>& wells_output
 	)
 	{
 		Mesh& mesh = mgr.mesh();
@@ -85,14 +82,26 @@ namespace SinglePhase {
 		{
 			// a 扩散项离散
 			std::vector<std::string> mobility_tokens = {"kxx:kxx", "kyy:kyy", "kzz:kzz" ,"/mu_g","rho:rho_g"};
-			if (!FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nmP.a_f_diff, nmP.s_f_diff, ctrl.pressure_field, mobility_tokens, "rho_g", FVM::Diffusion::RhoFaceMethod::Linear, ctrl.gravity, Pbc, ctrl.enable_buoyancy, ctrl.gradient_smoothing))
+			if (!FVM::Diffusion::build_FaceCoeffs_Central(
+				mgr, reg, freg, 
+				nmP.a_f_diff, nmP.s_f_diff, 
+				ctrl.pressure_field, mobility_tokens, 
+				ctrl.pmm_str.rho_fluid_field, FVM::Diffusion::RhoFaceMethod::Linear, 
+				ctrl.gravity, Pbc, ctrl.enable_buoyancy, ctrl.gradient_smoothing))
 			{
 				std::cerr << "[SinglePhase][Pressure] diffusion operator build failed.\n";
 				return false;
 			}
 
 			// b 时间项离散
-			if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(mgr, reg, dt, "c_phi", "phi_r", ctrl.pressure_old_field, "rho_g", ctrl.pressure_prev_field, "rho_g", "Drho_Dp_g", nmP.a_time, nmP.b_time))
+			if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
+				mgr, reg, 
+				dt, 
+				ctrl.pmm_str.c_r_tag, ctrl.pmm_str.phi_tag, 
+				ctrl.pressure_old_field, ctrl.pmm_str.rho_fluid_old_field,
+				ctrl.pressure_prev_field, ctrl.pmm_str.rho_fluid_field, 
+				ctrl.pmm_str.drho_dp_tag, 
+				nmP.a_time, nmP.b_time))
 			{
 				std::cerr << "[SinglePhase][Pressure] Timeterm operator build failed.\n";
 				return false;
@@ -107,7 +116,7 @@ namespace SinglePhase {
 			}
 			result.system = sys;	//储存进PressureAssemblyResult
 			int N = 0;
-			auto lid_cell = buildUnknownMap(mgr.mesh(), N);
+			auto lid_cell = GeneralTools::buildUnknownMap(mgr.mesh(), N);
 			result.cell_lid = lid_cell;	//储存进PressureAssemblyResult
 
 			// d 备份上一外迭代层的值并完成求解
@@ -127,23 +136,35 @@ namespace SinglePhase {
 			GeneralTools::underRelaxInPlace(reg, ctrl.pressure_field, ctrl.pressure_prev_field, sol_ctrl.under_relax);
 
 			// e 输出结果
-			dp_inf = dpInf;
-			lin_residual = linRes;
-			lin_iterations = linIters;
+			rep.dp_inf = dpInf;
+			rep.lin_residual = linRes;
+			rep.lin_iterations = linIters;
 			return true;
 		}
 		else 
 		{
 			// a 扩散项离散
 			std::vector<std::string> mobility_tokens = { "kxx:kxx", "kyy:kyy", "kzz:kzz" ,"/mu_g","rho:rho_g" };
-			if (!FVM::Diffusion::build_FaceCoeffs_Central(mgr, reg, freg, nmP.a_f_diff, nmP.s_f_diff, ctrl.pressure_field, mobility_tokens, "rho_g", FVM::Diffusion::RhoFaceMethod::Linear, ctrl.gravity, Pbc, ctrl.enable_buoyancy, ctrl.gradient_smoothing))
+			if (!FVM::Diffusion::build_FaceCoeffs_Central(
+				mgr, reg, freg,
+				nmP.a_f_diff, nmP.s_f_diff, 
+				ctrl.pressure_field, mobility_tokens, 
+				ctrl.pmm_str.rho_fluid_field, FVM::Diffusion::RhoFaceMethod::Linear, 
+				ctrl.gravity, Pbc, ctrl.enable_buoyancy, ctrl.gradient_smoothing))
 			{
 				std::cerr << "[SinglePhase][Pressure] diffusion operator build failed.\n";
 				return false;
 			}
 
 			// b 时间项离散
-			if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(mgr, reg, dt, "c_phi", "phi_r", ctrl.pressure_old_field, "rho_g", ctrl.pressure_prev_field, "rho_g", "Drho_Dp_g", nmP.a_time, nmP.b_time))
+			if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
+				mgr, reg, 
+				dt, 
+				ctrl.pmm_str.c_r_tag, ctrl.pmm_str.phi_tag,
+				ctrl.pressure_old_field, ctrl.pmm_str.rho_fluid_old_field, 
+				ctrl.pressure_prev_field, ctrl.pmm_str.rho_fluid_field, 
+				ctrl.pmm_str.drho_dp_tag, 
+				nmP.a_time, nmP.b_time))
 			{
 				std::cerr << "[SinglePhase][Pressure] Timeterm operator build failed.\n";
 				return false;
@@ -157,7 +178,7 @@ namespace SinglePhase {
 				return false;
 			}
 			int N = 0;
-			auto lid_cell = buildUnknownMap(mgr.mesh(), N);
+			auto lid_cell = GeneralTools::buildUnknownMap(mgr.mesh(), N);
 			result.cell_lid = lid_cell;
 
 			// d 耦合井系统,对系数矩阵
@@ -195,15 +216,16 @@ namespace SinglePhase {
 			std::copy(pvec.begin(), pvec.begin() + N, p_cells.begin());
 			GeneralTools::scatterVecToField(reg, mesh, ctrl.pressure_field, lid_cell, p_cells);
 			writeback_pw_fields_for_all(reg, wells, pvec);   ///#include "WellConfig.h"
+			wells_output = wells;
 
 			double dpInf = 0.0;
 			dpInf = GeneralTools::maxAbsDiff(reg, ctrl.pressure_field, ctrl.pressure_prev_field);
 			GeneralTools::underRelaxInPlace(reg, ctrl.pressure_field, ctrl.pressure_prev_field, sol_ctrl.under_relax);
 
 			// e 输出结果
-			dp_inf = dpInf;
-			lin_residual = linRes;
-			lin_iterations = linIters;
+			rep.dp_inf = dpInf;
+			rep.lin_residual = linRes;
+			rep.lin_iterations = linIters;
 			return true;
 		}	
 	}

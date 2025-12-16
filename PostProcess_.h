@@ -133,4 +133,15 @@ bool outputTecplot_cellToFaceToNode_BC(
     const std::string& outFilename
 );
 
+bool outputTecplot_cellToFaceToNode_BC_P(
+    MeshManager& mgr,
+    const FieldRegistry& reg,
+    FaceFieldRegistry& freg,
+    const TemperatureBCAdapter* Tbc,
+    const PressureBCAdapter* Pbc,
+    const std::string& cellFieldName,
+    const std::string& faceFieldName,
+    const std::vector<Vector>* gradBuf,
+    const std::string& outFilename
+);
 

@@ -151,11 +151,6 @@ int EDFM_withFracture_Geomtry()
     //计算闭合关系包括毛细压力和相对渗透率 //两相流时启用
     Initializer::computeClosure(mgr.mesh(), reg, vg, rp, diag);
 
-    //6）创建 transient 辅助场，后面时间推进会用
-    //单相渗流-传热问题
-    ensureTransientFields(mgr.mesh(), reg, /*p_name=*/"p_w", /*T_name=*/"T", /*p_old_name=*/"p_w_old", /*T_old_name=*/"T_old", /*p_prev_name=*/"p_w_prev", /*T_prev_name=*/"T_prev"); //p_w T代表当前场变量，*_old代表上一时步变量，*_prev代表上一迭代步的变量,水相
-    ensureTransientFields(mgr.mesh(), reg, /*p_name=*/"p_g", /*T_name=*/"T", /*p_old_name=*/"p_g_old", /*T_old_name=*/"T_old", /*p_prev_name=*/"p_g_prev", /*T_prev_name=*/"T_prev");//p_g T代表当前场变量，*_old代表上一时步变量，*_prev代表上一迭代步的变量,气相
-
     //7）裂缝主变量初始化 （当前还未涉及裂缝）**
     Initializer::initFracturePrimaries(mgr.mesh(), mgr.fracture_network(), reg, reg_fr);
 
