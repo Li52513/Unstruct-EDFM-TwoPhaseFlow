@@ -13,7 +13,7 @@
 #include "IMPES_CommonUtils.h"
 
 #include "SolverContrlStrName.h"
-#include "0_PhysicalParametesCalculateandUpdata.h"
+#include "PhysicalPropertiesManager_TwoPhase.h"
 #include "FaceMassRateCalculate.h"
 
 namespace IMPES_Iteration
@@ -182,22 +182,22 @@ namespace IMPES_Iteration
         }
 
         // ===== 2) 取 λ_w, λ_g, ρ_w, ρ_g ===== //
-        auto lambda_w = reg.get<volScalarField>(TwoPhase::Water().lambda_w_tag);
-        auto lambda_g = reg.get<volScalarField>(TwoPhase::CO2().lambda_g_tag);
+        auto lambda_w = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+        auto lambda_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
         if (!lambda_w || !lambda_g)
         {
             std::cerr << "[IMPES][Flux] missing lambda fields '"
-                << TwoPhase::Water().lambda_w_tag << "' or '"
-                << TwoPhase::CO2().lambda_g_tag << "'.\n";
+                << PhysicalProperties_string::Water().lambda_w_tag << "' or '"
+                << PhysicalProperties_string::CO2().lambda_g_tag << "'.\n";
             return false;
         }
 
-        auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
-        auto rho_g = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
+        auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+        auto rho_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
         if (!rho_w || !rho_g)
         {
-            std::cerr << "[IMPES][Flux] density fields '" << TwoPhase::Water().rho_tag
-                << "' or '" << TwoPhase::CO2().rho_tag << "' not found.\n";
+            std::cerr << "[IMPES][Flux] density fields '" << PhysicalProperties_string::Water().rho_tag
+                << "' or '" << PhysicalProperties_string::CO2().rho_tag << "' not found.\n";
             return false;
         }
 

@@ -12,16 +12,16 @@ vector<vector<int>> Cell::getLocalFaces(const std::unordered_map<int, Node>& all
     const auto& cn = CellNodeIDs;
     std::vector<std::vector<int>> faces;
 
-    auto is2DCell = [&](double eps = 1e-12)->bool {
+    auto is2DCell = [&](double eps = 1e-12)->bool
+    {
         double zmin = 1e300, zmax = -1e300;
         for (int nid : cn) {
             const Vector& p = allNodes.at(nid).coord;
             zmin = std::min(zmin, p.m_z);
             zmax = std::max(zmax, p.m_z);
         }
-        return (zmax - zmin) < eps;
-        };
-
+        return (zmax - zmin) < eps; 
+    };
     // 2D：边（按环连接）
     if ((cn.size() == 3 || cn.size() == 4) && is2DCell()) {
         const int m = static_cast<int>(cn.size());
@@ -34,7 +34,8 @@ vector<vector<int>> Cell::getLocalFaces(const std::unordered_map<int, Node>& all
     }
 
     // 3D：典型单元
-    if (cn.size() == 4) { // tetra
+    if (cn.size() == 4) 
+    { // tetra
         faces = {
             {cn[0], cn[1], cn[2]},
             {cn[0], cn[1], cn[3]},
@@ -42,7 +43,8 @@ vector<vector<int>> Cell::getLocalFaces(const std::unordered_map<int, Node>& all
             {cn[0], cn[2], cn[3]}
         };
     }
-    else if (cn.size() == 5) { // pyramid
+    else if (cn.size() == 5)
+    { // pyramid
         faces = {
             {cn[0], cn[1], cn[2], cn[3]},
             {cn[0], cn[1], cn[4]},
@@ -51,7 +53,8 @@ vector<vector<int>> Cell::getLocalFaces(const std::unordered_map<int, Node>& all
             {cn[3], cn[0], cn[4]}
         };
     }
-    else if (cn.size() == 6) { // prism
+    else if (cn.size() == 6) 
+    { // prism
         faces = {
             {cn[0], cn[1], cn[2]},
             {cn[3], cn[4], cn[5]},
@@ -60,8 +63,10 @@ vector<vector<int>> Cell::getLocalFaces(const std::unordered_map<int, Node>& all
             {cn[2], cn[0], cn[3], cn[5]}
         };
     }
-    else if (cn.size() == 8) { // hexa
-        faces = {
+    else if (cn.size() == 8) 
+    { // hexa
+        faces = 
+        {
             {cn[0], cn[1], cn[2], cn[3]},
             {cn[4], cn[5], cn[6], cn[7]},
             {cn[0], cn[1], cn[5], cn[4]},
@@ -72,7 +77,6 @@ vector<vector<int>> Cell::getLocalFaces(const std::unordered_map<int, Node>& all
     }
     return faces;
 }
-
 void Cell::computeCenterAndVolume(const std::unordered_map<int, Node>& allNodes)
 {
     const auto& cn = CellNodeIDs;
@@ -150,16 +154,13 @@ void Cell::computeCenterAndVolume(const std::unordered_map<int, Node>& allNodes)
         // 棱柱：底三角(0,1,2) + 顶三角(3,4,5)，来自直线挤出
         std::vector<int> bot = { cn[0], cn[1], cn[2] };
         std::vector<int> top = { cn[3], cn[4], cn[5] };
-
         double Ab = 0.0; Vector Cb(0, 0, 0);
         polygonAreaCentroid2D(bot, Ab, Cb);
-
         double h = 0.0;
         h += allNodes.at(cn[3]).coord.m_z - allNodes.at(cn[0]).coord.m_z;
         h += allNodes.at(cn[4]).coord.m_z - allNodes.at(cn[1]).coord.m_z;
         h += allNodes.at(cn[5]).coord.m_z - allNodes.at(cn[2]).coord.m_z;
         h /= 3.0;
-
         volume = Ab * std::fabs(h);
         center = Vector(Cb.m_x, Cb.m_y, Cb.m_z + h * 0.5);
         return;
@@ -167,17 +168,14 @@ void Cell::computeCenterAndVolume(const std::unordered_map<int, Node>& allNodes)
     else if (cn.size() == 8) {
         // 六面体：底四边形(0..3) + 顶(4..7)，来自直线挤出
         std::vector<int> bot = { cn[0], cn[1], cn[2], cn[3] };
-
         double Ab = 0.0; Vector Cb(0, 0, 0);
         polygonAreaCentroid2D(bot, Ab, Cb);
-
         double h = 0.0;
         h += allNodes.at(cn[4]).coord.m_z - allNodes.at(cn[0]).coord.m_z;
         h += allNodes.at(cn[5]).coord.m_z - allNodes.at(cn[1]).coord.m_z;
         h += allNodes.at(cn[6]).coord.m_z - allNodes.at(cn[2]).coord.m_z;
         h += allNodes.at(cn[7]).coord.m_z - allNodes.at(cn[3]).coord.m_z;
         h /= 4.0;
-
         volume = Ab * std::fabs(h);
         center = Vector(Cb.m_x, Cb.m_y, Cb.m_z + h * 0.5);
         return;

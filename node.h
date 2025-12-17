@@ -17,10 +17,7 @@ class Node
 public:
     int id;         // 节点编号
     Vector coord;   // 节点坐标
-
-    Node(int id = -1, const Vector& coord = Vector(0.0, 0.0, 0.0)) : id(id), coord(coord) {}//构造函数及初始化列表
-
- 
+    Node(int id = -1, const Vector& coord = Vector(0.0, 0.0, 0.0)) : id(id), coord(coord) {}//构造函数及初始化列表 
 };
 
 

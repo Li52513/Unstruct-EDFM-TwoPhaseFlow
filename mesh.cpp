@@ -271,10 +271,7 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                 Cell c(cellId, ids); c.computeCenterAndVolume(nodesMap_); cells_.push_back(c);
             }
         }
-
-
     }
-
     // 构建单元ID到索引的映射，方便后续快速访问
     cellId2index_.clear();
     for (size_t i = 0; i < cells_.size(); ++i)
@@ -282,11 +279,9 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
        // cout << "Cell ID: " << cells_[i].id << endl;	
 		cellId2index_[cells_[i].id] = static_cast<int>(i); //局部编号到全局编号的映射
     }
-    
     // 统计总单元数
     gridCount_ = cells_.size();
     std::cout << "网格数量为" << gridCount_ << endl;
-
     struct FaceAcc {
         std::vector<int> ordered;      // 有序顶点（来自某个单元的 getLocalFaces 原序）
         std::vector<int> cells;        // 邻接单元 id（1 或 2）
@@ -302,7 +297,6 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
             acc.cells.push_back(cell.id);
         }
     }
-
     // 2) 实例化：用“环序”构造几何；必要时校正朝向（可选）
     faces_.clear();
     int faceId = 1;
@@ -330,25 +324,11 @@ void Mesh::BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int
                 face.neighborCell = kv.second.cells.size() == 2 ? kv.second.cells[1] : -1;
             }
         }
-
         faces_.push_back(face);
         for (int cid : kv.second.cells)
             cells_[cellId2index_.at(cid)].CellFaceIDs.push_back(faceId);
         ++faceId;
     }
-
-
-	//// === Step 3: 构造 Face 对象并建立 Cell 和 Face 的对应关系 ===
-    //std::cout << "BuildMesh: faces_ count = " << faces_.size() << std::endl;
-    //cout << "=== Face owner/neighbor check ===" << std::endl;
-    //for (const auto& face : faces_) {
-    //   cout << "Face " << face.id << ": [";
-    //    for (int nid : face.FaceNodeIDs)
-    //       cout << nid << " ";
-    //  /* cout << "], owner = " << face.ownerCell
-    //        << ", neighbor = " << face.neighborCell << std::endl;*/
-    //}
-
 	buildFaceBins(); // 构建面 bin
     gmsh::write("UnstructuredMesh-EDFM.msh");
     gmsh::finalize();

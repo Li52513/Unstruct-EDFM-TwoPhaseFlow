@@ -141,8 +141,8 @@ namespace IMPES_Iteration
         }
 
         // 孔隙度与水相密度（时间项）
-        auto phi = reg.get<volScalarField>(TwoPhase::Rock().phi_tag);
-        auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
+        auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
+        auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
         if (!phi || !rho_w) {
             std::cerr << "[Saturation] missing porosity or water density field.\n";
             return false;
@@ -357,8 +357,8 @@ namespace IMPES_Iteration
             return false;
         }
 
-        auto phi = reg.get<volScalarField>(TwoPhase::Rock().phi_tag);
-        auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
+        auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
+        auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
         if (!phi || !rho_w) {
             std::cerr << "[Saturation] advanceSaturationHeun_RK2: missing porosity or rho_w.\n";
             return false;

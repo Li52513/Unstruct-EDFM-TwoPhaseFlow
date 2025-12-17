@@ -5,7 +5,7 @@
 #include <vector>
 #include "MeshManager.h"
 #include "FieldRegistry.h"
-#include "0_PhysicalParametesCalculateandUpdata.h"
+#include "PhysicalPropertiesManager_TwoPhase.h"
 #include "SolverContrlStrName.h"
 
 namespace IMPES_Iteration
@@ -18,9 +18,9 @@ namespace IMPES_Iteration
     * Computes diagonal/time coefficient aC and source bC for the implicit pressure
     */
     inline bool TimeTerm_IMPES_Pressure(
-        MeshManager& mgr,
-        FieldRegistry& reg,
-        double dt,
+        MeshManager& mgr,           //网格信息
+		FieldRegistry& reg,         //场注册表
+		double dt,                  //时间步长
         const std::string& p_old_name,
         const std::string& p_eval_name,
         const std::string& aC_name,
@@ -38,18 +38,18 @@ namespace IMPES_Iteration
 
         auto p_old = reg.get<volScalarField>(p_old_name);
         auto p_eval = reg.get<volScalarField>(p_eval_name);
-        auto phi = reg.get<volScalarField>(TwoPhase::Rock().phi_tag);
+        auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
         auto s_w = reg.get<volScalarField>(SaturationEquation_String().saturation);
 
-        auto rho_w_eval = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
-        auto rho_w_old = reg.get<volScalarField>(TwoPhase::Water().rho_old_tag);
-        auto drho_w_dp = reg.get<volScalarField>(TwoPhase::Water().drho_w_dp_tag);
+        auto rho_w_eval = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+        auto rho_w_old = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_old_tag);
+        auto drho_w_dp = reg.get<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag);
 
-        auto rho_g_eval = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
-        auto rho_g_old = reg.get<volScalarField>(TwoPhase::CO2().rho_old_tag);
-        auto drho_g_dp = reg.get<volScalarField>(TwoPhase::CO2().drho_g_dp_tag);
+        auto rho_g_eval = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
+        auto rho_g_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_old_tag);
+        auto drho_g_dp = reg.get<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag);
 
-        auto c_r = reg.get<volScalarField>(TwoPhase::Rock().c_r_tag);
+        auto c_r = reg.get<volScalarField>(PhysicalProperties_string::Rock().c_r_tag);
 
         if (!p_old || !p_eval || !phi || !s_w || !rho_w_eval || !rho_w_old || !drho_w_dp || !rho_g_eval || !rho_g_old || !drho_g_dp || !c_r)
         {

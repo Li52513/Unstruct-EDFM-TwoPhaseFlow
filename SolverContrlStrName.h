@@ -71,6 +71,13 @@ namespace PhysicalProperties_string
         std::string C_eff_old_tag = "C_eff_old";
         std::string lambda_eff_old_tag = "lambda_eff_old";
     };
+
+    struct TwoPhase_case
+    {
+        std::string Pc_tag = "Pc";					//capillary pressure
+        std::string dPc_dSw_tag = "dPc_dSw";		//derivative of capillary pressure to water saturation
+        std::string lambda_mass_tag = "lambda_mass";// equation : lambda_mass = lambda_w * rho_w + lambda_g * rho_g
+    };
 }
 
 namespace IMPES_Iteration

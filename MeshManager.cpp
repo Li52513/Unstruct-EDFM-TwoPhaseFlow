@@ -14,7 +14,7 @@ MeshManager::MeshManager(double lx, double ly, double lz,
 void MeshManager::BuildSolidMatrixGrid(NormalVectorCorrectionMethod corr) 
 {
     mesh_.BuildMesh(lx_, ly_, lz_, nx_, ny_, nz_, usePrism_, useQuadBase_);
-    mesh_.ClassifySolidMatrixCells();
+    mesh_.ClassifySolidMatrixCells();       //用于区分内部单元和边界单元
     bcGroups_ = BoundaryFaceClassify::ClassifyBoundaryFaces(mesh_, lx_, ly_,lz_,1e-9);
     // 2) 可选：统计所有边界面（用于自检）
     boundaryCount_ = 0;
@@ -67,8 +67,7 @@ void MeshManager::DetectAndSubdivideFractures()
         << ", 平均每条裂缝面数 = " << (double)totalCandidates / frNet_.fractures.size()
         << ", 剔除率 = " << (100.0 - 100.0 * totalCandidates / (totalFaces * frNet_.fractures.size()))
         << "%\n";
-        
-   
+
     // 3) 给全局裂缝–裂缝交点去重并编号
     frNet_.DeduplicateAndRenumberFractureToFractureIntersections();
     

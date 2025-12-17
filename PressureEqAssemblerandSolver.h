@@ -120,14 +120,14 @@ namespace IMPES_Iteration
         )
         {
             //输入场
-            auto lambda_g = reg.get<volScalarField>(TwoPhase::CO2().lambda_g_tag);
-            auto lambda_w = reg.get<volScalarField>(TwoPhase::Water().lambda_w_tag);
-            auto lambda_mass = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().lambda_mass_tag);
-            auto rho_g = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
-            auto rho_w = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
-            auto kxx = reg.get<volScalarField>("kxx");
-            auto kyy = reg.get<volScalarField>("kyy");
-            auto kzz = reg.get<volScalarField>("kzz");
+            auto lambda_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
+            auto lambda_w = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+            auto lambda_mass = reg.get<volScalarField>(PhysicalProperties_string::TwoPhase_case().lambda_mass_tag);
+            auto rho_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
+            auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+            auto kxx = reg.get<volScalarField>(PhysicalProperties_string::Rock().k_xx_tag);
+            auto kyy = reg.get<volScalarField>(PhysicalProperties_string::Rock().k_yy_tag);
+            auto kzz = reg.get<volScalarField>(PhysicalProperties_string::Rock().k_zz_tag);
             auto s_w = reg.get<volScalarField>(SaturationEquation_String().saturation);
 
             if (!lambda_g || !lambda_w || !rho_g || !rho_w

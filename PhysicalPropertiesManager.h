@@ -39,7 +39,7 @@ public:
 
     // ===== 统一的“按字段名更新”方法（推荐在外迭代/时间步里用） =====
     //基岩-固相参数更新
-     void UpdateMatrixRockAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
+    // void UpdateMatrixRockAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
 	 bool UpdateRockProperties(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field); //调用之前需要对基岩区域进行划分，不冉默认是Medium区域
 
      //基岩-水相物性参数更新

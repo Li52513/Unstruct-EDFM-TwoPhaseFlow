@@ -27,7 +27,6 @@ public:
 	
     vector<int>getCandidateFacesFromBins(const AABB& box) const;
 
-    
 	int getGridCount() const { return gridCount_; } // 获取网格总数
 
     vector<reference_wrapper<const Cell>> getInnerCells() const;

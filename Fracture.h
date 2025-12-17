@@ -6,12 +6,8 @@
 #include "Cell.h"
 #include "Face.h"
 #include "Node.h"
-#include "Fluid.h"
-#include "Matrix.h"
 #include "Mesh.h"
 #include "FractureSolidProperties.h "
-
-#pragma message("Fracture.h included!")
 
 /// 交点来源类型进行枚举
 enum class IntersectionOrigin 
@@ -29,7 +25,6 @@ enum class DistanceMetric
 	AreaWeight,   // 使用面积加权的“数值积分” <d> = sum(d_j * ΔS_j) / S
     CrossAwareGauss 
 };
-
 
 struct FractureIntersectionPointByMatrixMesh  //// 用于描述裂缝与基岩网格边界交点的结构体
 {
@@ -65,38 +60,26 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
 	// ————— 编号信息 —————  （在哪里）
     int id;                  ///< 裂缝单元序号
     int cellID;              ///< 裂缝单元所在基岩网格单元编号
-
     // —————— 几何信息 —————— （有多大）
 	double aperture = 1.0;         ///< 裂缝单元开度 w
     double length = 0.0;           ///< 裂缝单元长度 L
     double avgDistance =0.0;      ///< 平均距离 d
     double geomCI = 0.0;   ///< 纯几何耦合系数  CI_geom = (L·w) / d
     double geomAlpha = 0.0;   ///< 纯几何 α_geom = 2·w / L  可以进一步修正
-
     //——————裂缝段类型———————
     FractureElementType type = FractureElementType::Conductive;
 	///< 裂缝段类型（阻塞/导流）
-	
 	// —————— 储存物性参数 —————— （特性是什么）
     SolidProperties_Frac solidProps;  ///< 固相骨架物性
     WaterProperties fluidProps;  ///< 水相物性
     CO2Properties   gasProps;    ///< CO₂ 相物性
-
     // —————— 物性耦合 & 离散系数 —————— （储存离散系数）
     double alpha_fr = 0.0;   ///< TI 计算用 α_phys = 2·w·k / (μ·L)
     double k_eff = 0.0;   ///< 并联系统有效渗透率
-
     double aW_fr = 0.0;   ///< 左邻接段导流系数
     double aE_fr = 0.0;   ///< 右邻接段导流系数
     double b_fr = 0.0;   ///< 裂缝–基岩源项系数 CI_phys = θ·A / d
     double aP_fr = 0.0;   ///< 本段总离散系数 aW+aE+b
-
-    // —————— 待求解变量 ——————  （仍待补充 T 和 s）
-    double p_fr = 6.621e6;   ///< 裂缝段压力
-	double T_fr = 487.55;   ///< 裂缝段温度
-	double s_water_fr = 0.8;   ///< 裂缝段水相饱和度
-	double s_CO2_fr = 0.2;   ///< 裂缝段气相饱和度
-
     // —————— 归一化参数区间 ——————
     double param0 = 0.0;   ///< 本段起始归一化位置
     double param1 = 0.0;   ///< 本段终止归一化位置
@@ -106,11 +89,10 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     {
         int peerFracID{ -1 };
         int peerSegID{ -1 };
-        int peerGlobalSeg{ -1 };   // 新增：对端全局段索引（便于快速定位）
+        int peerGlobalSeg{ -1 };   // 对端全局段索引（便于快速定位）
         int atGlobalFF{-1};
-        double TIw{ 0.0 };         // 新增：水相交汇导纳（Star–Delta 后的“边”）
-        double TIg{ 0.0 };         // 新增：气相交汇导纳
-        // 其他你已有的字段保持不变
+        double TIw{ 0.0 };         // 水相交汇导纳（Star–Delta 后的“边”）
+        double TIg{ 0.0 };         // 气相交汇导纳
     };
     vector<FFF_Exchange> ffEx;
 

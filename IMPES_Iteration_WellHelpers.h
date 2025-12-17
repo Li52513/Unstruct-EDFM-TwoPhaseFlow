@@ -89,10 +89,10 @@ inline void debugPrintPeacemanPIAndRate(
     auto mask = reg.get<volScalarField>(well.mask_field.c_str());
     auto WI   = reg.get<volScalarField>(well.PI_field_w.c_str());
 
-    auto lambda_w = reg.get<volScalarField>(TwoPhase::Water().lambda_w_tag);
-    auto lambda_g = reg.get<volScalarField>(TwoPhase::CO2().lambda_g_tag);
-    auto rho_w    = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
-    auto rho_g    = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
+    auto lambda_w = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+    auto lambda_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
+    auto rho_w    = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+    auto rho_g    = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
 
     if (!pF || !mask || !WI || !lambda_w || !lambda_g || !rho_w || !rho_g) {
         std::cerr << "[DebugPI] missing fields for well " << well.name << "\n";

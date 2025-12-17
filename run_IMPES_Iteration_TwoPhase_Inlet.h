@@ -4,7 +4,7 @@
 #include <vector>
 #include <iostream>
 
-#include    "0_PhysicalParametesCalculateandUpdata.h"
+#include    "PhysicalPropertiesManager_TwoPhase.h"
 #include    "IMPES_Iteration_Loop.h"
 /**
  * @brief 1D Buckley–Leverett 风格的两相 IMPES 数值测试（仅数值解，不构造解析解）。

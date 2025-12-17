@@ -354,7 +354,7 @@ namespace IMPES_Iteration
         TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //基于相对渗透率更新流度以及其他基本物性参数
 
         ///额外计算CO2相的压力
-        auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
+        auto Pc = reg.get<volScalarField>(PhysicalProperties_string::TwoPhase_case().Pc_tag);
         auto p_g = reg.getOrCreate<volScalarField>(pressureCtrl.assembly.pressure_g, p_w->data.size(), 0.0);
         for (const auto& c : cells)
         {
@@ -466,7 +466,7 @@ namespace IMPES_Iteration
             TwoPhase::updateTwoPhasePropertiesAtTimeStep(mgr, reg, satCfg.saturation, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params);  //计算各相的有效饱和度、各相相对渗透率、毛细压力
             TwoPhase::updateWaterBasicPropertiesAtStep(mgr, reg, pressureCtrl.assembly.pressure_field, "T"); //基于相对渗透率更新流度以及其他基本物性参数
             ///额外计算CO2相的压力
-            auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
+            auto Pc = reg.get<volScalarField>(PhysicalProperties_string::TwoPhase_case().Pc_tag);
             auto p_g = reg.getOrCreate<volScalarField>(pressureCtrl.assembly.pressure_g, p_w->data.size(), 0.0);
             for (const auto& c : cells)
             {

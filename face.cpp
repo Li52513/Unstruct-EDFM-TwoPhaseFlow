@@ -95,11 +95,6 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     const double eps = 1e-14;   // 可按你的坐标尺度调整
     if (Aj_dot_ej < eps) Aj_dot_ej = eps;
 
-   //cout << "Face " << id << " 的面积矢量 A_j: (" 
-   //      << Aj.m_x << ", " << Aj.m_y << ", " << Aj.m_z << ") 长度: " 
-   //      << length << endl;
-
-
     // 3) 依据不同算法分解 A_j = E_j + T_j
     switch (method) 
     {
@@ -126,11 +121,9 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         break;
     }
     }
-
     // 4) 非正交分量
     vectorT = Aj - vectorE;
    // cout << "Face :" << id << "的T矢量:(" << vectorT.m_x << ", " << vectorT.m_y << ", " << vectorT.m_z << ")" << endl;
-
     //5） 正交插值权重gamma 投影到 e_j（0..1 之间）
     double D = ownerToNeighbor * ej;     // 应等于 d_norm
     //cout << "Face " << id << "D: " << D << endl;

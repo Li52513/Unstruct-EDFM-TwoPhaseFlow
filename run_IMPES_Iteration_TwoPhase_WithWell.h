@@ -3,10 +3,12 @@
 #include <string>
 #include <vector>
 #include <iostream>
-
-#include    "0_PhysicalParametesCalculateandUpdata.h"
-#include    "IMPES_Iteration_Loop.h"
-#include    "WellConfig_TwoPhase.h"  
+#include "MeshManager.h"
+#include "FieldRegistry.h"
+#include "FaceFieldRegistry.h"
+#include "PhysicalPropertiesManager_TwoPhase.h"
+#include "IMPES_Iteration_Loop.h"
+#include "WellConfig_TwoPhase.h"  
 /**
  * @brief Two-phase IMPES test with Peaceman wells (1 injector + 1 producer).
  *
@@ -25,7 +27,7 @@
 
 int run_IMPES_Iteration_TwoPhase_WellCase()
 {
-    // ---------------- 0. 网格与场注册 ----------------
+    // ---------------- 0. 网格设置与场注册 ----------------
     const double lengthX = 1.0;   // [m]
     const double lengthY = 1.0;    // 几乎 1D
     const double lengthZ = 0.0;
@@ -36,14 +38,13 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
 
     const bool usePrism = true;
     const bool useQuadBase = false;
-
-    std::cout << "\n===== [TEST] IMPES two-phase (1D Buckley–Leverett, numerical only) =====\n";
-    std::cout << "--- IMPES: building mesh (1D BL test) ---\n";
-
-    MeshManager mgr(lengthX, lengthY, lengthZ,
-        sectionNumX, sectionNumY, sectionNumZ,
-        usePrism, useQuadBase);
+    std::cout << "\n ==========Mesh: BUILDING ==========\n";
+    MeshManager mgr(lengthX, lengthY, lengthZ,sectionNumX, sectionNumY, sectionNumZ, usePrism, useQuadBase);
     mgr.BuildSolidMatrixGrid(NormalVectorCorrectionMethod::OverRelaxed);
+	std::cout << " \n ==========Mesh :BUILDING COMPLETED ==========\n";
+
+
+
 
     FieldRegistry     reg;
     FaceFieldRegistry freg;

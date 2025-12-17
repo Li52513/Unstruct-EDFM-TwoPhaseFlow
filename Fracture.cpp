@@ -217,7 +217,7 @@ static double fanGaussAverage(const std::vector<Vector>& poly,
 }
 
 
-// ====== 新增：穿越感知 + 三点高斯的平均距离 ======
+// ====== 穿越感知 + 三点高斯的平均距离 ======
 double Fracture::computeCrossAwareAverageDistance(
     const Cell& cell,
     const std::unordered_map<int, Node>& meshNodes,

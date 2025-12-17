@@ -9,7 +9,7 @@
 #include "Solver_AssemblerCOO.h"
 #include "CapRelPerm.h"   // VGParams, RelPermParams, kr_Mualem_vG
 #include "WellConfig_TwoPhase.h"    // WellDOF_TwoPhase (mode, role, target, Tin, etc.)
-#include "0_PhysicalParametesCalculateandUpdata.h"
+#include "PhysicalPropertiesManager_TwoPhase.h"
 
 namespace FVM {
     namespace TwoPhaseWellsStrict 
@@ -137,10 +137,10 @@ namespace FVM {
             }
 
             // 2) 储层相动度与密度场（用于 Producer / Pressure 模式）代替换
-            auto lambda_w_field = reg.get<volScalarField>(TwoPhase::Water().lambda_w_tag);
-            auto lambda_g_field = reg.get<volScalarField>(TwoPhase::CO2().lambda_g_tag);
-            auto rho_w_field = reg.get<volScalarField>(TwoPhase::Water().rho_tag);
-            auto rho_g_field = reg.get<volScalarField>(TwoPhase::CO2().rho_tag);
+            auto lambda_w_field = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
+            auto lambda_g_field = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
+            auto rho_w_field = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+            auto rho_g_field = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
 
             if (!lambda_w_field || !lambda_g_field || !rho_w_field || !rho_g_field) {
                 std::cerr << "[TwoPhaseWellsStrict] Missing fields "

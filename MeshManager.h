@@ -5,7 +5,7 @@
 
 /**
  * @class MeshManager
- * @brief 统一管理基岩 & 裂缝网格及几何参数、CI 计算、物性赋值
+ * @brief 统一管理基岩 & 裂缝网格及几何CI计算
  */
 
 class MeshManager

@@ -10,7 +10,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
-#include "0_PhysicalParametesCalculateandUpdata.h"
+#include "PhysicalPropertiesManager_TwoPhase.h"
 
 #include "Solver_TimeLoopUtils.h"
 #include "PressureEqSolver.h"
@@ -25,9 +25,6 @@
 #include "IMPES_Iteration_WellHelpers.h"
 #include "PostProcess_OutputReport.h"
 
-
-
-
 namespace IMPES_Iteration
 {
     /// 时间步控制参数
@@ -40,7 +37,8 @@ namespace IMPES_Iteration
         double safety_factor = 0.9;    ///< 步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数
     };
-    inline bool runTransient_IMPES_Iteration(
+    inline bool runTransient_IMPES_Iteration
+    (
         MeshManager& mgr,
         FieldRegistry& reg,
         FaceFieldRegistry& freg,
@@ -92,6 +90,7 @@ namespace IMPES_Iteration
 #else
         // std::filesystem not available: skip directory creation
 #endif
+
         TimeStepControl Tsc;
         Mesh& mesh = mgr.mesh();
         const auto& cells = mesh.getCells();
@@ -112,7 +111,7 @@ namespace IMPES_Iteration
         auto p_g = reg.get<volScalarField>("p_g");
         auto p_g_old = reg.get<volScalarField>("p_g_old");
         auto p_g_prev = reg.get<volScalarField>("p_g_prev");
-        auto Pc = reg.get<volScalarField>(TwoPhase::Auxiliaryparameters().Pc_tag);
+        auto Pc = reg.get<volScalarField>(PhysicalProperties_string::TwoPhase_case().Pc_tag);
         if (!p_g || !p_g_old || !p_g_prev || !Pc)
         {
             std::cerr << "[IMPES][Iteration] missing p_g/Pc fields.\n";

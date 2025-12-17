@@ -134,14 +134,6 @@ static inline void ensureFractureFluidFields(FieldRegistry& reg_fr, std::size_t 
 }
 
 
-
-static inline void ensureRockPrimaryFields(FieldRegistry& reg, size_t n, const InitFields& init)
-{
-	reg.getOrCreate<volScalarField>("p_w", n, init.p_w0); //基岩初始水相压力，Pa
-	reg.getOrCreate<volScalarField>("T", n, init.T0);   //基岩初始温度，K
-	reg.getOrCreate<volScalarField>("S_w", n, init.s_w); //基岩初始水相饱和度，1
-}
-
 inline void ensureFracPrimaryFields(FieldRegistry& freg, size_t ne)
 {
 	freg.getOrCreate<volScalarField>("pf_w", ne, 1.0e6);
@@ -149,68 +141,7 @@ inline void ensureFracPrimaryFields(FieldRegistry& freg, size_t ne)
 	freg.getOrCreate<volScalarField>("Tf", ne, 303.15);
 }
 
-
-//***************************基岩物性参数注册与赋值**************************//
-//注册
-static inline void ensureRockFields(FieldRegistry& reg, size_t n)
-{
-	reg.getOrCreate<volScalarField>("phi_r", n, 0.15);
-	reg.getOrCreate<volScalarField>("kxx", n, 1e-14);
-	reg.getOrCreate<volScalarField>("kyy", n, 1e-14);
-	reg.getOrCreate<volScalarField>("kzz", n, 1e-14);
-	reg.getOrCreate<volScalarField>("rho_r", n, 2650.0);
-	reg.getOrCreate<volScalarField>("cp_r", n, 1000.0);
-	reg.getOrCreate<volScalarField>("lambda_r", n, 2.5);
-	reg.getOrCreate<volScalarField>("c_phi", n, 1e-12); //孔隙度可压缩性 被c_r替代
-	reg.getOrCreate<volScalarField>("c_r", n, 1e-11); //基岩压缩系数
-
-}
  
-
-//基岩物性参数注册与计算更新
-void PhysicalPropertiesManager::UpdateMatrixRockAt(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field)
-{
-	auto& mesh = mgr.mesh();
-	const auto& cells = mesh.getCells();
-	const size_t n = cells.size();
-
-	ensureRockFields(reg, n);
-
-	auto pF = reg.get<volScalarField>(p_field);
-	auto TF = reg.get<volScalarField>(T_field);
-	if (!pF || !TF)
-	{
-		std::cerr << "[PPM][Rock] missing fields '" << p_field << "' or '" << T_field << "'.\n";
-		return;
-	}
-	auto phi_r = reg.get<volScalarField>("phi_r"); //孔隙度
-	auto kxx_r = reg.get<volScalarField>("kxx"); //渗透率 xx方向
-	auto kyy_r = reg.get<volScalarField>("kyy"); //渗透率 yy方向
-	auto kzz_r = reg.get<volScalarField>("kzz"); //渗透率 zz方向
-	auto rho_r = reg.get<volScalarField>("rho_r"); //基岩密度，kg/m³
-	auto cp_r = reg.get<volScalarField>("cp_r"); //基岩比热容，J/(kg·K)
-	auto lam_r = reg.get<volScalarField>("lambda_r"); //基岩导热系数，W/(m·K)
-	auto c_r = reg.get<volScalarField>("c_r"); // 基岩压缩系数
-
-
-	for (int ic = 0; ic < cells.size(); ++ic) 
-	{
-		const auto& cell = cells[ic];
-		if (cell.id < 0) continue;
-		const size_t i = mesh.getCellId2Index().at(cell.id);
-		double P = (*pF)[i], T = (*TF)[i];
-		const auto sp = rock::computeSolidProperties(cell.region, P, T);
-		(*phi_r)[i] = sp.phi_r;
-		(*kxx_r)[i] = sp.kxx;
-		(*kyy_r)[i] = sp.kyy;
-		(*kzz_r)[i] = sp.kzz;
-		(*rho_r)[i] = sp.rho_r;
-		(*cp_r)[i] = sp.cp_r;
-		(*lam_r)[i] = sp.k_r;
-		(*c_r)[i] = sp.compressibility;
-	}
-}
-//****************************************************************************//
 
 
 //**********************裂缝物性参数注册与赋值******************************//

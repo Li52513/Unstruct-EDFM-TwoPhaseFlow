@@ -5,8 +5,6 @@
 #include <vector>
 #include <unordered_map>
 using namespace std;
-
-
 struct BaseField
 {
 	string name;
@@ -25,6 +23,5 @@ struct VolField : BaseField
 	inline const T& operator[] (size_t i) const { return data[i]; } //重载下标运算符
 
 };
-
 using volScalarField = VolField<double>;
 using volVectorField = VolField<Vector>;
