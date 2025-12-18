@@ -9,7 +9,9 @@
 #include "MeshManager.h"
 #include "PhysicalPropertiesManager.h"
 #include "Initializer.h"
-
+#include "BCAdapter.h"
+#include "TemperatureBCAdapter.h"
+#include "FaceFieldRegistry.h"
 #include "Solver_TimeLoopDriver.h"
 #include "CouplingAssembler.h" 
 #include "PostProcessor.h"
@@ -39,46 +41,6 @@ int EDFM_withFracture_Geomtry()
     mgr.addFracture({ 0.1,0.2,0 }, { 0.3,0.9,0 });
     mgr.addFracture({ 0.7,0.1,0 }, { 0.1,0.8,0 });
     mgr.addFracture({ 0.0725,0.1825,0 }, { 0.4025,0.3925,0 });
-
-    /*mgr.addFracture({ 3.9925,0.0066356,0 }, { 3.9925,5.0066,0 });
-    mgr.addFracture({ 3.9925,1.3439,0 }, { 1.4925,2.985,0 });
-    mgr.addFracture({ 3.9925,1.7748,0 }, { 6.4925,3.6727,0 });
-    mgr.addFracture({ 2.371,0.97711,0 }, { 2.7235,1.6617,0 });
-    mgr.addFracture({ 2.5472,1.3194,0 }, { 2.7563,1.3194,0 });
-    mgr.addFracture({ 1.3467,1.3503,0 }, { 1.4925,1.5089,0 });
-    mgr.addFracture({ 2.1825,1.5945,0 }, { 1.4925,2.004,0 });
-    mgr.addFracture({ 1.4925,1.5089,0 }, { 3.33836,1.7436,0 });
-    mgr.addFracture({ 1.4925,1.5089,0 }, { 3.33836,1.7436,0 });
-    mgr.addFracture({ 1.4925,1.7381,0 }, { 1.718,1.8702,0 });
-    mgr.addFracture({ 1.102,3.182,0 }, { 1.5179,3.1829,0 });
-    mgr.addFracture({ 1.4925,2.985,0 }, { 1.5433,3.3789,0 });
-    mgr.addFracture({ 2.4291,2.3702,0 }, { 2.6646,3.3334,0 });
-    mgr.addFracture({ 2.3067,3.3701,0 }, { 2.5469,2.8518,0 });
-    mgr.addFracture({ 2.3067,3.3701,0 }, { 2.5469,2.8518,0 });
-    mgr.addFracture({ 2.6139,3.126,0 }, { 3.0591,3.2417,0 });
-    mgr.addFracture({ 4.6805,2.2971,0 }, { 6.4925,1.8756,0 });
-    mgr.addFracture({ 5.318,2.1488,0 }, { 5.8117,1.2797,0 });
-    mgr.addFracture({ 5.8028,2.0361,0 }, {6.4925,2.2699,0 });
-    mgr.addFracture({ 6.4925,1.8756,0 }, { 6.6653,1.632,0 });
-    mgr.addFracture({ 6.4925,1.8756,0 }, { 6.7387,2.0502,0 });
-    mgr.addFracture({ 6.2888,2.25266,0 }, { 6.3178,2.2106,0 });
-    mgr.addFracture({ 5.2425,2.7237,0 }, { 5.564,4.6445,0 });
-    mgr.addFracture({ 4.6556,4.2411,0 }, { 5.3717,3.4953,0 });
-    mgr.addFracture({ 5.2887,5.0066,0 }, { 5.5234,4.4022,0 });
-    mgr.addFracture({ 5.2887,5.0066,0 }, { 5.5234,4.4022,0 });
-    mgr.addFracture({ 5.452,3.9755,0 }, { 6.3347,4.452,0 });
-    mgr.addFracture({ 6.1004,4.3255,0 }, { 6.1178,4.7011,0 });
-    mgr.addFracture({ 5.8934,4.2138,0 }, { 6.4925,4.0853,0 });
-    mgr.addFracture({ 6.3347,4.452,0 }, { 6.5304,4.8415,0 });
-    mgr.addFracture({ 6.4326,4.6467,0 }, {6.7749,4.5888,0 });
-    mgr.addFracture({2.9949,5.0066,0 }, { 3.9982,3.6268,0 });
-    mgr.addFracture({ 2.3893,4.3328,0 }, { 3.4937,4.3167,0 });
-    mgr.addFracture({ 2.7472,3.856,0 }, { 3.1882,4.3212,0 });
-    mgr.addFracture({ 3.2771,4.6164,0 }, { 3.3986,5.0066,0 });
-    mgr.addFracture({ 3.9925,4.507,0 }, { 4.4446,5.0066,0 });
-    mgr.addFracture({ 4.2186,4.7568,0 }, { 4.6672,4.7825,0 });
-    mgr.addFracture({3.6395,5.2578,0 }, { 3.9925,5.0066,0 });
-    mgr.addFracture({ 3.7324,5.1917,0 }, { 3.9312,5.3935,0 });*/
     auto t2 = std::chrono::high_resolution_clock::now(); // 计时开始
 
     //mgr.setDFNRandomSeed(12345); // 设置随机种子
@@ -86,7 +48,7 @@ int EDFM_withFracture_Geomtry()
     auto t8 = std::chrono::high_resolution_clock::now();
 
     mgr.setDistanceMetric(DistanceMetric::CrossAwareGauss); // 设置距离度量方式AreaWeight CellCenter NodeAverage CrossAwareGauss
-    mgr.DetectAndSubdivideFractures();
+    mgr.DetectAndSubdivideFractures(false);
 
     auto t9 = std::chrono::high_resolution_clock::now(); // 计时结束
     auto ms10 = std::chrono::duration_cast<std::chrono::milliseconds>(t9 - t8).count();

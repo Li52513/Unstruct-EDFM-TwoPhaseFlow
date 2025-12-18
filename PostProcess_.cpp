@@ -1,4 +1,4 @@
-#include "PostProcess_.h"
+ï»¿#include "PostProcess_.h"
 
 #include <unordered_map>
 #include <algorithm>
@@ -8,7 +8,7 @@
 #include <iostream>
 #include <cmath>
 
-// 2) ±ã½İ·â×°¶¨Òå
+// 2) ä¾¿æ·å°è£…å®šä¹‰
 bool getFaceValueFromCellValue_T(
     MeshManager& mgr, const FieldRegistry& reg, FaceFieldRegistry& freg,
     const TemperatureBCAdapter& Tbc,
@@ -88,7 +88,7 @@ bool getFaceValueFromCellValue_plain(
     return true;
 }
 
-// 4) face ¡ú node ¶¨Òå£¨ÓÅÏÈ±ß½çÃæÆ½¾ù£©
+// 4) face â†’ node å®šä¹‰ï¼ˆä¼˜å…ˆè¾¹ç•Œé¢å¹³å‡ï¼‰
 bool getNodeValueFromFaceValue(
     MeshManager& mgr,
     FaceFieldRegistry& freg,
@@ -106,12 +106,12 @@ bool getNodeValueFromFaceValue(
 
     nodeValsOut.assign(nodes.size(), 0.0);
 
-    // nodeId ¡ú Ë÷Òı
+    // nodeId â†’ ç´¢å¼•
     std::unordered_map<int, size_t> nodeId2idx;
     nodeId2idx.reserve(nodes.size());
     for (size_t i = 0; i < nodes.size(); ++i) nodeId2idx[nodes[i].id] = i;
 
-    // node ¡ú faces ÁÚ½Ó
+    // node â†’ faces é‚»æ¥
     std::vector<std::vector<int>> node2faces(nodes.size());
     for (const auto& F : faces) {
         const int iF = F.id - 1;
@@ -121,7 +121,7 @@ bool getNodeValueFromFaceValue(
         }
     }
 
-    // È¡Öµ
+    // å–å€¼
     for (size_t in = 0; in < nodes.size(); ++in)
     {
         const auto& adj = node2faces[in];
@@ -140,7 +140,7 @@ bool getNodeValueFromFaceValue(
     return true;
 }
 
-// 4) Ò»ÌõÁú£ºcell¡úface(º¬ABC+Ìİ¶È»º³å)¡únode¡úTecplot(Èı½Ç)
+// 4) ä¸€æ¡é¾™ï¼šcellâ†’face(å«ABC+æ¢¯åº¦ç¼“å†²)â†’nodeâ†’Tecplot(ä¸‰è§’)
 bool outputTecplot_cellToFaceToNode_BC(
     MeshManager& mgr,
     const FieldRegistry& reg,
@@ -163,7 +163,7 @@ bool outputTecplot_cellToFaceToNode_BC(
     std::vector<double> nodeVals;
     if (!getNodeValueFromFaceValue(mgr, freg, faceFieldName, nodeVals)) return false;
 
-    // 3) Ğ´ Tecplot£¨¹Ø¼üĞŞ²¹£º½« CellNodeIDs µÄ¡°½ÚµãID¡±Ó³ÉäÎª 1-based Ë³ĞòÏÂ±ê£©
+    // 3) å†™ Tecplotï¼ˆå…³é”®ä¿®è¡¥ï¼šå°† CellNodeIDs çš„â€œèŠ‚ç‚¹IDâ€æ˜ å°„ä¸º 1-based é¡ºåºä¸‹æ ‡ï¼‰
     Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
     const auto& nodes = mesh.getNodes();
     const auto& cells = mesh.getCells();
@@ -173,8 +173,8 @@ bool outputTecplot_cellToFaceToNode_BC(
         return false;
     }
 
-    // ¡ª¡ª ½¨Á¢ nodeId -> Ë³ĞòÏÂ±ê£¨0-based£©£¬È»ºóĞ´Á¬Í¨Ê± +1 ¡ª¡ª //
-    //    nodes[i].id  ¿ÉÄÜÊÇÈÎÒâ ID£» Tecplot ĞèÒªµÄÊÇ ¡°µÚ i ĞĞ¡± µÄ 1-based ÏÂ±ê
+    // â€”â€” å»ºç«‹ nodeId -> é¡ºåºä¸‹æ ‡ï¼ˆ0-basedï¼‰ï¼Œç„¶åå†™è¿é€šæ—¶ +1 â€”â€” //
+    //    nodes[i].id  å¯èƒ½æ˜¯ä»»æ„ IDï¼› Tecplot éœ€è¦çš„æ˜¯ â€œç¬¬ i è¡Œâ€ çš„ 1-based ä¸‹æ ‡
     std::unordered_map<int, int> nodeId2Seq;
     nodeId2Seq.reserve(nodes.size());
     for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
@@ -184,19 +184,19 @@ bool outputTecplot_cellToFaceToNode_BC(
     std::ofstream ofs(outFilename, std::ios::out);
     if (!ofs) { std::cerr << "[Tecplot] cannot open file: " << outFilename << "\n"; return false; }
 
-    ofs << "Variables = x, y, T\n";
+    ofs << "Variables = x, y, " << cellFieldName << "\n";
     ofs << "Zone  n=" << nodes.size()
         << "  e=" << cells.size()
         << "  f=fepoint  et=triangle\n";
 
-    // Ğ´½Úµã±í£º×ø±ê + ½ÚµãÖµ£¨Óë nodes µÄË³ĞòÒ»ÖÂ£©
+    // å†™èŠ‚ç‚¹è¡¨ï¼šåæ ‡ + èŠ‚ç‚¹å€¼ï¼ˆä¸ nodes çš„é¡ºåºä¸€è‡´ï¼‰
     for (size_t in = 0; in < nodes.size(); ++in) {
-        // ÄãµÄ Vector ³ÉÔ±¿ÉÄÜÊÇ x/y »ò m_x/m_y£»°´Äã¹¤³ÌÀïÒ»ÖÂµÄÄÇ¸öÀ´£º
-        // Èç¹ûÊÇ .x/.y ¾Í¸Ä³É nodes[in].coord.x / .y
+        // ä½ çš„ Vector æˆå‘˜å¯èƒ½æ˜¯ x/y æˆ– m_x/m_yï¼›æŒ‰ä½ å·¥ç¨‹é‡Œä¸€è‡´çš„é‚£ä¸ªæ¥ï¼š
+        // å¦‚æœæ˜¯ .x/.y å°±æ”¹æˆ nodes[in].coord.x / .y
         ofs << nodes[in].coord.m_x << "  " << nodes[in].coord.m_y << "  " << nodeVals[in] << "\n";
     }
 
-    // Ğ´µ¥ÔªÁ¬Í¨£º½« ¡°½ÚµãID¡± ×ª»»Îª ¡°Ë³ĞòÏÂ±ê + 1£¨Tecplot 1-based£©¡±
+    // å†™å•å…ƒè¿é€šï¼šå°† â€œèŠ‚ç‚¹IDâ€ è½¬æ¢ä¸º â€œé¡ºåºä¸‹æ ‡ + 1ï¼ˆTecplot 1-basedï¼‰â€
     for (const auto& c : cells) {
         for (size_t k = 0; k < c.CellNodeIDs.size(); ++k) {
             const int nodeId = c.CellNodeIDs[k];
@@ -215,7 +215,7 @@ bool outputTecplot_cellToFaceToNode_BC(
     return true;
 }
 
-// 4) Ò»ÌõÁú£ºcell¡úface(º¬ABC+Ìİ¶È»º³å)¡únode¡úTecplot(Èı½Ç)
+// 4) ä¸€æ¡é¾™ï¼šcellâ†’face(å«ABC+æ¢¯åº¦ç¼“å†²)â†’nodeâ†’Tecplot(ä¸‰è§’)
 bool outputTecplot_cellToFaceToNode_BC_P(
     MeshManager& mgr,
     const FieldRegistry& reg,
@@ -238,7 +238,7 @@ bool outputTecplot_cellToFaceToNode_BC_P(
     std::vector<double> nodeVals;
     if (!getNodeValueFromFaceValue(mgr, freg, faceFieldName, nodeVals)) return false;
 
-    // 3) Ğ´ Tecplot£¨¹Ø¼üĞŞ²¹£º½« CellNodeIDs µÄ¡°½ÚµãID¡±Ó³ÉäÎª 1-based Ë³ĞòÏÂ±ê£©
+    // 3) å†™ Tecplotï¼ˆå…³é”®ä¿®è¡¥ï¼šå°† CellNodeIDs çš„â€œèŠ‚ç‚¹IDâ€æ˜ å°„ä¸º 1-based é¡ºåºä¸‹æ ‡ï¼‰
     Mesh& mesh = const_cast<Mesh&>(mgr.mesh());
     const auto& nodes = mesh.getNodes();
     const auto& cells = mesh.getCells();
@@ -248,8 +248,8 @@ bool outputTecplot_cellToFaceToNode_BC_P(
         return false;
     }
 
-    // ¡ª¡ª ½¨Á¢ nodeId -> Ë³ĞòÏÂ±ê£¨0-based£©£¬È»ºóĞ´Á¬Í¨Ê± +1 ¡ª¡ª //
-    //    nodes[i].id  ¿ÉÄÜÊÇÈÎÒâ ID£» Tecplot ĞèÒªµÄÊÇ ¡°µÚ i ĞĞ¡± µÄ 1-based ÏÂ±ê
+    // â€”â€” å»ºç«‹ nodeId -> é¡ºåºä¸‹æ ‡ï¼ˆ0-basedï¼‰ï¼Œç„¶åå†™è¿é€šæ—¶ +1 â€”â€” //
+    //    nodes[i].id  å¯èƒ½æ˜¯ä»»æ„ IDï¼› Tecplot éœ€è¦çš„æ˜¯ â€œç¬¬ i è¡Œâ€ çš„ 1-based ä¸‹æ ‡
     std::unordered_map<int, int> nodeId2Seq;
     nodeId2Seq.reserve(nodes.size());
     for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
@@ -264,14 +264,14 @@ bool outputTecplot_cellToFaceToNode_BC_P(
         << "  e=" << cells.size()
         << "  f=fepoint  et=triangle\n";
 
-    // Ğ´½Úµã±í£º×ø±ê + ½ÚµãÖµ£¨Óë nodes µÄË³ĞòÒ»ÖÂ£©
+    // å†™èŠ‚ç‚¹è¡¨ï¼šåæ ‡ + èŠ‚ç‚¹å€¼ï¼ˆä¸ nodes çš„é¡ºåºä¸€è‡´ï¼‰
     for (size_t in = 0; in < nodes.size(); ++in) {
-        // ÄãµÄ Vector ³ÉÔ±¿ÉÄÜÊÇ x/y »ò m_x/m_y£»°´Äã¹¤³ÌÀïÒ»ÖÂµÄÄÇ¸öÀ´£º
-        // Èç¹ûÊÇ .x/.y ¾Í¸Ä³É nodes[in].coord.x / .y
+        // ä½ çš„ Vector æˆå‘˜å¯èƒ½æ˜¯ x/y æˆ– m_x/m_yï¼›æŒ‰ä½ å·¥ç¨‹é‡Œä¸€è‡´çš„é‚£ä¸ªæ¥ï¼š
+        // å¦‚æœæ˜¯ .x/.y å°±æ”¹æˆ nodes[in].coord.x / .y
         ofs << nodes[in].coord.m_x << "  " << nodes[in].coord.m_y << "  " << nodeVals[in] << "\n";
     }
 
-    // Ğ´µ¥ÔªÁ¬Í¨£º½« ¡°½ÚµãID¡± ×ª»»Îª ¡°Ë³ĞòÏÂ±ê + 1£¨Tecplot 1-based£©¡±
+    // å†™å•å…ƒè¿é€šï¼šå°† â€œèŠ‚ç‚¹IDâ€ è½¬æ¢ä¸º â€œé¡ºåºä¸‹æ ‡ + 1ï¼ˆTecplot 1-basedï¼‰â€
     for (const auto& c : cells) {
         for (size_t k = 0; k < c.CellNodeIDs.size(); ++k) {
             const int nodeId = c.CellNodeIDs[k];
@@ -289,7 +289,6 @@ bool outputTecplot_cellToFaceToNode_BC_P(
     ofs.close();
     return true;
 }
-
 
 
 

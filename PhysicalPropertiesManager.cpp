@@ -200,7 +200,7 @@ void PhysicalPropertiesManager::classifyFractureElementsByGeometry(MeshManager& 
 }
 
 //裂缝固相物性参数注册与计算更新
-void PhysicalPropertiesManager::UpdateFractureRockAt(MeshManager& mgr, FieldRegistry& reg_fr, FieldRegistry& reg, const std::string& pf_field, const std::string& Tf_field)
+void PhysicalPropertiesManager::UpdateFractureRockAt(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field)
 {
 	const FractureNetwork& frNet = mgr.fracture_network(); // 取出裂缝网络
 	//调用裂缝段索引

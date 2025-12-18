@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include "UserDefineVarType.h"
 #include <string>
 #include <memory>
@@ -8,19 +8,19 @@ using namespace std;
 struct BaseField
 {
 	string name;
-	size_t size; //´æ´¢¸ÃÎïÀí³¡±äÁ¿µÄ¸öÊı
+	size_t size; //å­˜å‚¨è¯¥ç‰©ç†åœºå˜é‡çš„ä¸ªæ•°
 	explicit BaseField (string n, size_t nCells)
 		: name(move(n)), size(nCells) {}
-	virtual ~BaseField() = default; //ĞéÎö¹¹º¯Êı
+	virtual ~BaseField() = default; //è™šææ„å‡½æ•°
 }; 
 
 template<typename T>
 struct VolField : BaseField
 {
-	vector<T> data; //Ëù´¢´æµÄÎïÀíÁ¿
+	vector<T> data; //æ‰€å‚¨å­˜çš„ç‰©ç†é‡
 	VolField(const string& n, size_t nCells, const T& init = T{}) : BaseField(n, nCells), data(nCells, init) {}
-	inline  T& operator[] (size_t i) { return data[i]; } //ÖØÔØÏÂ±êÔËËã·û
-	inline const T& operator[] (size_t i) const { return data[i]; } //ÖØÔØÏÂ±êÔËËã·û
+	inline  T& operator[] (size_t i) { return data[i]; } //é‡è½½ä¸‹æ ‡è¿ç®—ç¬¦
+	inline const T& operator[] (size_t i) const { return data[i]; } //é‡è½½ä¸‹æ ‡è¿ç®—ç¬¦
 
 };
 using volScalarField = VolField<double>;

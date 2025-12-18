@@ -7,68 +7,74 @@
 #include <cstdlib>   // rand, srand
 #include <ctime>     // time
 #include <cmath>     // cos, sin, M_PI
-#include "Fracture.h"
+#include "FracIndex.h" 
 
+class Fracture;          // å¦‚æœä½ åŸæ¥å°± forward declare ä¹Ÿå¯ä»¥
+struct FracElemIndex;    // å·²åœ¨ FracIndex.h å®šä¹‰
 
 class FractureNetwork 
 {
    
 public:
 
-    //´¢´æÁÑ·ìÓëÁÑ·ì½»µãµÄĞÅÏ¢
+    //å‚¨å­˜è£‚ç¼ä¸è£‚ç¼äº¤ç‚¹çš„ä¿¡æ¯
     struct GlobalFFPoint
     {
-        int id;               // È«¾Ö±àºÅ
-        Vector point;         // ½»µã×ø±ê
-        int fracA, fracB;     // ·¢Éú½»µãµÄÁ½ÌõÁÑ·ìË÷Òı
-        double paramA, paramB;// ÔÚÏß¶Î [0,1] ÉÏµÄ¹éÒ»»¯Î»ÖÃ
+        int id;               // å…¨å±€ç¼–å·
+        Vector point;         // äº¤ç‚¹åæ ‡
+        int fracA, fracB;     // å‘ç”Ÿäº¤ç‚¹çš„ä¸¤æ¡è£‚ç¼ç´¢å¼•
+        double paramA, paramB;// åœ¨çº¿æ®µ [0,1] ä¸Šçš„å½’ä¸€åŒ–ä½ç½®
     };
 
-	vector<Fracture> fractures;  // ÁÑ·ì¼¯ºÏ
-	vector<GlobalFFPoint> globalFFPts; // ÁÑ·ì-ÁÑ·ì½»µã
-   /* void computeFractureFractureTI(const Fluid& fluid);*/
-	
+	vector<Fracture> fractures;  // è£‚ç¼é›†åˆ
+	vector<GlobalFFPoint> globalFFPts; // è£‚ç¼-è£‚ç¼äº¤ç‚¹
+    /** \brief å°†ç¼“å­˜ç´¢å¼•æ ‡è®°ä¸ºå¤±æ•ˆï¼ˆå½“ fractures/elements å‘ç”Ÿå˜åŒ–æ—¶è°ƒç”¨ï¼‰ã€‚ */
+    inline void invalidateFracElemIndex()
+    {
+        fracElemIndexValid_ = false;
+        fracElemIndex_.offset.clear();
+        fracElemIndex_.total = 0;
+    }
 
-    void setRandomSeed(unsigned seed);  //unsigned ÊÇÊ²Ã´Êı¾İÀàĞÍ£¿
+    void setRandomSeed(unsigned seed);  //unsigned æ˜¯ä»€ä¹ˆæ•°æ®ç±»å‹ï¼Ÿ
 
-    //@brief Éú³ÉËæ»ú DFN ÁÑ·ìÍøÂç
+    //@brief ç”Ÿæˆéšæœº DFN è£‚ç¼ç½‘ç»œ
     /**
-     * @brief »ùÓÚ DFN ·½·¨Ëæ»úÉú³ÉÁÑ·ì
-     * @param N            ÒªÉú³ÉµÄÁÑ·ìÊıÁ¿
-     * @param minPoint     ÁÑ·ìÖĞĞÄ×ø±êÏÂÏŞ (x,y,z)
-     * @param maxPoint     ÁÑ·ìÖĞĞÄ×ø±êÉÏÏŞ (x,y,z)
-     * @param Lmin         ÁÑ·ì×îĞ¡³¤¶È
-     * @param Lmax         ÁÑ·ì×î´ó³¤¶È
-     * @param alpha        ³¤¶ÈÃİÂÉÖ¸Êı (p(L) ¡Ø L^{-¦Á})
-     * @param kappa        von Mises Å¨¶È (¦Ê¡Ö0¡ú¾ùÔÈÈ¡Ïò)
-     * @param avoidOverlap ÊÇ·ñ¼òµ¥±ÜÈÃÒÑÓĞÁÑ·ìÖØµş
+     * @brief åŸºäº DFN æ–¹æ³•éšæœºç”Ÿæˆè£‚ç¼
+     * @param N            è¦ç”Ÿæˆçš„è£‚ç¼æ•°é‡
+     * @param minPoint     è£‚ç¼ä¸­å¿ƒåæ ‡ä¸‹é™ (x,y,z)
+     * @param maxPoint     è£‚ç¼ä¸­å¿ƒåæ ‡ä¸Šé™ (x,y,z)
+     * @param Lmin         è£‚ç¼æœ€å°é•¿åº¦
+     * @param Lmax         è£‚ç¼æœ€å¤§é•¿åº¦
+     * @param alpha        é•¿åº¦å¹‚å¾‹æŒ‡æ•° (p(L) âˆ L^{-Î±})
+     * @param kappa        von Mises æµ“åº¦ (Îºâ‰ˆ0â†’å‡åŒ€å–å‘)
+     * @param avoidOverlap æ˜¯å¦ç®€å•é¿è®©å·²æœ‰è£‚ç¼é‡å 
      */
     void generateDFN(int N, const Vector& minPoint, const Vector& maxPoint, double Lmin, double Lmax, double alpha, double kappa, bool avoidOverlap);
     
-    //@brief Ìí¼ÓÁÑ·ì
+    //@brief æ·»åŠ è£‚ç¼
     void addFracture(const Vector& start, const Vector& end);  
-    
-    //@brief Ö÷´¦Àíº¯Êı£º¼ì²âÁÑ·ì-ÁÑ·ì½»µã + ÁÑ·ì-±ß½ç½»µã + ·Ö¶Î
-    //void processFractures(const vector<Face>& meshFaces, const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes, const Fluid& fluid, const Matrix& matrix, Mesh& mesh);
-    
-    //@brief ½« globalFFPts ÖĞµÄÃ¿¸öÁÑ·ì¨CÁÑ·ì½»µã·Ö·¢ÖÁ¶ÔÓ¦Á½ÌõÁÑ·ìµÄ intersections ÖĞ
+        
+    //@brief å°† globalFFPts ä¸­çš„æ¯ä¸ªè£‚ç¼â€“è£‚ç¼äº¤ç‚¹åˆ†å‘è‡³å¯¹åº”ä¸¤æ¡è£‚ç¼çš„ intersections ä¸­
     void DistributeFracture_FractureIntersectionsToGlobalInersections();  
     
-    //@brief Êä³öËùÓĞÁÑ·ìºÍ½»µãĞÅÏ¢
+    //@brief è¾“å‡ºæ‰€æœ‰è£‚ç¼å’Œäº¤ç‚¹ä¿¡æ¯
     void printFractureInfo() const; 
 	
-    //@brief ¼ì²âÁÑ·ì¨CÁÑ·ì½»µã
+    //@brief æ£€æµ‹è£‚ç¼â€“è£‚ç¼äº¤ç‚¹
     void DetectFracturetoFractureIntersections(); 
 	
-    //@brief È¥ÖØ²¢ÖØĞÂ±àºÅÁÑ·ì¨CÁÑ·ì½»µã
+    //@brief å»é‡å¹¶é‡æ–°ç¼–å·è£‚ç¼â€“è£‚ç¼äº¤ç‚¹
     void DeduplicateAndRenumberFractureToFractureIntersections(); 
     
-    //@brief µ¼³öÁÑ·ìÍøÂçĞÅÏ¢µ½ÎÄ±¾ÎÄ¼ş
+    //@brief å¯¼å‡ºè£‚ç¼ç½‘ç»œä¿¡æ¯åˆ°æ–‡æœ¬æ–‡ä»¶
     void exportToTxt(const string& prefix) const;  
 	
-    //@brief ÅĞ¶ÏÁ½¸öµãÊÇ·ñÔÚ¸ø¶¨µÄ¹«²î·¶Î§ÄÚÏàµÈ
+    //@brief åˆ¤æ–­ä¸¤ä¸ªç‚¹æ˜¯å¦åœ¨ç»™å®šçš„å…¬å·®èŒƒå›´å†…ç›¸ç­‰
     bool isClose(const Vector& a, const Vector& b, double tol = 1e-6) const; 
 
 private:
-    int nextFracID_{ 0 };          ///< µİÔöµÄÁÑ·ì ID
+    int nextFracID_{ 0 };          ///< é€’å¢çš„è£‚ç¼ ID
+    FracElemIndex fracElemIndex_;
+    bool fracElemIndexValid_ = false;
 };

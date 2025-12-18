@@ -1,0 +1,3233 @@
+
+
+----- Page 1 -----
+
+石油科学通报 2025 年 04 月 第 10 卷第 2 期：309-325
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法
+陈黄鑫1,2，陈玉祥1，孙树瑜2*
+1 厦门大学数学科学学院，厦门 361005
+2 同济大学数学科学学院，上海 200092
+* 通信作者, suns@tongji.edu.cn
+收稿日期: 2025-03-24；修回日期: 2025-04-19
+国家自然科学基金面上项目(12471345) 资助
+摘要 多孔介质中多相渗流问题是油气藏开发领域重要的研究内容，由于我国地质条件复杂，岩石性质如渗透
+率、孔隙度等分布不均匀，复杂多相渗流问题的数值求解需克服系统的多变量、强非线性、计算量大以及保持
+变量的物理属性等难点。对于传统的不可压不混溶两相渗流模型，隐压显饱(IMPES)的半隐格式是求解该类问
+题的一类广泛使用的重要算法，即隐式求解压力方程和显式更新饱和度，但传统的IMPES方法在更新饱和度时
+需计算饱和度梯度，因此在求解复杂非均匀介质中的两相流问题中并不适用，Hoteit和Firoozabadi提出了改进的
+IMPES方法，使得改进后的方法可以预测非均匀介质中饱和度不连续的情况。由于前两种IMPES方法在更新饱
+和度时只选取其中一相流体的质量守恒方程进行计算，因此无法保证另一相流体亦满足局部质量守恒。这两种
+IMPES方法对压力方程的推导都是在偏微分方程连续层面加合各相的体积守恒方程而得，然后对压力方程和饱
+和度方程用不完全匹配的空间离散方法，所以无法同时保证两相流体逐相局部质量守恒。本文基于课题组近几
+年发表的求解两相渗流问题的几类新型IMPES半隐格式，提出了一种新型推导IMPES中压力方程的框架，即先
+对每相的体积守恒方程用局部守恒的空间离散方法做离散，然后加合每相离散的体积守恒方程，从而实现了压
+力方程和饱和度方程在空间离散上的完全匹配，从本质上克服了以往文献中的IMPES半隐方法无法同时保证两
+相流体均满足局部质量守恒的难点，使得新型IMPES方法保各相流体均满足局部质量守恒、饱和度保界，计算
+格式为无偏求解，且适用于求解非均匀介质中具有不同毛管力分布的两相渗流问题。本文提出的新型逐相守恒
+IMPES框架还有一个传统IMPES没有的优势，即新型逐相守恒IMPES框架中只需要定义体积守恒或质量守恒方
+程的空间离散方法，不需要单独定义压力方程的空间离散方法。课题组近几年发表的几类新型的IMPES半隐格
+式求解可以认为是本文提出的新型逐相守恒IMPES框架的特例，本文IMPES框架还可以应用于更复杂的多组分
+多相渗流，构造更多的新颖格式。本文同时通过非均质多孔介质数值算例，验证了新型IMPES方法在处理复杂
+地质条件下两相流问题的有效性和优越性，相比传统方法更具适应性，同时更稳定也更高效。
+关键词 两相渗流；隐压显饱方法；迎风型混合有限元方法；局部质量守恒；保界
+中图分类号：O242；TV139.14
+引用格式：陈黄鑫, 陈玉祥, 孙树瑜. 无偏隐压显饱数值方法 —— 两相渗流模拟的新算法. 石油科学通报, 2025, 10(02): 309-325
+CHEN Huangxin, CHEN Yuxiang, SUN Shuyu. Unbiased implicit pressure explicit saturation schemes: Novel algorithms for the 
+simulation of two-phase flow in porous media. Petroleum Science Bulletin, 2025, 10(02): 309-325. DOI: 10.3969/j.issn.2096-1693. 
+2025.02.013
+©2016—2025 中国石油大学(北京) 清华大学出版社有限公司 www.cup.edu.cn/sykxtb
+
+----- Page 2 -----
+
+310 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+Unbiased implicit pressure explicit saturation schemes: Novel algorithms for the simulation of two-phase flow in porous media
+CHEN Huangxin1,2, CHEN Yuxiang1, SUN Shuyu2
+1 School of Mathematical Sciences, Xiamen University, Xiamen 361005, China
+2 School of Mathematical Sciences, Tongji University, Shanghai 200092, China
+Received: 2025-03-24; Revised: 2025-04-19
+Abstract Multiphase flow in porous media is an important research topic in the field of oil and gas reservoir development. Due 
+to the complex geological conditions in China, properties of rocks, such as permeability and porosity, are complex and heterogeneous. The numerical solution for the complex multiphase flow problems needs to overcome challenges such as the system’s 
+multiple variables, strong nonlinearity, large computational cost, and the preservation of physical properties. For the traditional 
+incompressible and immiscible two-phase flow model, the IMplicit Pressure Explicit Saturation (IMPES) semi-implicit scheme is 
+a widely-used important algorithm for solving such problems, where the pressure equation is solved implicitly, and the saturation 
+is updated explicitly. However, the traditional IMPES scheme requires the calculation of saturation gradients when updating the 
+saturation. Therefore, it is not suitable for solving the two-phase flow problems in complex heterogeneous media. Hoteit and 
+Firoozabadi proposed an improved IMPES method, allowing the method to reproduce discontinuous saturation in heterogeneous 
+media. However, these two IMPES methods only update the saturation through the mass conservation equation of one phase of 
+fluid, they cannot guarantee that the other phase of fluid also satisfies the local mass conservation property. The derivations of 
+the pressure equations for these two IMPES methods are obtained by adding the volume conservation equations of each phase at 
+the continuous level of partial differential equations, and then using incompletely matched spatial discretization methods for the 
+pressure equation and the saturation equation. Therefore, it is impossible to simultaneously ensure the local mass conservation 
+of each phase for the two-phase fluid. In this paper, based on several types of novel IMPES semi-implicit schemes for solving 
+two-phase flow in porous media that we have published in recent years, we propose a new framework for deriving the pressure 
+equation in IMPES. That is, we first discretize the volume conservation equation of each phase using a spatial discretization 
+method with local conservation, and then add up the discretized volume conservation equations of each phase. In this way, a 
+complete match in spatial discretization between the pressure equation and the saturation equation is achieved. Essentially, it 
+overcomes the difficulty in previous literatures that the IMPES semi-implicit method cannot simultaneously ensure that both 
+phases of the fluid satisfy local mass conservation. The novel IMPES method ensures that each phase of the fluid satisfies local 
+mass conservation, the saturation is bounded, the computational scheme is an unbiased solution, and it is suitable for solving 
+two-phase flow problem with different capillary pressure distributions in heterogeneous porous media. The novel phase-wise 
+conservation IMPES framework proposed in this paper also has an advantage that the traditional IMPES does not have. That is, 
+in the novel phase-by-phase conservation IMPES framework, it is only necessary to define the spatial discretization method of 
+the volume conservation or mass conservation equation, and there is no need to separately define the spatial discretization method 
+of the pressure equation. The solutions of several types of novel IMPES semi-implicit schemes that we have published in recent 
+years can be regarded as special cases of the novel phase-by-phase conservation IMPES framework proposed in this paper. The 
+IMPES framework in this paper can also be applied for more complex multi-component and multi-phase flow in porous media to 
+construct more novel schemes. At the same time, through numerical examples of heterogeneous porous media, this paper verifies 
+the effectiveness and superiority of the novel IMPES method in dealing with two-phase flow problems under complex geological 
+conditions. Compared with the traditional method, it is more adaptable, more stable, and more efficient.
+Keywords two-phase flow in porous media; IMPES scheme; upwind mixed finite element method; local mass conservation; 
+bound-preserving property
+DOI: 10.3969/j.issn.2096-1693.2025.02.013
+0 引言
+多相渗流问题的数学建模和数值方法研究是油气
+藏开发等能源领域重点关注的问题；通过研究多相渗
+流过程，可以优化注水、注气等工程措施，提高油气
+采收率[1]。随着我国非常规油气藏开发的加速推进，
+相比传统油气藏数值模拟方法，需发展更高效且保物
+理属性的数值方法。本文将基于此探讨新型数值方法
+求解两相渗流问题，以期对油气藏能源开发领域的研
+
+----- Page 3 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 311
+究起到一定的推动作用。
+多孔介质渗流的数值模拟是国内外众多学者关注
+的问题，如M. Wheeler, A. Firoozabadi, Z. Chen以及国
+内学者J. Yao, H. Rui, C. Zhang, H. Guo, H. Yang教授等
+人对多孔介质渗流的数值方法开展过系统的研究[1-12]。
+多相渗流问题中最常见的为两相渗流问题，对于传统
+的不可压不混溶两相渗流模型，常用的数值方法包含
+全隐格式和半隐格式。全隐格式通常能保数值解的物
+理属性，其求解的难点归结为大规模非线性方程组
+的求解[1, 8-9, 13]，每个时间步的计算通常需大量的计算
+资源。隐压显饱(IMPES)方法被广泛用于解决两相渗
+流耦合非线性系统[14-16]，它可被视为一种基于物理的
+IMplicit-Explicit(IMEX)分裂方法。IMPES方法最早由
+Sheldon等人于 1959 年[17]和Stone等人于 1961 年[18]提
+出，该方法已广泛应用于求解多孔介质中两相渗流的
+耦合非线性系统，其主要思想是将压力的计算与饱和
+度的计算分开，然后使用隐式和显式时间逼近方法分
+别求解压力和饱和度方程。IMPES方法的设计简单，
+可高效实现，并且与完全隐式方法相比，所需的计算
+机内存较少。
+对于具有毛管压力的非均匀多孔介质中的两相
+流问题，饱和度的分布可能是不连续的，由于标准
+IMPES方法总是生成空间上连续的饱和度，因此在这
+种情况下，传统的IMPES方法无法准确求解。为了
+解决这个问题，Hoteit和Firoozabadi[19-20]提出了一种
+改进的IMPES方法(HF-IMPES)。对于不同的毛管压
+力，HF-IMPES方法可以再现具有预期不连续性的饱
+和度解。然而，传统IMPES方法和HF-IMPES方法
+都仅对润湿相流体满足局部质量守恒，对于总流体混
+合物并不满足质量守恒。此外，传统IMPES方法和
+HF-IMPES方法可能产生润湿相饱和度大于 1 或者小
+于零的非物理情况。
+至今，已有多种改进IMPES方法被提出用于模
+拟多孔介质两相渗流问题[12, 21-23]，其中包括迭代型
+IMPES方法等，此外一些IMPES方法的改进则是为了
+解决大时间步长下的稳定性问题，诸如排序技术[11]、
+自适应隐式方法[12, 24]等。但文献中鲜有讨论完全保
+两相流体均质量守恒、保界、无偏求解且高稳定性的
+IMPES方法。针对此问题，课题组近年来研究了几类
+保各相流体均满足局部质量守恒、饱和度保界且计算
+格式为无偏求解的新型IMPES方法[25-26]。
+在算法设计中，关键是基于全离散系统的等价变
+形构造半隐格式。在数值求解中，利用迎风型混合有
+限元方法来求解压力—速度系统，在对各相流体的离
+散化质量守恒方程求和后，得到总的离散化质量守恒
+方程。总系统的求解可以分解为多个步骤，其中耦合
+的压力—速度系统可以分解为两个解耦的系统，然后
+可以显式更新各相流体的饱和度。由于各相流体的离
+散质量守恒方程都在总线性系统中求解，因此局部质
+量守恒性质对各相流体均成立。这是确保新算法在局
+部以及全局上对各相流体均保持局部质量守恒的关键。
+新型IMPES方法对于各相流体的求解是无偏的，且此
+类新方法满足条件保界，即如果时间步长小于某个值，
+则各相流体的饱和度始终满足保界。同时本文也指出
+提出的新型IMPES方法也可以作为完全隐式方法中代
+数系统的预处理器。以下本文将针对该新型IMPES方
+法开展详细的探讨及其数值验证。
+1 数学模型
+基于质量守恒方程、Darcy定律、饱和度约束和毛
+管压力方程，带重力效应的两相渗流问题可用式(1)描
+述。其中，润湿相和非润湿相分别用下标w和n表示。
+ 
+φ ∇ Ωα
+u K
+S S
+pS p p
+α α α
+n w
+cw n w
+∂
+∂
+(
++ =
+S
+=− + =
+t
+α +⋅ = =
+)
+k
+µ
+= −
+r
+α
+α
+1, ,
+uα α
+(∇ ρ∇ Ω α p gz
+F
+在 中
+, .
+, , w,n,
+Ω
+在 中
+在 中Ω
+), , w,n, 在 中 (1)
+其中Ω ⊂ = d (d 2,3)是一个多面体边的有界域，
+φ是介质的孔隙率，K表示绝对渗透率张量，Sα、uα、
+pα、Fα分别是各相流体的饱和度、Darcy速度、压力和
+汇/源项，pc是毛管压力。在Darcy方程中，ρα，krα，
+µα分别是α相流体的密度、相对渗透率和粘度，g是重
+力加速度的大小，z是深度。相迁移率函数由λα = k
+µ
+r
+α
+α
+定义，总迁移率由λλ λ twn = + 给出。定义分数流函数
+为
+f f w w tn n t = ⋅= λ λ λλ / /. (2)
+Γ Ω = ∂ 由Γ D和Γ N组成，其中ΓΓ Γ = ∪D N且Γ Γ D N ∩
+= φ，Γ D表示Dirichlet边界，Γ N为Neumann边界。初始
+和边界条件如下
+u n
+SSt
+S S
+p p
+α α
+α α
+α α
+α α
+⋅ = =
+= =
+= =
+= =
+0
+B
+B
+, 0,
+g
+, , w,n.
+, , w,n,
+N
+在 上
+, , w,n,
+在 上
+Γ α
+Γ α
+在 上
+in
+D
+Γ α N
+ (3)
+假设绝对渗透率张量K是对称正定的，其可为
+
+----- Page 4 -----
+
+312 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+均匀或非均匀，n是边界单位外法向量，孔隙度φ与
+时间无关且一致有界，存在正常数λλλ wn t
+aaa , , ，使得
+相迁移率函数满足0≤λ λ ww w (S )≤ a
+，0≤λ λ nw n (S )≤ a，
+0 < λ λ t (Sw t )≤ a
+。
+2 传统 IMPES 方法和 HF-IMPES 方法
+由于在均匀多孔介质中饱和度通常是连续的，传
+统IMPES方法[1]被广泛用于模拟多孔介质中的两相渗
+流问题。系统的总质量守恒方程可通过各相流体的质
+量守恒定律求和以及饱和度约束得到，如下所示
+∇ ⋅ = ut t F , (4)
+其中FF F twn = + , uu u twn = + 是总Darcy速度。通过各
+相流体的Darcy定律和毛管压力方程，可将总Darcy速
+度改写为
+ uK K t t w n c ww nn =− − − + λ ∇ λ ∇ ρ λρ ∇ p p (λ . )Kg z (5)
+总质量守恒定律也可重写为
+∇ λ ρ λρ ∇
+−⋅ = + ⋅ + ∇ λ∇ ∇ λ ∇
+⋅+ = ((
+(
+w w n n pres w
+t wt n c K K pF p )
+)Kg z RHS S
+(
+): ,
+)
+( )
+ (6)
+这就是所谓的压力方程。对于给定的Sw，压力方程关
+于pw是线性的。注意到∇ ∇ p S c w = dp S
+d
+c
+S
+(
+w
+w ) ，对于润湿
+相
+ uu K w wt nw c nw w n =+ − − f f p f gz λ ∇ λ ρρ ∇ ( )K , (7)
+代入润湿相质量守恒方程，可得
+∇ λ ρ ρ
+φ ∇
+∂
+⋅ ∇− − ∇
+∂
+   
+ 
+S
+t
+w
+n w w w n
+= −⋅ −
+f S gz
+F f
+K
+w wt
+      d
+d
+S
+p
+w
+c
+( u )
+( ) .
+ (8)
+这称为饱和度方程。从时间步开始，对于给定的
+Sw
+n
+，传统IMPES方法通过压力方程隐式求解pw
+n+1
+，在
+n+1 时间步更新浸润相饱和度Sw
+n+1
+，公式如下
+φ
+− ⋅ ∇λ ∇ =
+S S
+t t
+w w
+n n
+n n
++
++
+( ( ) ) ( ),
+1
+1
+−
+−
+t w w sat w S p RHS S n n n
+=
+K
+RHS p S
++
+sat w w
+1
+( , ). n n +1 (9)
+在非均匀多孔介质中，毛细不连续通常是由毛管
+压力函数的差异引起的，饱和度是由毛管压力的连续
+性和毛细函数在空间上的变化而不连续的。对于不同
+的毛管压力函数，Hoteit和Firoozabadi提出了改进的
+IMPES(HF-IMPES)方法来处理非均匀多孔介质中的
+毛管压力差异。
+定 义 Φ ρ α αα = + p gz， α = w,n 和 ΦΦΦ c nw =− =
+p gz c nw + − (ρ ρ ) 。总速度定义为 uuu t ac = + ，其中
+u K a tw = −λ ∇Φ 和u K c nc = −λ ∇Φ 。HF-IMPES方法可总结
+如下。
+步骤 1 给定S w
+n
+，求解uc
+n+1
+使得
+u K c
+nn n +1 = −λS S nw cw ( ) ∇Φ ( ). (10)
+步骤 2 给定S w
+n
+和u c
+n+1
+，隐式求解u a
+n+1
+和Φww
+n+1
+∇ ∇
+u K a t ww
+n nn
+⋅ = −⋅
++ +
+u u
+1 1
+at c
+= −
+n n + + 1 1
+λ Φ
+F
+(Sw ) ∇
+,
+.
+ (11)
+步骤 3 给定S w
+n
+，u a
+n+1
+和Φww
+n+1
+，通过以下显式格式
+更新润湿和非润湿相饱和度
+φ ∇
+S S n w
+n n
+S S
++1 +1
+t t
+w w
+n n
+n n
++1
++1
+= −
+−
+−
+1 .
+= −⋅ F f w wwa ( (S n n )u +1
+),
+ (12)
+分析可以发现，HF-IMPES方法仅在润湿相方面
+是局部质量守恒的，而在非润湿相则不满足质量守
+恒。此外，传统IMPES方法和HF-IMPES方法均不
+是无偏求解格式，饱和度数值可能大于 1 而越界。为
+了克服这些缺点，本文将引入 3 类新型的保物理性质
+的IMPES方法来求解非均匀多孔介质中的两相渗流问
+题。
+3 新型 IMPES 方法
+本节提出一种新型推导IMPES中压力方程的
+框架。这种框架是基于近几年发表的求解两相渗
+流问题的几类新型IMPES半隐格式(FC-IMPES-I、
+FC-IMPES-II 和 P-IMPES 方法)
+[25-26]，基于共性抽象
+而得。这种新型框架中，本文先对每相的体积守恒方
+程用局部守恒的空间离散方法做离散，然后加合每相
+离散的体积守恒方程，从而实现了压力方程和饱和度
+方程在空间离散上的完全匹配。这种新型框架可以推
+出各种新型的IMPES半隐格式，有效克服了传统方法
+在处理复杂非均匀介质时的局限性，为多相渗流问题
+的研究提供了新的思路和方法。以往文献中的IMPES
+半隐方法无法同时保证两相流体均满足局部质量守
+恒，而本节系统研究的几类新型IMPES方法从本质上
+解决了这一难题。图 1 通过对比传统IMPES方法与
+FC-IMPES-I方法的算法设计流程，清晰地解释了这
+种“先离散再加合”，而不是传统的“先加合再离散”
+的新思路。
+
+----- Page 5 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 313
+FC-IMPES-I、FC-IMPES-II 和 P-IMPES是课
+题组近几年发表的 3 种新方法。在这 3 种新型算法的
+推导中，通过对各相流体离散质量守恒方程求和，并
+在总线性系统中求解，确保了局部质量守恒性质对
+各相流体均成立，这是与传统方法的重要区别。传
+统IMPES方法和HF-IMPES方法可能出现润湿相饱
+和度大于 1 或者小于 0 的非物理情况。本文的新型
+IMPES方法满足条件保界，即当时间步长小于某个
+值时，各相流体的饱和度始终满足保界，避免了非
+物理结果的产生，使模拟结果更符合实际物理现象。
+同时新型IMPES方法对于各相流体的求解是无偏的，
+这一特性提高了算法的可靠性。在复杂多相渗流模拟
+中，无偏求解能够更准确地反映流体的真实流动情
+况，为油气藏开发等领域提供更精确的数值模拟依
+据。
+本文首先引入最低阶Raviart-Thomas(RT)混合有
+限元逼近，记RT P P 00 0 = + [ ]
+d
+x ，d = 2,3, 其中 P0是分片
+常数空间。定义
+Uv v
+Q q L q PK K
+h h h 0 h
+hh h 0 h
+= ∈ ∈ ∀∈
+= ∈ ∈ ∀∈
+{
+{
+H div RT K K
+2
+(
+(Ω )
+, :| , ,
+:| , ,
+Ω )
+K
+K
+( )
+( )
+ }
+ } (13)
+其中，H div L ( , : Ω Ω∇ Ω ) = ∈ ⋅∈ {v v   L   2 2 ( ) d
+( )}。设Uh
+0 =
+{v U vn ∈ ⋅ h N : 0 = 在 上 Γ }。接下来，本文将通过迎风型
+RT混合有限元方法来求解压力—速度系统。在结构化
+网格上使用最低阶RT混合有限元方法时，如果在混合
+有限元方法中应用梯形积分规则，则混合有限元方法
+等效于在结构化网格上的有限中心差分方法。
+3.1 第一类完全保质量守恒IMPES方法(FC-IMPES-I)
+定义wα =− × + K (∇ ρ∇ α α p z g )，成立u w α αα = λ 。假
+设wα ∈ H div ( ,Ω )，p L α ∈ 2
+(Ω )和S α ∈ L2(Ω )。对于任意
+v U α ∈ h，q Q∈ h和S w h
+h ∈Q ，定义双线性形式B q α α (v , ;S wh
+)
+K
+B q q
+∑∈
+α α α α
+h
+(
+∫
+v v
+∂K
+, ; ,
+α
+− \Γ
+S λS
+ 
+   
+w w
+h h
+λ S α α
+) =⋅ −
+(
+(∇
+w
+h
+)
+(
+v n⋅
+(
+q,
+) ) ) (14)
+其中，∂ = ⊂∂ ⋅ < K eK α α
+−
+{ : |0 {u n h
+e e } }，其中法向量ne外
+部于K。这里uα
+h
+是α相流体的离散速度。实际上，这是
+一个针对λ S α ( w
+h
+)在∂K上的迎风格式。如果q Q∈ h是分
+段常数，则可以按如下方式计算B q α α (v , ;S w
+h
+)
+= ⋅
+K
+B q q
+∑∈
+α α α α
+
+K
+∑
+h
+(
+∈
+∫
+v v n
+h
+∂
+∫
+K
+, ;
+α
+−
+∂
+\
+K
+Γ
+S λS
+λ S
+ 
+   
+α αα
+w w
+h h
+λ S
+(
+α α
+) = ⋅ −
+(
+w,
+*,
+K
+h
+∑
+w
+h
+∈
+)
+
+)
+v n
+h
+v n
+∫ ∂K
+⋅
+q,
+q
+( )
+ (15)
+其中相迁移率函数λα (Sw
+h
+)中的迎风值Sw,
+*,h
+α定义如下
+S
+Sα
+w,
+*,
+*,
+h
+h
+α
+=
+=
+
+
+
+
+
+
+
+
+S S
+S S
+1 , n.
+S
+α α αγ
+α α αγ
+h h
+h h
+− =
+w
+*,
+K
+K
+h
+S
+i
+, w,
+j
+n
+, 0
+*,
+, < 0
+如果
+如果
+h
+α =
+α
+{
+{
+λ
+λ
+(
+(
+w
+w
+)
+)
+v n
+v n
+⋅ ≥
+⋅
+}
+}
+γ
+γ
+,
+ (16)
+外法向量nγ
+来表示γ =∂ ∩∂ K K i j，其中γ是朝外指
+向Ki
+的。如果γ Γ ⊂ in，那么S PS w, w
+∗,h B
+α γ |γ γ = | ，其中Pγ
+是投
+影到P0 (γ )上的L2 投影算子。本文始终假设对于任意的
+S Q w ∈ h，均有
+λ λλ wn0 ( S S
+* *
+w,w ) w,n
+F F
++ ≥ > ( ) 0, (17)
+λ α α α (Sw,
+∗ ), n,w = ，其中的迎风值由某已知相速度确
+定。令J T = (0, ]，有如下连续时间情形的离散方法来
+求解多孔介质中两相渗流问题。对于任意的v U∈ h
+0
+和
+q Q∈ h，求解 w U α
+h (⋅ ∈ ,t) h， p tQ αh (⋅ ∈ , ) h， S tQ αh
+(⋅ ∈ , ) h，
+α = w,n，使得
+ (
+(
+ 
+(
+ 
+(
+ 
+S S tJ
+Sq Sq t
+φ α
+ρ∇ α
+K w v v vn
+p pq pS q t J
+n w
+h h
+w w
+α
+n w cw
+h
+h h h
++=∈
+∂
+−
+, , , 0.
+g z t J
+∂
+1
+−= ∈
+S
+t
+α
+h
+)
+αα α
+hh B
+, + , ; , , w,n, ,
+= =
+, ,
+, , w,n, ,
+q B qS F q t J
+, , , ,
+v
+(
+1, ,
+)
+)
+− ⋅ =− ⋅ −
+)
+0
+(
+α α α
+p p
+(
+(
+= ∈
+)
+w
+∇
+(
+h h
+)
+)
+w )
+)
+= = ∈
+∫Γ
+(
+D
+)
+ (18)
+设在时间步长n时，给定S Q w
+h n, ∈ h，则在下一时间
+步n+1中求解w U α
+h n, 1+ ∈ h，p Q αh n, 1+ ∈ h，S Q αh n, 1+ ∈ h，其中
+α = w, n，
+(
+(
+(
+   
+ 
+− ⋅− =
+S S
+φ
+F q
+Kw v v
+p p q pS q
+n w
+∫
+hn hn
+α
+Γ
+,1 ,1
+n w c w
+hn hn h n
+S S
+−+ +
+D
+,1 ,1 ,
+, , w,n,
++ +
+1 ,1 , 1
+α α
+hn hn
++ +
+p gz
+t t
+,1 ,
++ =
+n n
+)
+α α
+α α
+B
+h n h n
+− =
++
++
+vn v
+1
+α
+−
+−
+, ,
+=
+)
+(
+− ⋅=
+, ,.
+ρ∇ α
+, + ,;
+1,
+(
+q B qS
+)
+p
+(
+α α
+, , w,n,
+∇
+(
+(
+)
+whn hn ,1 ,
+)
++
+) )
+w ) =
+ (19)
+
+----- Page 6 -----
+
+314 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+通过对各相流体的离散质量守恒方程求和，并
+注意到饱和度约束，可求解以下线性系统，以计算
+w U α
+h n, 1+ ∈ h和p Q αh n, 1+ ∈ h，
+(
+(
+∑
+− ⋅− =
+α
+Kw v v
+p p q pS q
+∫Γ
+n w c w
+hn hn h n
+B qS F q
+−+ +
+,1 ,1 ,
+D
+1 ,1 , 1
+α α
++ +
+p gz
+(
+α α
+α α
+B
+h n h n
+− =
+w
+vn v
+hn hn ,1 ,
+, ,
++
+)
+,; , ,
+(
+− ⋅=
+, ,.
+ρ∇ α
+(
+)
+p
+w t
+(
+) =
+, , w,n,
+∇
+(
+(
+)
+)
+)
+)
+)
+ (20)
+定 义 www c nw
+hn hn hn ,1 ,1 ,1 + ++ = − 。对于任意 v U∈ h0
+， 有
+∇⋅ ∈v Qh。根据式(11)的第二个方程可得
+(
+∫Γ
+Kw v v
+D
+−
+(
+1
+p p g z n w nw
+B B
+c w
+h,n+1 h,n
+− ⋅− −
+, ,
+)
+)
+v n v
+= ⋅− ( p S c
+(
+(
+(ρρ∇
+) ∇
+)
+)
+, .)
+ (21)
+对于wc
+h n, 1+ 的求解是适定的，且式(11)的求解可以分
+解为两个步骤。首先，计算p p n w
+hn hn ,1 ,1 + + − 和wch n, 1+ ，之后
+pw
+h n, 1+ 和wwh n, 1+ 可以通过式(11)的前两个方程获得。对于任
+意 (, ) v U q Q ∈ ×h h，定 义 B qS B qS t w ( w v v , ; , ; h n, , h n ) = ∑α
+α ( )。
+综上，总结FC-IMPES-I方法如下。
+算法 1 (FC-IMPES-I)给定S Q w
+h n, ∈ h，在下一时
+间步n+1中按如下格式计算。
+步骤 1 通过式(11)的第 3 个方程和式(12)分别求
+解ppQ n w
+hn hn ,1 ,1 + + − ∈ h和w U ch n, 1+ ∈ h。
+步骤 2 求解pw
+h n, 1+ 和wwh n, 1+
+(
+(
+− ⋅− ∈
+B qS
+K p
+F q B qS q Q
+∫
+tw w
+Γ
+t nc w
+(
+−
+, , ; , ,
+w
+D
+1 , , wv v
+p gz
+h n+1 h
+)
+, ,n
+w w
+h n+1 h n+1
+w w
+B
+− ∈
+vn v v U
+, ;
+, ,
+(w
+) − ⋅=
+(
+h n+1 h
+ρ ∇
+, ,n
+(
+) =
+, , .
+∇
+)
+)
+)
+h
+0
+h
+ (22)
+则pn
+h n, 1+ 和wnh n, 1+ 可通过如下方式更新
+www
+p pp p n nw w
+hn hn hn hn
+ncw
+hn hn hn
+,1 ,1 ,1 ,1
+,1 ,1 ,1
++ ++ +
++ ++
+=−+
+= +
+(
+.
+) ,
+ (23)
+步骤 3 Sα
+h n, 1+ , w,n α = 更新可通过如下两个方式
+进行。
+方式I 通过如下方程更新润湿相饱和度Sw
+h n, 1+
+      φ
+S S w w
+hn hn
+t t
+,1 ,
+n n
++
++1
+−
+− ,q B qS F q + = ,; , . ww w w (whn hn ,1 , + ) ( ) (24)
+则非润湿相饱和度Sn
+h n, 1+ 可更新为S S n wh n,1 ,1 + + h n = −1 。
+方式II 通过如下方程更新润湿和非润湿相饱和
+度S S w n
+hn hn ,1 ,1 + + ,
+   
+ 
+     
+φ
+φ
+S S
+S S
+n n
+w w
+hn hn
+hn hn
+t t
+t t
+,1 ,
+,1 ,
+n n
+n n +
++
++
++
+1
+1
+−
+−
+−
+−
+, ,; , ,
+,q B qS F q ,; , .
+q B qS F q + =
++ = nn w n
+ww w w
+(
+(
+w
+w
+hn hn
+hn hn
+,1 ,
+,1 ,
++
++
+)
+)
+(
+(
+)
+)
+ (25)
+在文献[25]中已证明如果 S S w n
+hn hn , , + =1，那么
+FC-IMPES-I方法第 3 步中的两种更新方法是等价的。
+3.2 第二类完全保质量守恒IMPES方法(FC-IMPES-II)
+定义ξ α α = λt
+w ，其中w K α αα =− + (∇ ρ∇ p gz)，得
+到uα αα = f ξ ，其中fα是前述定义的分数流函数。假设
+ξ α ∈ H div ( ,Ω )，p L α ∈ 2
+(Ω )，S L α ∈ 2(Ω )。对于任意的
+v U α ∈ h，q Q∈ h和S Q w
+h ∈ h，定义
+K
+B qS f S q
+∑
+
+∈
+α α α α
+h
+(
+∫
+v v
+∂K
+, ; ,
+α
+− \Γ
+   
+w w
+h h
+fS q α α
+)
+(
+= ( ⋅ −
+w
+h
+∇
+) v n
+(
+⋅
+(
+.
+) ) )
+ (26)
+这里，∂Kα
+−
+的定义如第 3.1 节所述，并且上述双
+线性形式也是f S α ( w
+h
+)在∂K上的迎风格式。实际上，
+B qS 
+α α (v , ; w
+h
+)可重写为
+B qS f S q 
+α α ( α αα v , ; w w, v n h h ) = ⋅ K
+∑∈h
+∫∂K ( *, ) , (27)
+在函数f S α α ( w,
+*,h )中，迎风值Sw,*,h
+α的定义与函数λα α (Sw,
+*,h )
+相同。
+设J T = (0, ]，有如下连续时间情形的空间离散
+算 法。 对 于 任 意 的 v U∈ h
+0 和 q Q∈ h ,寻 找 ξ α
+h
+(⋅ ∈ ,t) Uh , 
+ptQ α
+h
+(⋅ ∈ , ) h，StQ α
+h
+(⋅ ∈ , ) h，α = w,n，使得
+α
+α
+(
+ 
+(
+   
+(
+− ⋅−
+S S t J
+(
+Sq Sq t
+φ
+p pq pS q t J
+n w
+∫
+h h
+λ ∇
+= ∈
+= ∈
+w w
+Γ
+α
+h
+h h h
++ = ∈
+∂
+t
+D
+, , , 0.
+∂
+K p
+−= ∈
+S
+w,n, ,
+w,n, ,
+p gz
+t
+α
+h
+)
+)
+α α
+B
+−
+, , ; , , 
+= =
+vn v
+w cw
+1
+q B qS F q
+ξ
+, , , ,
+(
+1, ,
+α α
+h h
+t J
+t J
++ =
+)
+, ,
+0
+v v
+
+(
+)
+(
+α
+ρ ∇
+− ⋅=
+)
+(
+(
+ξ
+(
+α α
+h h
+, ,
+)
+)
+w
+)
+)
+) ( )
+ (28)
+如果在时间步n时给定了S Q w
+h n, ∈ h，在下一个时间步
+n+1中求解ξ α
+h n+1 , ∈Uh，p Q αh n+1 , ∈ h , S Q αh n+1 , ∈ h，α = w,n，
+
+----- Page 7 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 315
+方法如下
+α
+     
+(
+(
+− ⋅− =
+S S
+(
+φ
+p p q pS q
+n w
+∫
+h n+1 h n+1
+λ ∇
+=
+Γ
+, ,
+α
+h n+1 h n+1 h
+S S
+t
+, , ,n
+D
+K p
+w,n,
+α α
+h,n+1 h n
+t t
+p gz
++ =
+n+1 n
+)
+α α
+B
+− =
+−
+vn v
+1
+−
+−
+ξ α α
+w c w
+h n+1 , , h n+1
+,
+(
+, ,.
+, ,
+, ,; , ,
+ρ∇ α
+v v
+1,
+q B qS F q
+)
+)
+− ⋅=
++ =
+(
+(
+
+, , w,n,
+α
+(
+(
+)
+ξ α α
+hn hn ,1 , +
+)
+)
+)
+w ) ( )
+ (29)
+按式(13)计算B qS 
+α (ξ α
+h,n+1, ; w
+h,n )，类似于式(11)，可
+求解ξ α
+h,n+1 ∈Uh，p Q αh n, 1+ ∈ h使得
+(
+(
+∑
+− ⋅− =
+α
+(
+p p q pS q
+∫
+λ ∇
+Γ
+n w c w
+h,n+ h,n+ h n
+B qS F q
+t
+D
+
+Kv v
+α α
+p gz
+11 ,
+(
+)
+α α
+− =
+B
+ξ
+−
+vn v
+1
+h,n+ h,n
+ξ α α
+h,n+ h,n+
+1
+,; , ,
+1 1
+, ,.
+(
+, ,
+ρ∇ α
+)
+)
+w t
+− ⋅=
+)
+(
+(
+=
+p
+, , w,n,
+(
+(
+)
+)
+)
+)
+)
+ (30)
+定义ξ ξξ c nw
+hn hn hn ,1 ,1 ,1 + ++ = − ，通过式(17)中的第 3 个
+方程进一步得到
+(
+Γ
+∫
+(
+D
+λ ∇
+(
+t c
+p p g z
+K p S
+n w nw
+B B
+)
+− ⋅− −
+−1
+ξ c w
+h n, 1 h n,
+)v n v
++ ,= , - v v )
+(
+(
+(ρρ∇
+( )
+)
+⋅
+,
+)
+)
+ (31)
+与算法 1 类似，可以通过式(17)第 3 个方程和式(18)
+获得p p n w
+h hn ,n 1 , 1 + + − 和ξ ch,n 1+ ，然后用与算法 1 类似的方法，
+利用式(17)的前两个方程得到pα
+h n, 1+ 和ξ αh n, 1+ 。
+给 定 Sw，对于任意 (v U , q Q )∈ ×h h，定义
+B qS B qS 
+t w ( w v v , ; ) = ∑ , ; α
+a ( )。现在总结FC-IMPES-II
+方法如下。
+算法 2 (FC-IMPES-II)给定S Q w
+h n, ∈ h , 在下一时
+间步n +1中按如下格式计算。
+步骤 1 通过式(17)的第 3 个方程和式(18)分别求
+解pn
+h n, 1+ −p Q wh n, 1+ ∈ h和ξ ch n, 1+ ∈Uh。
+步骤 2 求解pw
+h n, 1+ 和ξ wh n, 1+
+(
+− ⋅− ∈
+B qS F q
+B qS q Q 
+
+(
+∫
+nc w
+tw w t
+λ ∇
+Γ
+(
+(
+tw w
+ξ
+D
+ξ
+Kv v
+hn hn
+p gz 
+hn hn
+,1 ,
+)
+,1 ,
+w w
+B
+−
++
++
+vn v v U
+1
+,; ,
+ξ
+,; , ,
+h n, 1+ + h n, 1
+(
+, ,
+ρ ∇
+)
+)
+)
+= −
+− ⋅=
+(
+( p
+∈
+,, . )
+)
+h
+)
+h
+0
+ (32)
+则pn
+h n, 1+ 和ξ nh n, 1+ 可通过如下方式更新
+ξξξ
+p pp p
+ncw
+hn hn hn
+n nw w
+hn hn hn hn
+,1 ,1 ,1
+,1 ,1 ,1 ,1
++ ++
++ ++ +
+= +
+=−+ (
+.
+) ,
+ (33)
+步骤 3 Sα
+h n, 1+ , α = w,n的更新可通过如下两个方
+式进行。
+方式I 通过如下方程更新润湿相饱和度Sw
+h n, 1+
+     
+B qS F q 
+φ
+ww w w
+S S
+(ξ
+w w
+hn hn
+t t
+,1 ,
+hn hn
+n n
+,1 ,
++
++1
++
+−
+−
+,; ,
+,q
+) =
++
+( )
+ (34)
+则非润湿相饱和度Sn
+h n, 1+ 可更新为S S n wh n,1 ,1 + + h n = −1 。
+方式II 通过如下方程更新润湿和非润湿相饱和
+度S S w
+hn hn ,1 ,1 + + , n
+ 
+ 
+   
+ 
+ 
+B S Fq
+B S Fq 
+
+φ
+φ
+ww w w
+wn n n
+S S
+S S
+(
+(ξ
+ξ
+n n
+w w
+hn hn
+hn hn
+t t
+t t
+,1 ,
+,1 ,
+hn hn
+hn hn
+n n
+n n
+,1 ,
+,1 ,
++
++
++
++
+1
+1
++
++
+−
+−
+−
+−
+, ,.
+, ,,
+)
+)
+,
+,
+=
+=
+q
+q
+(
+(
++
++
+)
+)
+ (35)
+类似于算法 1，可以证明FC-IMPES-II方法第 3
+步中的两种方法也是等价的。此外，算法 2 在各相流
+体的辅助速度ξ α和压力pα的求解也是无偏的。当不考
+虑毛管压力和重力效应时，可推得
+ξ
+uK K
+w t w t nn
+ttwtn =− =−
+=− =− =
+λ∇ λ∇
+λ∇ λ∇ K Kξ
+p p
+p p
+,
+,
+ (36)
+此时ξ ξ wnt = = u，因此和算法 1 相比，算法 2 中的假
+设ξ α ∈ H div ( ,Ω )更物理。
+3.3 保物理属性IMPES方法(P-IMPES方法)
+文献[26]中研究的完全保质量守恒、等保物理性
+质的IMPES方法简记为P-IMPES方法。
+定 义 ξ α α = λt
+w ，其中 w K α α =− + (∇ ρ∇ p gz)，
+α = n,w，记ξξξ c nw = − ，成立
+u u
+u u n nt wnc
+w wt wnc
+= +
+= −
+f ff
+f ff
+ξ
+ξ
+.
+,
+ (37)
+将方程(1)的质量守恒方程和Darcy定律重新表述
+为以下方程：
+φ∇ ∇ Ω
+φ∇ ∇ Ω
+(
+(λ λ ∇ ρ∇ Ω
+λ λ ∇ ρ∇ Ω
+∂
+∂
+t tc
+t t t nc w w
+∂
+∂
+Ku K
+Ku K
+S
+S
+t
+t
+n
+w
+)
+)
++⋅ =
+− −
+− −
++⋅ = ⋅
+1 1
+1
+t
+= −−
+= −−
+(
+(
+fF f
+(
+(
+fF f
+n n
+wt w nwc
+u
+u
+t) nwc
+)
+)
+) 1
+f g
+f g
+w
+−
+ξ
+ξ
++
+⋅(
+(
+p z
+p z n n
+f
+f
+ξ
+ξ
+), 
+), 
+在 中,
+, 
+在 中,
+, 在 中,
+在 中.
+ (38)
+
+----- Page 8 -----
+
+316 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+基于此，本文为两相渗流问题引入一个新型
+的保物理属性IMPES方法。假设ut , ξ c ∈ H div ( ,) Ω ，
+p L α ∈ 2( ) Ω 以及Sα ∈ L2( ) Ω ，α = w,n。对于任意v ∈uh
+0
+，
+q∈Qh和Sw
+h ∈Qh，定义一个双线性形式B qS α (v, ; wh
+)如下
+K
+B S
+∑∈
+α α
+
+(
+h
+v v
+∫∂
+, ;
+K
+qS f q
+α
+− \Γ  
+ 
+ 
+w w
+h )
+f S α
+= −
+(
+(∇
+w
+h
+⋅
+)
+(
+v n⋅
+(
+q
+h
+,
+) ), ) (39)
+其中∂ = ⊂∂ K eK α α < −
+{ : 0 {uh ⋅ne e }| }，其中ne是指向外部
+的法向量，这是f S α ( w
+h
+)在∂K上的迎风格式。实际上，
+如果q Q∈ h是分段常数，可按如下方式计算Bα( ) v,q S; w
+h
+=
+K
+B f S
+∑∈
+α α
+
+K
+∑
+() (
+h
+∈
+v v n
+∫
+
+∂
+h
+,
+K
+q
+∫
+α
+−
+∂
+;
+\
+K
+Γ
+S
+   
+ 
+w w
+f
+h h
+α α
+f q
+(
+α
+=
+S
+(
+w,
+K
+*,
+S
+∑∈
+h
+w
+h
+h
+)
+)
+∫
+v n
+∂
+v n
+K
+⋅
+⋅
+q,
+) ⋅ − q
+ (40)
+在函数λα α (Sw,
+*,h )中，迎风值λα α (Sw,*,h )定义如下
+S
+Sα
+w,
+*,
+*,
+h
+h
+α
+=
+=
+
+
+
+
+
+
+
+
+S
+S
+1 , n.
+S
+α α γ
+α α γ
+h h
+h h
+− =
+w
+*,
+| , 0,
+| , 0,
+h
+K
+K
+S
+, w,
+i
+j
+n
+*,
+如果
+h
+如果
+α
+α
+{
+{
+u n
+=
+u n
+⋅ ≥
+⋅ <
+}
+}
+γ
+γ (41)
+用法向量nγ
+沿着Ki外部来表示γ =∂ ∩∂ K K i j。如果
+γ Γ ⊂ in，那么S PS w, w
+∗,h B
+α γ |γ γ = | ，其中Pγ
+是到P0 (γ )的L2投影
+算子。通过以下方式定义B qS c w (v, ; h
+)
+− ⋅ −
+K
+K
+B qS f S f S q
+∑
+∑
+∈
+∈
+K
+c w n w ww
+∑
+
+
+∈
+(
+h
+h
+
+v v
+∫
+∫
+h
+∂
+∂
+, ; ( ) ,
+∫
+K K
+K K
+∂ ∪
+n w
+w n
+− −
+− −
+K K
+
+∩
+w n
+− −
+( )
+( )
+h hh
+\
+)
+Γ
+∪
+= ⋅ −
+  
+ 
+Γ
+Γ
+(
+fS f S q
+∇
+   
+     
+nwww ()()
+fS f S q
+f S fS q
+n w w w,w
+w w n w,n
+(
+() ( )
+h h
+() ( )
+h h
+h h
+(
+
+)
+
+*,
+v n
+*,
+⋅
+v n
+v n⋅
+) )
+ (42)
+对任意q Q∈ h成立。
+B qS f S
+fS q w
+c w (
+(
+v, ;
+w,
+*,h
+w ) v n
+h h )
+⋅
+= ⋅ K T
+∑∈ h
+∫∂K n ( w,n
+*, )
+ (43)
+定义σ w =1和σ n = −1，对于任意v U∈ h
+0
+和q Q∈ h，求
+解 ut
+h
+(⋅ ∈ ,t U ) h
+，ξ c
+h
+(⋅ ∈ ,t) Uh
+，ptQ α
+h
+(⋅ ∈ , ) h
+，StQ α
+h
+(⋅ ∈ , ) h
+，
+α = w, n，使得
+α
+(
+(
+(
+(
+(
+(
+(
+(
+ 
+(
+   
+− − ⋅−
+(
+(
+(
+Sq Sq t
+S Sq q t J
+φ
+ρ ∇
+F q B qS
+ρ ∇
+p pq
+(
+λ ∇
+λ
+λ ∇
+= ∈
+α α
+n w
+w w
+n
+n w
+w
+h
+h h
+(
+h h
+∂
+tt w
+t nc w
+tt n
+g tJ
+, ,; ,
+λ
+, , , 0.
+∂
+g tJ
+K uv v
+K ξ v vn
+K uv v
++= ∈
+−
+S
+w,n, ,
+t wc n
+t
+α
+K ξ v vn
+h
+)
+)
+)
+)
+)
+z v
+−
+−
+−
+z v
++
+, ,;
+= =
+,, ,
+1
+1
+1
+)
+q B qS
+, , ,
+, 1, , ,
+−
+,
+σ
+(
+f p
+1
+)
+)
+h h
+h h
+t J
+)
+f p
++ =
+)
+, ,
+, ,
+0
+h B
+= ∈
+cc w
+,
+)
+)
+(
+(
+α
+(
+h B
+∈
+− ⋅=
+− ⋅=
+∈
+ξ
+)
+,
+)
+pS q t J
+(
+(
+(
+h h
+u
+− ⋅−
+c w
+)
+p
+p
+(
+t w
+)
+h h
+∫Γ
+h
+D
+∫Γ
+)
+D
+, , ,
+)
+)
+)
+)
+)
+ (44)
+设 第 n 个时间步的 S Q w
+h n, ∈ h 已 知， 则 在 下 一 时
+间 步 n +1 中求解 u U t
+h n, 1+ ∈ h， ξ ch n, 1+ ∈Uh， p Q α
+h n, 1+ ∈ h，
+S Q α
+h n, 1+ ∈ h，其中α = w, n，如下所示
+(
+(
+(
+(
+ 
+(
+   
+( , ) , ; , w,n,
+− −
+∫
+∫
+(
+(
+(
+Γ
+F q B qS
+Γ
+S Sq q
+φ
+p p q pS q
+(
+λ ∇
+λ ∇
+λ
+D
+D
+α α
+n w
+n w c w
+hn hn
+(
+hn hn h n
+S S
+tt w
+t nw c
+tt n
+,1 ,1
+,1 ,1 ,
+λ
+p gz
+p gz
+Ku v v
+K ξv
+Ku v v
+α α
++ +
+hn hn
++ +
+n n
+w w
+t ww c
+B
+B
+t t
+,1 ,
+K ξv
+n n
+vn v
+vn v
+)
+)
+)
++ =
+− =
++
++
+−
+−
+−
++ =
+1
+⋅ −
+⋅ −
+1
+1
+1
+)
+−
+−
+σ α
+−
+f S
+1
+h n h n
+h n h n
+f S
+, 1 , 1
+, 1 , 1
+(
+(
+(
++ +
++ +
+cc w
+ρ ∇
+ρ ∇
+, 1, ,
+(
+, ,.
+, ,
+, ,
+hn hn
+(
+, ,;
+, ,1
+ξ
+q B qS
+)
+)
+hn hn
+)
+)
+)
+hn hn
+, ,1
+− ⋅=
+− ⋅=
+,1 ,
+)
++ =
++
+(
+(
+(
+(
+, ,
+, ,
+p
+p
++
+α
+)
+,
+)
+(
++
+)
+(u
+,
+)
+t w
+hn hn
+−
+,1 ,
+)
+)
++
+)
+)
+)
+)
+)
+ (45)
+P-IMPES 方法的关键在于上述线性系统的求解，
+该方程可重新表述为一个等效的解耦系统。在式(27)
+中各相流体的质量守恒方程均被求解，这正是该算法
+能够保持各相流体均满足局部质量守恒的本质原因。
+通过对各相流体的离散质量守恒方程求和，并注意到
+饱和度约束及以下方程
+∑α
+σ αB qS c c ( , ; ) 0, ξ hn hn , +1
+w
+, = (46)
+求解如下线性系统，即求解u U t
+h n, 1+ ∈ h
+，ξ c
+h n, 1+ ∈Uh
+，pα
+h n, 1+
+∈Qh，α = w,n，使得
+
+----- Page 9 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 317
+(
+(
+(
+(
+∑
+− −
+∫
+∫
+∇
+α
+(
+(
+(
+Γ
+p p q pS q
+(
+D
+λ ∇
+λ
+λ ∇
+D
+n w c w
+(
+hn hn h n
+B qS F q
+t t
+t nw
+tt n
+p gz
+,1 ,1 ,
+λ
+p gz
+Ku v v
+K ξv
+Ku v v
+α
+n n
++ +
+B
+w w
+t ww c
+B
+K ξv
+vn v
+(
+vn v
+)
+)
+)
+− =
+−
+−
+−
+u
+⋅ −
+⋅ −
+1
+1
+1
+)
+t wt
+hn hn
+−
+,1 ,
+f S
+1
+h n h n
+h n h n
++
+f S
+, 1 , 1
+, 1 , 1
+(
+(
+,; , ,
+(
++ +
++ +
+ρ ∇
+ρ ∇
+(
+, ,.
+, ,
+, ,
+hn hn , ,1
+)
+hn hn
+)
+)
+)
+, ,1
+− ⋅=
+− ⋅=
+)
+c
+)
+(
+(
+(
+, ,
+, ,
+=
+p
+p
++
+w
+)
+(
+,
+)
+(
++ ,
+) −
+)
+)
+)
+)
+)
+)
+ (47)
+fS f S nw ww ( Q h n, , h n ) + = ⋅∈ ( ) 1和∇ v h，由此可推得
+(
+∫
+(
+Γ
+λ ∇
+D
+(
+t c Kξ v c w v
+p p g z n w nw
+B B
+)
+−
+− ⋅− −
+1 h n, 1+ h n,
+) v n v
+, , ) = ⋅− (
+((
+p S
+ρρ∇
+( )
+)
+)
+, .)
+ (48)
+因此，线性系统式(28)的求解可为两个步骤。首先，
+求解式(27)的第 5 个方程以得到ppp nw n w
+hn hn hn ,1 ,1 ,1 + ++ = − ，
+再求解式(29)以得到ξ c
+h n, 1+ 。接下来，pwh n, 1+ 和uth n, 1+ 可
+以通过式(28)的第一个和第二个方程求解，然后pn
+h n, 1+
+可直接获得。综上可得新的保物理属性IMPES方法
+(P-IMPES)。
+算法 3 (P-IMPES)给定S Q w
+h n, ∈ h ,在下一时间步
+中按如下格式计算。
+步骤 1 通过式(27)的第 5 个方程和式(29)分别求
+解ppQ n w
+hn hn ,1 ,1 + + − ∈ h和ξ ch n, 1+ ∈Uh。
+步骤 2 求解ppQ n w
+hn hn ,1 ,1 + + − ∈ h和ξ ch n, 1+ ∈Uh
+(
+(
+∑
+∫
+α
+(
+(
+Γ
+λ
+λ ∇
+D
+B qS F q q Q
+t nw c
+tt w
+p gz
+Ku v v
+K ξv
+α
+w w
+B
+(
+vn v
+)
+)
+−
+−
+u
+⋅ −
+1
+1
+t wt
+hn hn ,1 ,
+f S
+h n h n
++
+, 1 , 1
+(
+,; , , ,
+(
++ +
+ρ ∇
+, ,
+hn hn , ,1
+)
+)
+− ⋅=
+)
+(
+, .
+= ∈
+p
++
+(
+,
+)
+) −
+)
+)
+h
+ (49)
+则pn
+h n, 1+ 可通过如下方式更新
+p pp p n nw w
+hn hn hn hn ,1 ,1 ,1 ,1 + ++ + =−+ ( ) . (50)
+步骤 3 首先通过如下方程更新润湿相饱和度
+Sw
+h n, 1+
+(
+     
+φ
+F q B qS w cc w
+S S
+, ,;
+w w
+hn hn
+t t
+,1 ,
+n n
+)
++1
++
++
+−
+−
+(ξ hn hn
+, , ;
+,1 ,
+q B qS
++
++ = wt w (u
+)
+hn hn ,1 , + ) (51)
+则非润湿相饱和度 Sn
+h n, 1+ 可更新为 S S n wh n,1 ,1 + + h n = −1 。
+上述 3 类新型IMPES方法相较于传统的IMPES
+方法和HF-IMPES方法，在稳定性方面表现出显著优
+势。图 1 揭示了传统IMPES方法和新型IMPES方法的
+联系和区别(以FC-IMPES-I为例)，指出新型IMPES
+方法既继承了传统IMPES方法和HF-IMPES方法的优
+点，同时又保持了方程解本身更多的物理属性。
+图 1 传统IMPES 方法与FC-IMPES-I 方法的算法设计流程对比
+Fig. 1 Comparison of algorithmic design between the traditional IMPES method and the FC-IMPES-I method
+
+----- Page 10 -----
+
+318 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+通过数学理论上的严格证明[1-2]，本文确保了这些
+新型IMPES方法能够在求解过程中有效地保持各相流
+体的局部质量守恒性质，并在一定时间步长下保证饱
+和度的有界性。这一特性对于油气藏开发尤为重要，
+可在提高模拟精度的同时，避免了传统方法可能出现
+的不稳定性和计算误差。此外，新型IMPES方法具有
+无偏求解的优势，从而提高了算法的可靠性。基于这
+些优点，新型IMPES方法在油气资源的开采以及复杂
+多相渗流预测等方面，具有广阔的应用前景，尤其是
+在非常规油气资源的开发过程中，能够更准确地捕捉
+流体的动态变化，帮助提高开发效率并降低经济风险。
+新型IMPES方法由于用了“先离散后加合”的
+新策略，使得压力方程的空间离散和饱和度的空间离
+散可以实现完全匹配，从本质上克服了以往文献中的
+IMPES半隐方法无法同时保证两相流体均满足局部质
+量守恒的难点。新型IMPES方法除了保各相流体均
+满足局部质量守恒、饱和度保界，计算格式为无偏求
+解，而且适用于求解非均匀介质中具有不同毛管力分
+布的两相渗流问题。课题组近几年发表的几类新型的
+IMPES半隐格式求解可以认为是本文提出的新型逐相
+守恒IMPES框架的特例，本文IMPES框架还可以应用
+于更复杂的多组分多相渗流，构造更多的新颖格式。
+新型逐相守恒IMPES框架还有一个传统IMPES没有的
+优势，即新型逐相守恒IMPES框架中只需要定义体积
+守恒方程(或者质量守恒方程)的空间离散方法，不需
+要单独定义压力方程的空间离散方法。
+4 数值算例
+本节将基于P-IMPES方法和HF-IMPES方法开
+展在封闭系统和非封闭系统中的两相渗流模拟，如下
+两个算例都将基于非均匀介质情形，通过数值结果对
+比展示新型IMPES方法的优点。假设绝对渗透率张量
+为K I = K ，其中I是单位矩阵K，K是一个具有单位为
+1 mD的正常数。毛管压力函数为pS S c w ( ) = − w
+B
+K
+c log ,
+其中Bc是一个具有单位为1 bar mD ⋅ 1/2的参数，Sw为
+有效饱和度[26]，饱和度是一个无量纲的百分比值。
+润湿相和非润湿相的相对渗透率分别为k S rw w = β 和
+k S rn = − w (1 )β。图 2 展示了本节所使用的网格剖分。
+4.1 算例一
+在这个数值实验中测试了所提出算法在两相逆
+流问题中的性能表现。计算域设置为一个尺寸为
+250 m 250 m × 的二维非均质多孔介质区域。如图 3 左
+侧所示，初始条件下水相(润湿相)位于计算域下层的
+中间两个区域，而重油相(非润湿相)则充满其余空
+间。水相和重油相的密度分别设置为ρ W =1000 kg / m3
+和ρ N =1200 kg / m3，对应的粘度分别为 µ W =1 cP和
+µ N = 0.45 cP。值得注意的是，由于水相密度低于重油
+相导致显著的重力分异现象。
+为了模拟真实储层中的非均质性，在计算域的中
+部设置了一个低渗透率区域(K =1 mD)，而其余区域
+则具有较高的渗透率(K =1000 mD)，如图 3 右侧所示
+由于渗透率数值相对较小，为更清晰地展示结果，图
+中采用其对数形式进行呈现。这种渗透率的强烈对比
+将显著影响两相流体的运移行为。计算网格采用包
+含 20 000 个单元的三角形网格进行离散，网格尺寸
+为h = 2.5 m，所有边界均设置为不渗透边界条件。在
+毛管压力模型中，采用了参数Bc =1来表征两相界面
+效应，时间步长设置为 0.5 d。图 4 展示了润湿相饱和
+ڕᅭ㑾ᵩރܳ ᅭ䘕ࡧഌ⮱㑾ᵩރܳᩫ๔ఫ
+图 2 100×100 的网格剖分
+Fig. 2 Mesh partitioning with a resolution of 100×100
+
+----- Page 11 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 319
+度在不同时间步的分布。将P-IMPES与HF-IMPES
+算法进行对比分析，图 5 分别展示了P-IMPES与
+HF-IMPES算法在每次迭代所使用的时间，可以
+看 到P-IMPES算法每次所使用时间在 0.7~0.8 s而
+HF-IMPES算法所使用时间在 0.8~0.9 s，因此在每个
+迭代步中两个算法在相同空间网格的计算时间比较接
+近，这也说明改进的IMPES算法在单步计算时间和传
+统方法相比没有增加过多的计算量。但在时间步长的
+图 3 (例 1)左：初始状态下的润湿相饱和度；右: 渗透率(单位: mD)
+Fig. 3 (Example 1): Left-Initial wetting phase saturation; Right-Permeability (unit: mD)
+-0.5
+0
+0.5
+1.0
+1.5
+2.0
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+图 4 (例 1) Bc=1 在时间步 300(左上)、900(右上)、1800(左下)、2400(右下)的排水过程中润湿相的饱和度分布图
+Fig. 4 (Example 1): Saturation distribution of the wetting phase during the drainage process with Bc=1 at time steps 300 (top 
+left), 900 (top right), 1800 (bottom left), and 2400 (bottom right)
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+
+----- Page 12 -----
+
+320 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+设置上，从图 6 的上图可以看出，基于HF-IMPES算
+法的润湿相饱和度数值解在设置时间步长 0.5 d的情
+况下，在第 300 迭代步时出现溢出，而P-IMPES算
+法则表现的更加稳健，这说明改进的P-IMPES算法
+对时间步长敏感度更低。HF-IMPES、P-IMPES算
+法和FC-IMPES算法均采用了一阶的欧拉格式，表 1
+0 50 100 150 200
+䔚А⁎᪝
+䓽㵹ᬣ䬡s
+䓽㵹ᬣ䬡s
+⃼⁎䔚А䓽㵹ᬣ䬡 ⃼⁎䔚А䓽㵹ᬣ䬡
+0 250 300
+0.6 0.78
+0.80
+0.82
+0.84
+0.86
+0.88
+0.90
+0.92
+0.94
+0.96
+0.7
+0.8
+0.9
+1.0
+1.1
+1.2
+1.3
+50 100 150 200
+䔚А⁎᪝
+250 300
+1*.1&4 )'*.1&4
+图 5 (例 1)：每次迭代所用时间, 左：P-IMPES，右：HF-IMPES
+Fig. 5 (Example 1): CPU time per iteration. Left: P-IMPES; Right: HF-IMPES
+图 6 (例 1) ：上：基于HF-IMPES算法在第 100(左)和第 300(右)个时间步时的润湿相饱和度空间分布值。下：基于
+P-IMPES算法在第 100(左)和第 300(右)个时间步时的润湿相饱和度空间分布值
+Fig. 6 (Example 1): Top-Spatial distribution of the wetting phase saturation at the100th (left) and 300th(right) time steps based 
+on the HF-IMPES algorithm. Bottom-Spatial distribution of the wetting phase saturation at the 100th (left) and 300th (right) 
+time steps based on the P-IMPES algorithm
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250
+0
+50
+100
+150
+200
+250
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+
+----- Page 13 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 321
+展示了P-IMPES算法在时间上的误差阶达到了一阶。
+该实验设计充分考虑了实际油藏中的关键特征，包括
+流体密度差异、粘度对比、渗透率非均质性以及重力
+效应等因素，为验证算法在不同物理条件下的鲁棒性
+提供了良好的测试平台。通过分析两相流体在非均质
+介质中的运移规律，可以深入理解密度驱动流与渗透
+率场之间的相互作用机制。算法对比结果进一步证实
+了P-IMPES方法在处理复杂两相流问题中的有效性
+和优越性。
+4.2 算例二
+在这个数值实验中模拟了非均质多孔介质中润
+湿相的驱替过程，重点研究了渗透率非均质性对
+两相流动行为的影响。计算域设置为一个尺寸为
+300 m 150 m × 的矩形区域，采用包含 10 000 个单元
+的三角形网格进行离散化，网格尺寸为 h = 3 m，时
+间步长设置为d，以确保数值稳定性和计算效率。渗
+透率场呈现出明显的空间非均质性，如图 7 右图所
+示，其中包含两个显著不同的子区域：低渗透率区
+域(K =1 mD)和高渗透率区域(K =10 mD)。流体系
+统由润湿相(水相)和非润湿相(油相)组成，其密度
+分别设置为ρW=1000 kg/m3 和ρN=800 kg/m3
+，粘度分别
+为μW=1 cp和μN=0.45 cp。润湿相以恒定速率 0.63 m3/
+d从左边界注入，而右边界则保持润湿相压力恒定为
+100 bar，其余边界设置为不渗透边界条件。
+在初始时刻，计算域几乎完全被非润湿相饱和，
+仅在与注入边界相邻的单元中充满润湿相。这种初始
+配置模拟了实际油藏中水驱油过程的初始状态。图
+8 展示了Bc = 60 时，润湿相饱和度在不同时间步的
+分布。为了研究毛管压力效应的影响，在图 9 分别
+测试了毛管压力函数中参数Bc = 0 (忽略毛管压力)和
+Bc = 60(考虑显著毛管压力效应)两种情况，图 9 表
+明Bc = 0和Bc = 60情况下的排水过程存在差异。当不
+考虑毛管压力时，可以看到注入的水在渗透率更高的
+层中流动得更快。从图 10 可以看出HF-IMPES算法
+在 0.1 d时间步长下润湿相饱和度数值解出现溢出，而
+P-IMPES算法可稳健计算。图 11 展示了相对渗透率
+函数指β数取不同的值时润湿相饱和度空间分布的对
+比，可以看出当β越大时润湿相饱和度变化越慢。
+该实验设计充分考虑了多孔介质非均质性、流体
+表 1 时间步长的收敛阶
+Table 1 Convergence order with respect to the time step
+时间步长/d 误差 阶数
+0.8 0.6189 1.6271
+0.4 0.2420 1.2199
+0.2 0.1039 1.3548
+0.1 0.0336 —
+图 7 (例 2)：左：初始状态下的润湿相饱和度；右：渗透率分布 (单位：mD)
+Fig. 7 (Example 2): Left: Initial wetting phase saturation; Right: Permeability distribution (unit: mD)
+0 50 100 150 200 250 300
+0
+50
+100
+150
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+
+----- Page 14 -----
+
+322 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+图 8 (例 2)：Bc=60 在时间步 100(左上)、300(右上)、500(左下)和 700(右下)处的排水过程中润湿相的饱和空间分布
+Fig. 8 (Example 2): Spatial distribution of wetting phase saturation during the drainage process at time steps 100 (top left), 300 
+(top right), 500 (bottom left), and 700 (bottom right) with Bc=60
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+物性差异以及边界条件等关键因素。通过对比不同毛
+管压力参数下的模拟结果，可以深入理解毛管压力效
+应对流体运移规律的影响，为实际油藏开发中的水驱
+油过程优化提供理论指导。
+图 9 (例 2)：时间步 800 步时润湿相饱和度分布
+Fig. 9 (Example 2): Wetting phase saturation distribution at time step 800
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+Bc=60 Bc=0
+
+----- Page 15 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 323
+5 结论
+多相渗流问题在油气藏开发中至关重要，我国复
+杂地质条件对数值求解提出挑战。传统不可压不混溶
+两相渗流模型常用全隐格式和半隐格式(如IMPES方
+法)，全隐格式计算比较复杂，传统IMPES方法在更
+新饱和度时需计算饱和度梯度，不适用于复杂非均匀
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+图 10 (例 2)：左：基于P-IMPES算法在第 100 个时间步时的润湿相饱和度空间分布值。右：基于HF-IMPES算法在第 100
+个时间步时的润湿相饱和度空间分布值
+Fig. 10 (Example 2): Left-Wetting phase saturation spatial distribution at time step 100 based on the P-IMPES algorithm. 
+Right-Wetting phase saturation spatial distribution at time step 100 based on the HF-IMPES algorithm
+图 11 (例 2)：相对渗透率函数取不同指数时润湿相饱和度在 300 迭代步时的空间分布
+Fig. 11 (Example 2): Spatial distribution of wetting phase saturation at iteration step 300 for different exponents of the relative 
+permeability function
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+0 50 100 150 200 250 300
+0
+50
+100
+150
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+β=2 β=4
+β=6 β=8
+
+----- Page 16 -----
+
+324 石油科学通报 ( 多孔介质渗流实验与模拟专题 ) 2025 年 04 月 第 10 卷第 2 期
+介质，且无法保证两相流体均满足局部质量守恒。传
+统IMPES方法通过压力方程隐式求解压力，显式更
+新饱和度，但在非均匀介质中存在局限性。Hoteit和
+Firoozabadi提出的HF-IMPES方法虽然可处理非均匀
+介质中毛管压力差异，但仅在润湿相方面局部质量守
+恒，且两种方法均存在饱和度越界问题。
+应对这些挑战，本文提出了新型逐相守恒IMPES
+框架，通过讨论了 3 种新颖的无偏隐压显饱数值方法
+来阐述新型逐相守恒IMPES框架中“先离散再加合”
+的推导新思路。IMPES方法的推导是基于多孔介质
+中不可压不混溶两相渗流问题的基本数学模型，通过
+对相关方程进行等价变形、引入新变量及离散化处理
+来实现，关键是如何解耦压力和饱和度。传统IMPES
+算法的推导是在偏微分方程层次推导出压力方程和饱
+和度方程，分别用于求算压力和更新饱和度。与传
+统IMPES算法推导不一样的是，本文讨论的 3 种新
+型IMPES方法的推导是先进行空间离散，得到空间
+离散层面上方程后再进行等价变形推出离散的压力方
+程和饱和度方程，从而实现无偏和逐相守恒等优越性
+质。新型IMPES方法从本质上克服了以往IMPES半隐
+方法无法同时保证两相流体均满足局部质量守恒的难
+点，使得新型IMPES方法保各相流体均满足局部质量
+守恒。同时，新型IMPES方法满足条件保界，即如果
+时间步长小于某个值，则各相流体的饱和度始终满足
+保界，避免了传统方法可能出现的饱和度非物理情况。
+新型 IMPES方法对于各相流体的求解是无偏的，提高
+了算法的可靠性。
+本文通过两个数值算例验证和对比新型IMPES方
+法的性能。算例一测试新算法在两相逆流问题中的
+表现，对比P-IMPES与HF-IMPES算法，结果表明
+P-IMPES在处理复杂两相流问题中更有效；算例二模
+拟非均质多孔介质中润湿相驱替过程，研究渗透率非
+均质性和毛管压力效应对流体运移规律的影响。总体
+来说，在数值算例中，通过设置非均质多孔介质区域，
+验证了新型IMPES方法在处理复杂地质条件下两相流
+问题的有效性和优越性，相比传统方法更具适应性。
+本文聚焦于多孔介质中两相渗流问题的数值求
+解，其新颖点体现在对传统隐压显饱(IMPES)方法的
+改进与创新上。本文提出了“先离散再加合”的推导
+新思路，构建了新型逐相守恒IMPES框架，课题组近
+几年发表的几类新型的IMPES半隐格式求解可以认为
+是本文提出的新型逐相守恒IMPES框架的特例，本文
+IMPES框架还可以应用于更复杂的多组分多相渗流，
+构造更多的新颖格式。针对我国地质条件复杂，岩石
+性质分布不均匀的情况，新型IMPES方法可有效求解
+非均匀介质中具有不同毛管力分布的两相渗流问题。
+新型 IMPES方法在油气资源开采以及复杂多相渗流预
+测等方面具有广阔应用前景，尤其是在复杂的非常规
+油气资源开发中，能更准确捕捉流体动态变化，帮助
+提高开发效率并降低经济风险。本文提出的算法设计
+思想可应用到可压缩多相和多组分渗流的计算，在非
+常规储层中非达西流动的应用有待进一步的研究。
+参考文献
+[1] CHEN Z, HUAN G, MA Y. Computational methods for multiphase flows in porous media[J]. SIAM, Philadelphia, PA, USA, 2006.
+[2] CHEN Z, HUAN G, LI B. An improved IMPES method for two-phase flow in porous media[J]. Transp. Porous Media, 2004, 54: 361-
+376.
+[3] DAWSON C. SUN S, WHEELER M F. Compatible algorithms for coupled flow and transport[J]. Comput. Methods Appl. Mech. Engrg., 
+2004, 193: 2565-2580.
+[4] FENG W, GUO H, KANG Y, YANG Y. Bound-preserving discontinuous Galerkin methods with second-order implicit pressure explicit 
+concentration time marching for compressible miscible displacements in porous media[J]. J. Comp. Phys., 2022, 463: 111240.
+[5] GUO H, YANG Y. Bound-preserving discontinuous Galerkin method for compressible miscible displacement in porous media[J]. SIAM 
+J. Sci. Comput., 2017, 39: A1969–A1990.
+[6] HUANG Z, YAN X, Yao J. A two-phase flow simulation of discrete-fractured media using mimetic finite difference method[J]. Commun. Comput. Phys., 2014, 16: 799–816.
+[7] LI X, RUI H. Superconvergence of a fully conservative finite difference method on non-uniform staggered grids for simulating wormhole propagation with the Darcy-Brinkman-Forchheimer framework[J]. J. Fluid Mech., 2019, 872: 438–471.
+[8] MONTEAGUDO J E P, FIROOZABADI A. Comparison of fully implicit and IMPES formulations for simulation of water injection in 
+fractured and unfractured media[J]. Int. J. Numer. Meth. Eng., 2007, 69: 698-728.
+[9] YANG H, YANG C, SUN S. Active-set reduced-space methods with nonlinear elimination for two-phase flow problems in porous 
+media[J]. SIAM J. Sci. Comput., 2016, 38: B593–B618.
+
+----- Page 17 -----
+
+无偏隐压显饱数值方法 —— 两相渗流模拟的新算法 325
+[10] YANG H, SUN S, LI Y, YANG C. A scalable fully implicit framework for reservoir simulation on parallel computers[J]. Comput. 
+Methods Appl. Mech. Engrg., 2018, 330: 334–350.
+[11] KWOK F, TCHELEPI H. Potential-based reduced Newton algorithm for nonlinear multiphase flow in porous media[J]. J. Comput. 
+Phys., 2007, 227: 706-727.
+[12] THOMAS G W, THURNAU D H. Reservoir simulation using an adaptive implicit method[J]. SPE J., 1983, 23: 759-768.
+[13] QIAO C, WU S, XU J, et al. Analytical decoupling techniques for fully implicit reservoir simulation[J]. J. Comp. Phys., 2017, 336: 
+664–681.
+[14] COATS K H. A note on IMPES and some IMPES-based simulation models[C]. Presented at the 15th symposium on reservoir simulation, Houston, TX: SPE 49774 1999.
+[15] COATS K H. IMPES stability: The CFL limit, presented at the SPE reservoir simulation symposium[C]. Houston, TX: SPE 85956 2001.
+[16] COATS K H. IMPES stability: selection of stable time steps[C]. Presented at the SPE reservoir simulation symposium, Houston, TX: 
+SPE 84924 2001.
+[17] SHELDON J W, ZONDEK B, CARDWELL W T. One-dimensional, incompressible, noncapillary, two-phase fluid flow in a porous 
+medium[J]. T. SPE AIME, 1959, 216: 290-296.
+[18] STONE H L, GARDER JR A O. Analysis of gas-cap or dissolved-gas reservoirs[J]. T. SPE AIME, 1961, 222: 92-104.
+[19] HOTEIT H, FIROOZABADI A. Numerical modeling of two-phase flow in heterogeneous permeable media with different capillarity 
+pressures[J]. Adv. Water Resour., 2008, 31: 56-73.
+[20] HOTEIT H, FIROOZABADI A. An efficient numerical model for incompressible two-phase flow in fractured media[J]. Adv. Water 
+Resour., 2008, 31: 891-905.
+[21] DURLOFSKY L J, EFENDIEV Y, AND GINTING V. An adaptive local-global multiscale finite volume element method for twophase 
+flow simulations[J]. Adv. Water Resour., 2007, 30: 576-588.
+[22] QIN G, EWING R E, CHEN Z. Analysis of a compositional model for fluid flow in porous media[J]. SIAM J. Appl. Math., 2000, 60: 
+747-777.
+[23] WATTS J W. A compositional formulation of the pressure and saturation equations[C]. 1985, SPE 12244.
+[24] COLLINS D A, NGHIEM L X, LI Y K, et al. An efficient approach to adaptive implicit compositional simulation with an equation of 
+state[J]. SPE Reservoir Eng., 1992, 7: 259-264.
+[25] CHEN H, KOU J, SUN S, et al. Fully mass-conservative IMPES schemes for incompressible two-phase flow in porous media[J].
+Comput. Methods Appl. Mech. Engrg., 2019, 350: 641-663.
+[26] CHEN H, SUN S. A new physics-preserving IMPES scheme for incompressible and immiscible two-phase flow in heterogeneous porous 
+media[J]. J. Comput. Appl. Math., 2021, 381: 113035.
+(编辑 马桂霞)
+第一作者：陈黄鑫（1983 年—），博士，教授，博士生导师，主要从事自适应有限元方法、多重网格法、间断
+Galerkin方法、多孔介质流动输运问题，流体拓扑优化问题，高波数波动问题研究，chx@xmu.edu.cn。
+通信作者：孙树瑜（1971 年—），博士，教授、博士生导师，国家高层次人才，主要从事页岩油气开发、二氧化碳
+封存及地质储氢等问题的建模和计算等关键技术研究，suns@tongji.edu.cn。

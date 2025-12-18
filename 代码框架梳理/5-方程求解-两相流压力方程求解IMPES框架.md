@@ -1,12 +1,10 @@
-#pragma once
-#include <string>
+```
 #include <vector>
 #include <memory>
 #include <iostream>
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
-#include "Solver_TimeLoopUtils.h"
 #include "BCAdapter.h"
 #include "TwoPhaseWells_StrictRate.h"
 #include "FVM_WellCoupling_TwoPhase.h"
@@ -140,8 +138,7 @@ namespace IMPES_Iteration
             return false;
         }
         // 1) 组装压力方程（时间项、扩散、毛细、重力、井耦合，不含通量）
-        // 1) assemble pressure equation (time+diff+cap+grav+wells; no flux)
-        PressureAssemblyResult asmb;
+        PressureAssemblyResult asmb;  //创建一个组装结果的实体
         if (!assemblePressureTwoPhase(mgr, reg, freg, Pbc, wells, dt, ctrl.assembly, asmb))
         {
             std::cerr << "[IMPES_Iteration][Pressure] assemblePressureTwoPhase failed.\n";
@@ -198,3 +195,7 @@ namespace IMPES_Iteration
     }
 
 }// namespace IMPES_Iteration
+
+
+```
+

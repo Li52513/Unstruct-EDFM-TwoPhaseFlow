@@ -7,7 +7,6 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FieldAcessForDiscre.h" // For cellScalar
-#include "MultiPhaseProperties.h"  // For kr_Mualem_vG, etc.
 
 namespace FVM {
 	namespace TwoPhaseWellCoupling {

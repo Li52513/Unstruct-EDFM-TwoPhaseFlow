@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FVM_WellDOF_TwoPhase.h"
@@ -8,19 +8,101 @@
 namespace IMPES_Iteration
 {
     /**
-     * @brief »ùÓÚ Peaceman ÑÏ¸ñ Rate Á½Ïà¾®£¬¹¹½¨Ë®ÏàÖÊÁ¿Ô´³¡ Qw_well [kg/s]¡£
+     * @brief åŸºäºä¸¥æ ¼ Peaceman ä¸¤ç›¸äº•æ¨¡å‹ï¼Œæ„å»ºæ°´/æ°”ä¸¤ç›¸çš„å•å…ƒè´¨é‡æºé¡¹åœº [kg/s]ã€‚
      *
-     * Ô¼¶¨£º
-     *  - Qw_well[i] > 0 : Ïòµ¥Ôª i ×¢ÈëË®Ïà
-     *  - Qw_well[i] < 0 : ´Óµ¥Ôª i ²É³öË®Ïà
+     * çº¦å®šï¼šQ>0 è¡¨ç¤ºæµå…¥å•å…ƒï¼ˆæ³¨å…¥ï¼‰ï¼ŒQ<0 è¡¨ç¤ºæµå‡ºå•å…ƒï¼ˆé‡‡å‡ºï¼‰ã€‚
      *
-     * @param mgr        Íø¸ñ¹ÜÀíÆ÷
-     * @param reg        ³¡×¢²á±í£¨Ìá¹© p_w, lambda_w, lambda_g, rho_w, rho_g µÈ£©
-     * @param wells      Á½Ïà¾® DOF ÁĞ±í£¨p_bh ÒÑÓÉÑ¹Á¦½â¸üĞÂ£©
-     * @param vg_params  VG ²ÎÊı
-     * @param rp_params  Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı
-     * @param pw_field   µ¥ÔªÑ¹Á¦³¡Ãû£¨Í¨³£Îª "p_w"£©
-     * @param Qw_name    Êä³öË®ÏàÔ´³¡Ãû£¬ÀıÈç "Qw_well"
+     * @param Qw_name  è¾“å‡ºæ°´ç›¸æºåœºåï¼ˆå¯ä¸ºç©ºï¼šä¸è¾“å‡ºï¼‰
+     * @param Qg_name  è¾“å‡ºæ°”ç›¸æºåœºåï¼ˆå¯ä¸ºç©ºï¼šä¸è¾“å‡ºï¼‰
+     */
+    inline bool buildWaterAndGasSourceFieldsFromWells(
+        MeshManager& mgr,
+        FieldRegistry& reg,
+        const std::vector<WellDOF_TwoPhase>& wells,
+        const VGParams& vg_params,
+        const RelPermParams& rp_params,
+        const std::string& pw_field,
+        const std::string& Qw_name,
+        const std::string& Qg_name)
+    {
+        if (Qw_name.empty() && Qg_name.empty()) return true;
+
+        Mesh& mesh = mgr.mesh();
+        const int Nc = static_cast<int>(mesh.getCells().size());
+
+        std::vector<double> Qw_cell(Nc, 0.0);
+        std::vector<double> Qg_cell(Nc, 0.0);
+
+        std::vector<double> Mw_cell, Mg_cell; // ä¸´æ—¶ç¼“å­˜ï¼Œä¸åŒäº•å¤ç”¨
+        for (const auto& well : wells)
+        {
+            if (!FVM::TwoPhaseWellsStrict::compute_well_phase_mass_rates_strict(
+                mgr, reg, well,
+                vg_params, rp_params,
+                pw_field,
+                Mw_cell, Mg_cell))
+            {
+                std::cerr << "[IMPES][Well] compute_well_phase_mass_rates_strict failed for well '"
+                    << well.name << "'.\n";
+                return false;
+            }
+
+            if ((int)Mw_cell.size() != Nc || (int)Mg_cell.size() != Nc) {
+                std::cerr << "[IMPES][Well] Mw_cell/Mg_cell size mismatch.\n";
+                return false;
+            }
+
+            for (int ic = 0; ic < Nc; ++ic) {
+                Qw_cell[ic] += Mw_cell[ic];
+                Qg_cell[ic] += Mg_cell[ic];
+            }
+        }
+
+        if (!Qw_name.empty())
+        {
+            auto Qw = reg.getOrCreate<volScalarField>(Qw_name.c_str(), Nc, 0.0);
+            if (!Qw) {
+                std::cerr << "[IMPES][Well] failed to create water source field '"
+                    << Qw_name << "'.\n";
+                return false;
+            }
+            Qw->data.assign(Nc, 0.0);
+            for (int ic = 0; ic < Nc; ++ic) {
+                (*Qw)[ic] = Qw_cell[ic]; // kg/s, æ³¨å…¥æ­£ï¼Œé‡‡å‡ºè´Ÿ
+            }
+        }
+
+        if (!Qg_name.empty())
+        {
+            auto Qg = reg.getOrCreate<volScalarField>(Qg_name.c_str(), Nc, 0.0);
+            if (!Qg) {
+                std::cerr << "[IMPES][Well] failed to create gas source field '"
+                    << Qg_name << "'.\n";
+                return false;
+            }
+            Qg->data.assign(Nc, 0.0);
+            for (int ic = 0; ic < Nc; ++ic) {
+                (*Qg)[ic] = Qg_cell[ic]; // kg/s, æ³¨å…¥æ­£ï¼Œé‡‡å‡ºè´Ÿ
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief åŸºäº Peaceman ä¸¥æ ¼ Rate ä¸¤ç›¸äº•ï¼Œæ„å»ºæ°´ç›¸è´¨é‡æºåœº Qw_well [kg/s]ã€‚
+     *
+     * çº¦å®šï¼š
+     *  - Qw_well[i] > 0 : å‘å•å…ƒ i æ³¨å…¥æ°´ç›¸
+     *  - Qw_well[i] < 0 : ä»å•å…ƒ i é‡‡å‡ºæ°´ç›¸
+     *
+     * @param mgr        ç½‘æ ¼ç®¡ç†å™¨
+     * @param reg        åœºæ³¨å†Œè¡¨ï¼ˆæä¾› p_w, lambda_w, lambda_g, rho_w, rho_g ç­‰ï¼‰
+     * @param wells      ä¸¤ç›¸äº• DOF åˆ—è¡¨ï¼ˆp_bh å·²ç”±å‹åŠ›è§£æ›´æ–°ï¼‰
+     * @param vg_params  VG å‚æ•°
+     * @param rp_params  ç›¸å¯¹æ¸—é€ç‡å‚æ•°
+     * @param pw_field   å•å…ƒå‹åŠ›åœºåï¼ˆé€šå¸¸ä¸º "p_w"ï¼‰
+     * @param Qw_name    è¾“å‡ºæ°´ç›¸æºåœºåï¼Œä¾‹å¦‚ "Qw_well"
      */
     inline bool buildWaterSourceFieldFromWells(
         MeshManager& mgr,
@@ -31,49 +113,22 @@ namespace IMPES_Iteration
         const std::string& pw_field,
         const std::string& Qw_name)
     {
-        Mesh& mesh = mgr.mesh();
-        const int Nc = static_cast<int>(mesh.getCells().size());
-
-        // 1) µ÷ÓÃ¾®Ä£¿é£¬Éú³É cell ¼¶Ë®ÏàÖÊÁ¿Ô´Êı×é
-        std::vector<double> wellSources;
-        if (!FVM::TwoPhaseWellsStrict::build_saturation_well_sources_strict(
+        return buildWaterAndGasSourceFieldsFromWells(
             mgr, reg, wells,
             vg_params, rp_params,
             pw_field,
-            wellSources))
-        {
-            std::cerr << "[IMPES][Well] build_saturation_well_sources_strict failed.\n";
-            return false;
-        }
-
-        if ((int)wellSources.size() != Nc) {
-            std::cerr << "[IMPES][Well] wellSources size mismatch.\n";
-            return false;
-        }
-
-        // 2) Ğ´Èë FieldRegistry µÄÌåÔ´³¡
-        auto Qw = reg.getOrCreate<volScalarField>(Qw_name.c_str(), Nc, 0.0);
-        if (!Qw) {
-            std::cerr << "[IMPES][Well] failed to create Qw_well field '"
-                << Qw_name << "'.\n";
-            return false;
-        }
-        Qw->data.assign(Nc, 0.0);
-        for (int ic = 0; ic < Nc; ++ic) {
-            (*Qw)[ic] = wellSources[ic]; // kg/s, ×¢ÈëÕı£¬²É³ö¸º
-        }
-
-        return true;
+            Qw_name,
+            /*Qg_name=*/"");
     }
 
-    /// \brief µ÷ÊÔÓÃ£º´òÓ¡µ¥¿ÚÉú²ú¾®µ±Ç°µÄ Peaceman ÖÊÁ¿Ö¸ÊıºÍÔ¤ÆÚÁ÷Á¿¡£
+    /// \brief è°ƒè¯•ç”¨ï¼šæ‰“å°å•å£ç”Ÿäº§äº•å½“å‰çš„ Peaceman è´¨é‡æŒ‡æ•°å’Œé¢„æœŸæµé‡ã€‚
     ///
-    /// \param mgr   Íø¸ñ¹ÜÀíÆ÷
-    /// \param reg   ³¡×¢²á±í£¨Ìá¹© p_w, lambda_w, lambda_g, rho_w, rho_g, mask, WI£©
-    /// \param well  Ä¿±ê¾®£¨Í¨³£ÎªÉú²ú¾®£¬mode=Pressure£©
-    /// \param pw_field_name  Ñ¹Á¦³¡Ãû³Æ£¨Èç "p_w"£©
+    /// \param mgr   ç½‘æ ¼ç®¡ç†å™¨
+    /// \param reg   åœºæ³¨å†Œè¡¨ï¼ˆæä¾› p_w, lambda_w, lambda_g, rho_w, rho_g, mask, WIï¼‰
+    /// \param well  ç›®æ ‡äº•ï¼ˆé€šå¸¸ä¸ºç”Ÿäº§äº•ï¼Œmode=Pressureï¼‰
+    /// \param pw_field_name  å‹åŠ›åœºåç§°ï¼ˆå¦‚ "p_w"ï¼‰
     ///
-    /// µ÷ÓÃÊ±»ú£ºÑ¹Á¦·½³ÌÊÕÁ²¡¢well.p_bh ÒÑ¸üĞÂÖ®ºó¡£
+    /// è°ƒç”¨æ—¶æœºï¼šå‹åŠ›æ–¹ç¨‹æ”¶æ•›ã€well.p_bh å·²æ›´æ–°ä¹‹åã€‚
 inline void debugPrintPeacemanPIAndRate(
     MeshManager& mgr,
     const FieldRegistry& reg,
@@ -99,7 +154,7 @@ inline void debugPrintPeacemanPIAndRate(
         return;
     }
 
-    const double p_bh = well.p_bh; // Pressure Ä£Ê½ÏÂÓ¦µÈÓÚ well.target
+    const double p_bh = well.p_bh; // Pressure æ¨¡å¼ä¸‹åº”ç­‰äº well.target
     double sum_PI_mass = 0.0;
     double sum_dotM    = 0.0;
     double sum_deltap  = 0.0;
@@ -149,8 +204,8 @@ inline void debugPrintPeacemanPIAndRate(
     std::cout << "[DebugPI] Well '" << well.name << "' (mode=Pressure)\n"
         << "  p_bh       = " << p_bh << " Pa\n"
         << "  nPerf      = " << nPerf << "\n"
-        << "  Sum PI_mass= " << sum_PI_mass << " (kg/(s¡¤Pa))\n"
-        << "  Avg ¦¤p     = " << avg_dp << " Pa\n"
+        << "  Sum PI_mass= " << sum_PI_mass << " (kg/(sÂ·Pa))\n"
+        << "  Avg Î”p     = " << avg_dp << " Pa\n"
         << "  Est Q_mass = " << sum_dotM << " kg/s\n";
 }
 

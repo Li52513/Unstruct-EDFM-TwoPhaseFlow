@@ -15,8 +15,8 @@
 #include "VolField.h"          // volScalarField
 #include "UserDefineVarType.h" // Vector
 #include <iomanip>
-// 你已有的物性与相对渗透率工具
-// pc_vG(...), kr_Mualem_vG(...)
+#include "CapRelPerm.h"      // VGParams, RelPermParams, kr_Mualem_vG
+
 
 using std::size_t;
 using std::vector;

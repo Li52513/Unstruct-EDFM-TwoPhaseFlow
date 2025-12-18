@@ -109,19 +109,42 @@ namespace CO2_Prop
 		auto k_rgF = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_rg_tag);
 		auto lambda_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
 
-		auto gt = CO2PropertyTable::instance();
+		auto& gt = CO2PropertyTable::instance();
+
+		size_t oorCount = 0;      // out-of-range or query failure
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
 			const auto& c = cells[ic];
-			if (c.id < 0) continue;
+			if (c.id < 0) continue; // ghost / invalid
 			const size_t i = mesh.getCellId2Index().at(c.id);
-			double p = (*pF)[i], T = (*TF)[i];
-			double rho = BASE_rho_g, mu = BASE_mu_g, cp = BASE_cp_g, k = BASE_k_g;
-			try { const auto G = gt.getProperties(p, T); rho = G.rho; mu = G.mu; cp = G.cp; k = G.k; }
-			catch (...) {}
-			(*rho_gF)[i] = rho; (*mu_gF)[i] = mu; (*cp_gF)[i] = cp; (*k_gF)[i] = k;
-			//流度计算
-			(*lambda_gF)[i] = (*k_rgF)[i] / std::max((*mu_gF)[i], 1e-20);
+			const double p = (*pF)[i];
+			const double T = (*TF)[i];
+			double rho = BASE_rho_g;
+			double mu = BASE_mu_g;
+			double cp = BASE_cp_g;
+			double k = BASE_k_g;
+			try {
+				const auto G = gt.getProperties(p, T);
+				rho = G.rho;
+				mu = G.mu;
+				cp = G.cp;
+				k = G.k;
+			}
+			catch (...) {
+				++oorCount; // keep fallback
+			}
+			(*rho_gF)[i] = rho;
+			(*mu_gF)[i] = mu;
+			(*cp_gF)[i] = cp;
+			(*k_gF)[i] = k;
+			// mobility/lambda with protection
+			const double mu_eff = std::max(mu, 1e-20);
+			(*lambda_gF)[i] = (*k_rgF)[i] / mu_eff;
+		}
+
+		if (oorCount > 0) {
+			std::cerr << "[PPM][Fluid][CO2] property query failed/OOR in "
+				<< oorCount << " cells (using fallback constants)\n";
 		}
 		return true;
 	}

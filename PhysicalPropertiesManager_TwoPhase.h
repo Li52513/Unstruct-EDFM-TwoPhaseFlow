@@ -1,4 +1,4 @@
-#pragma once
+ï»¿#pragma once
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "InitConfig.h"					// Where VGParams and RelPermParams are defined
@@ -47,7 +47,7 @@ namespace TwoPhase
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::TwoPhase_case().lambda_mass_tag, n, 0.0);// Mobility mass
 	}
 	/**
-	*  To calculate the water basic properties at a certain step to get a output step  ¼ÆËãµ±Ç°Ê±¿ÌË®µÄ»ù±¾ÎïĞÔ²ÎÊı   // old²ãµÄÎïĞÔ²»ĞèÒª¼ÆËã  ÔÚ½øÈëµü´ú²ãÇ°½«¼ÆËãºóµÄ»ù±¾ÎïĞÔ²ÎÊı¸´ÖÆ´æ´¢µ½*_oldÖĞ
+	*  To calculate the water basic properties at a certain step to get a output step  è®¡ç®—å½“å‰æ—¶åˆ»æ°´çš„åŸºæœ¬ç‰©æ€§å‚æ•°   // oldå±‚çš„ç‰©æ€§ä¸éœ€è¦è®¡ç®—  åœ¨è¿›å…¥è¿­ä»£å±‚å‰å°†è®¡ç®—åçš„åŸºæœ¬ç‰©æ€§å‚æ•°å¤åˆ¶å­˜å‚¨åˆ°*_oldä¸­
 	*/
 
 	inline void computeWaterBasicPropertiesAtStep(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_inputfield, const std::string& T_inputfield)
@@ -56,7 +56,7 @@ namespace TwoPhase
 		Water_Prop::compute_water_properties_const(mgr, reg, p_w_inputfield, T_inputfield);
 	}
 	/**
-	*  To calculate the CO2 basic properties at a certain step to get a output step  ¼ÆËãµ±Ç°Ê±¿ÌCO2µÄ»ù±¾ÎïĞÔ²ÎÊı   // old²ãµÄÎïĞÔ²»ĞèÒª¼ÆËã  ÔÚ½øÈëµü´ú²ãÇ°½«¼ÆËãºóµÄ»ù±¾ÎïĞÔ²ÎÊı¸´ÖÆ´æ´¢µ½*_oldÖĞ
+	*  To calculate the CO2 basic properties at a certain step to get a output step  è®¡ç®—å½“å‰æ—¶åˆ»CO2çš„åŸºæœ¬ç‰©æ€§å‚æ•°   // oldå±‚çš„ç‰©æ€§ä¸éœ€è¦è®¡ç®—  åœ¨è¿›å…¥è¿­ä»£å±‚å‰å°†è®¡ç®—åçš„åŸºæœ¬ç‰©æ€§å‚æ•°å¤åˆ¶å­˜å‚¨åˆ°*_oldä¸­
 	*/
 
 	inline void computeCO2BasicPropertiesAtStep(MeshManager& mgr, FieldRegistry& reg, const std::string& p_g_inputfield, const std::string& T_inputfield)
@@ -104,18 +104,15 @@ namespace TwoPhase
 			if (c.id < 0) continue;
 			const size_t i = mesh.getCellId2Index().at(c.id);
 			// Relative permeability of water
-			double sw_val = (*s_w)[i];
-			double se = Se_from_Sw(sw_val, vg);
-			//Ö÷±äÁ¿-ÒÑ¾­ÔÚ³õ³¡³õÊ¼»¯µÄÊ±ºò½øĞĞÁË³õÊ¼»¯ 															// Capillary pressure (linear Pc = pc_entry*(1-Se))
-			(*Pc)[i] = pc_vG(se, vg);																	// Capillary pressure (linear Pc = pc_entry*(1-Se))
-			//(*Pc)[i] = 1e7;
-			kr_Mualem_vG(se, vg, rp, (*k_rw)[i], (*k_rg)[i]);					// Relative permeabilities and derivative of capillary pressure (Corey + linear Pc)
-			(*dPc_dSw)[i] = dpc_dSw_vG(se, vg);
+			const double sw_val = (*s_w)[i];
+			(*Pc)[i] = pc_vG(sw_val, vg);
+			kr_Mualem_vG(sw_val, vg, rp, (*k_rw)[i], (*k_rg)[i]);
+			(*dPc_dSw)[i] = dpc_dSw_vG(sw_val, vg);
 		}
 	}
-	//=============================================================·â×°ºóµÄº¯Êı===================================================================//
+	//=============================================================å°è£…åçš„å‡½æ•°===================================================================//
 	/**
-	*  ÔÚ½øĞĞÊ±¼ä²½ÍÆ½øÇ°£¬»ùÓÚµ±Ç°Ê±¿ÌµÄSw¼ÆËãµÃµ½Á½ÏàÊôĞÔ²ÎÊı£¬¼´ Pc, krw, krg, dPc_dSw 
+	*  åœ¨è¿›è¡Œæ—¶é—´æ­¥æ¨è¿›å‰ï¼ŒåŸºäºå½“å‰æ—¶åˆ»çš„Swè®¡ç®—å¾—åˆ°ä¸¤ç›¸å±æ€§å‚æ•°ï¼Œå³ Pc, krw, krg, dPc_dSw 
 	*/
 	
 	inline void updateTwoPhasePropertiesAtTimeStep(MeshManager& mgr, FieldRegistry& reg, const std::string& Sw_field, const VGParams& vg, const RelPermParams& rp)
@@ -130,8 +127,8 @@ namespace TwoPhase
 	}
 
 	/**
-	*	»ùÓÚÒÑÖªµÄÁ½ÏàÉøÁ÷²ÎÊı£¬²¢¸ù¾İµ±Ç°µÄÖ÷±äÁ¿Ñ¹Á¦ºÍÎÂ¶È£¬¼ÆËãµ±Ç°Ê±¿ÌË®µÄ»ù±¾ÎïĞÔ²ÎÊı£¬ÔÚµü´úIMPESÖĞ£¬³ıÁËÔÚµü´ú²ãÄÚ£¬×é×°Ñ¹Á¦·½³ÌµÄÏµÊı¾ØÕóÇ°µ÷ÓÃ¸Ãº¯Êı½øĞĞ¼ÆËã£¬¼ÆËãrho_w, mu_w, drho_wdp¡£ĞèÒª×¢ÒâµÄÊÇ£¬lambda_wÒ²ÊÇÔÚËæ×Åµü´ú·¢Éú±ä»¯µÄ£¬ÒòÎªlambda_wµÄ¼ÆËãÉæ¼°µ½ğ¤¶Èmu_w¡£
-	* »¹ĞèÒª×¢ÒâµÄÊÇ£¬Õâ¸öº¯ÊıÖ»¼ÆËãµ±Ç°Ê±¿ÌµÄ»ù±¾ÎïĞÔ²ÎÊı£¬²»Éæ¼°old²ãµÄ´æ´¢£¬old²ãµÄ´æ´¢ÔÚ½øÈëµü´ú²ãÇ°½øĞĞ¡£ ÊÇµü´úIMPESµÄµäĞÍÌØÕ÷
+	*	åŸºäºå·²çŸ¥çš„ä¸¤ç›¸æ¸—æµå‚æ•°ï¼Œå¹¶æ ¹æ®å½“å‰çš„ä¸»å˜é‡å‹åŠ›å’Œæ¸©åº¦ï¼Œè®¡ç®—å½“å‰æ—¶åˆ»æ°´çš„åŸºæœ¬ç‰©æ€§å‚æ•°ï¼Œåœ¨è¿­ä»£IMPESä¸­ï¼Œé™¤äº†åœ¨è¿­ä»£å±‚å†…ï¼Œç»„è£…å‹åŠ›æ–¹ç¨‹çš„ç³»æ•°çŸ©é˜µå‰è°ƒç”¨è¯¥å‡½æ•°è¿›è¡Œè®¡ç®—ï¼Œè®¡ç®—rho_w, mu_w, drho_wdpã€‚éœ€è¦æ³¨æ„çš„æ˜¯ï¼Œlambda_wä¹Ÿæ˜¯åœ¨éšç€è¿­ä»£å‘ç”Ÿå˜åŒ–çš„ï¼Œå› ä¸ºlambda_wçš„è®¡ç®—æ¶‰åŠåˆ°é»åº¦mu_wã€‚
+	* è¿˜éœ€è¦æ³¨æ„çš„æ˜¯ï¼Œè¿™ä¸ªå‡½æ•°åªè®¡ç®—å½“å‰æ—¶åˆ»çš„åŸºæœ¬ç‰©æ€§å‚æ•°ï¼Œä¸æ¶‰åŠoldå±‚çš„å­˜å‚¨ï¼Œoldå±‚çš„å­˜å‚¨åœ¨è¿›å…¥è¿­ä»£å±‚å‰è¿›è¡Œã€‚ æ˜¯è¿­ä»£IMPESçš„å…¸å‹ç‰¹å¾
 	*/
 
 	inline void updateWaterBasicPropertiesAtStep(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_field, const std::string& T_field)

@@ -2,7 +2,7 @@
 #include <vector>
 #include <cstddef>
 
-// 前置声明，不需要完整定义
+
 class FractureNetwork;
 
 struct FracElemIndex {

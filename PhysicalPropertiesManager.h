@@ -62,10 +62,10 @@ public:
 
 
 	//裂缝-固相
-	void UpdateFractureRockAt(MeshManager& mgr, FieldRegistry& reg_fr, FieldRegistry& reg, const std::string& pf_field, const std::string& Tf_field);
+	void UpdateFractureRockAt(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field);
 
 	//裂缝-流体相：phase ∈ {"water","co2","both"}
-	void UpdateFractureFluidAt(MeshManager& mgr, FieldRegistry& reg_fr, FieldRegistry& reg, const std::string& pf_field, const std::string& Tf_field, const std::string& phase);
+	void UpdateFractureFluidAt(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field, const std::string& phase);
  
 
 

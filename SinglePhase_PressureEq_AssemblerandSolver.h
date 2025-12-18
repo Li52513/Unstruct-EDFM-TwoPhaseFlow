@@ -34,21 +34,21 @@ namespace SinglePhase {
 	{
 		PressureAssemblyConfig assembly;
 		LinearSolverOptions    linear;
-		double under_relax = 1.0;		///< Ç·ËÉ³ÚÏµÊı (0<urf<=1, ½¨Òé 0.3~0.7)
-		double tol_abs = 1e-5;			///¾ø¶Ô²Ğ²î
-		double tol_rel = 1e-6;			///Ïà¶Ô²Ğ²î
-		int max_outer = 40;				///×î´óÍâµü´ú´ÎÊı
-		bool   verbose = true;			///< ÊÇ·ñ´òÓ¡Ã¿ÂÖÍâµü´úµÄ dp_inf / linRes
+		double under_relax = 1.0;		///< æ¬ æ¾å¼›ç³»æ•° (0<urf<=1, å»ºè®® 0.3~0.7)
+		double tol_abs = 1e-5;			///ç»å¯¹æ®‹å·®
+		double tol_rel = 1e-6;			///ç›¸å¯¹æ®‹å·®
+		int max_outer = 40;				///æœ€å¤§å¤–è¿­ä»£æ¬¡æ•°
+		bool   verbose = true;			///< æ˜¯å¦æ‰“å°æ¯è½®å¤–è¿­ä»£çš„ dp_inf / linRes
 	};
 	/**
-	 * \brief µ¥´ÎÑ¹Á¦×é×° + ÏßĞÔÇó½â µÄ±¨¸æ
+	 * \brief å•æ¬¡å‹åŠ›ç»„è£… + çº¿æ€§æ±‚è§£ çš„æŠ¥å‘Š
 	 */
 	struct PressureStepReport
 	{
-		double lin_residual = 0.0;      ///< ÏßĞÔÇó½âÆ÷·µ»Ø²Ğ²î£¨Èç¹û¿ÉÓÃ£©
-		int    lin_iterations = 0;      ///< ÏßĞÔÇó½âÆ÷µü´ú²½Êı
-		double dp_inf = 0.0;            ///< ±¾´Î outer ÖĞÑ¹Á¦³¡µÄÎŞÇî·¶Êı±ä»¯
-		int    outer_iterations = 0;   ///< Êµ¼ÊÊ¹ÓÃµÄÍâµü´ú´ÎÊı
+		double lin_residual = 0.0;      ///< çº¿æ€§æ±‚è§£å™¨è¿”å›æ®‹å·®ï¼ˆå¦‚æœå¯ç”¨ï¼‰
+		int    lin_iterations = 0;      ///< çº¿æ€§æ±‚è§£å™¨è¿­ä»£æ­¥æ•°
+		double dp_inf = 0.0;            ///< æœ¬æ¬¡ outer ä¸­å‹åŠ›åœºçš„æ— ç©·èŒƒæ•°å˜åŒ–
+		int    outer_iterations = 0;   ///< å®é™…ä½¿ç”¨çš„å¤–è¿­ä»£æ¬¡æ•°
 	};
 
 	struct PressureAssemblyResult
@@ -57,7 +57,7 @@ namespace SinglePhase {
 		std::vector<int> cell_lid;
 	};
 	/**
-	*  brief: ¸Ãº¯ÊıÓÃÓÚµ¥ÏàÑ¹Á¦·½³ÌÏµÊı¾ØÕó×é×°
+	*  brief: è¯¥å‡½æ•°ç”¨äºå•ç›¸å‹åŠ›æ–¹ç¨‹ç³»æ•°çŸ©é˜µç»„è£…
 	*/
 	inline bool AssembleandSolver_PressureEq_SinglePhase(
 		MeshManager& mgr,
@@ -70,7 +70,7 @@ namespace SinglePhase {
 		const PressureBCAdapter& Pbc,
 		double dt,
 		const std::vector<WellConfig>& wellsCfg_in,
-		// per-outer Êä³öÁ¿£º
+		// per-outer è¾“å‡ºé‡ï¼š
 		std::vector<WellDOF>& wells_output
 	)
 	{
@@ -80,7 +80,7 @@ namespace SinglePhase {
 		if (!GeneralTools::startOuterIteration_scatter(reg,ctrl.pressure_field,ctrl.pressure_prev_field)) return false;
 		if (wellsCfg_in.size() == 0)
 		{
-			// a À©É¢ÏîÀëÉ¢
+			// a æ‰©æ•£é¡¹ç¦»æ•£
 			std::vector<std::string> mobility_tokens = {"kxx:kxx", "kyy:kyy", "kzz:kzz" ,"/mu_g","rho:rho_g"};
 			if (!FVM::Diffusion::build_FaceCoeffs_Central(
 				mgr, reg, freg, 
@@ -93,7 +93,7 @@ namespace SinglePhase {
 				return false;
 			}
 
-			// b Ê±¼äÏîÀëÉ¢
+			// b æ—¶é—´é¡¹ç¦»æ•£
 			if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
 				mgr, reg, 
 				dt, 
@@ -107,19 +107,19 @@ namespace SinglePhase {
 				return false;
 			}
 
-			// c ÏµÊı¾ØÕó×é×°
+			// c ç³»æ•°çŸ©é˜µç»„è£…
 			SparseSystemCOO sys;
 			if (!assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sys))
 			{
 				std::cerr << "[SinglePhase][Pressure] Assemble process build failed.\n";
 				return false;
 			}
-			result.system = sys;	//´¢´æ½øPressureAssemblyResult
+			result.system = sys;	//å‚¨å­˜è¿›PressureAssemblyResult
 			int N = 0;
-			auto lid_cell = GeneralTools::buildUnknownMap(mgr.mesh(), N);
-			result.cell_lid = lid_cell;	//´¢´æ½øPressureAssemblyResult
+			auto lid_cell = buildUnknownMap(mgr.mesh(), N);
+			result.cell_lid = lid_cell;	//å‚¨å­˜è¿›PressureAssemblyResult
 
-			// d ±¸·İÉÏÒ»Íâµü´ú²ãµÄÖµ²¢Íê³ÉÇó½â
+			// d å¤‡ä»½ä¸Šä¸€å¤–è¿­ä»£å±‚çš„å€¼å¹¶å®Œæˆæ±‚è§£
 			auto pvec = GeneralTools::gatherFieldToVec(reg, mesh, ctrl.pressure_field, lid_cell, N);
 
 			double linRes = 0.0;
@@ -135,7 +135,7 @@ namespace SinglePhase {
 			dpInf = GeneralTools::maxAbsDiff(reg, ctrl.pressure_field, ctrl.pressure_prev_field);
 			GeneralTools::underRelaxInPlace(reg, ctrl.pressure_field, ctrl.pressure_prev_field, sol_ctrl.under_relax);
 
-			// e Êä³ö½á¹û
+			// e è¾“å‡ºç»“æœ
 			rep.dp_inf = dpInf;
 			rep.lin_residual = linRes;
 			rep.lin_iterations = linIters;
@@ -143,7 +143,7 @@ namespace SinglePhase {
 		}
 		else 
 		{
-			// a À©É¢ÏîÀëÉ¢
+			// a æ‰©æ•£é¡¹ç¦»æ•£
 			std::vector<std::string> mobility_tokens = { "kxx:kxx", "kyy:kyy", "kzz:kzz" ,"/mu_g","rho:rho_g" };
 			if (!FVM::Diffusion::build_FaceCoeffs_Central(
 				mgr, reg, freg,
@@ -156,7 +156,7 @@ namespace SinglePhase {
 				return false;
 			}
 
-			// b Ê±¼äÏîÀëÉ¢
+			// b æ—¶é—´é¡¹ç¦»æ•£
 			if (!FVM::Timeterm::TimeTerm_FullyImplicit_SinglePhase_Flow(
 				mgr, reg, 
 				dt, 
@@ -170,7 +170,7 @@ namespace SinglePhase {
 				return false;
 			}
 
-			// c ÏµÊı¾ØÕó×é×°
+			// c ç³»æ•°çŸ©é˜µç»„è£…
 			SparseSystemCOO sys;
 			if (!assemble_COO(mgr, reg, freg, "ddt+diffusion", nmP, &sys))
 			{
@@ -178,11 +178,11 @@ namespace SinglePhase {
 				return false;
 			}
 			int N = 0;
-			auto lid_cell = GeneralTools::buildUnknownMap(mgr.mesh(), N);
+			auto lid_cell = buildUnknownMap(mgr.mesh(), N);
 			result.cell_lid = lid_cell;
 
-			// d ñîºÏ¾®ÏµÍ³,¶ÔÏµÊı¾ØÕó
-			std::vector<WellConfig> wellsCfg = wellsCfg_in;   // ±¾µØ¿½±´£¬±ãÓÚ²¹Æë×Ö¶ÎÃû
+			// d è€¦åˆäº•ç³»ç»Ÿ,å¯¹ç³»æ•°çŸ©é˜µ
+			std::vector<WellConfig> wellsCfg = wellsCfg_in;   // æœ¬åœ°æ‹·è´ï¼Œä¾¿äºè¡¥é½å­—æ®µå
 			build_masks_and_PI_for_all(mgr, reg, wellsCfg);		//WellConfig.h
 			std::vector<WellDOF> wells;
 			const int Ntot = register_well_dofs_for_all(Nc, wellsCfg, wells);//WellConfig.h
@@ -195,13 +195,13 @@ namespace SinglePhase {
 			}
 			result.system = sys;
 
-			// d ±¸·İÉÏÒ»Íâµü´ú²ãµÄÖµ²¢Íê³ÉÇó½â
+			// d å¤‡ä»½ä¸Šä¸€å¤–è¿­ä»£å±‚çš„å€¼å¹¶å®Œæˆæ±‚è§£
 			auto pvec = GeneralTools::gatherFieldToVec(reg, mesh, ctrl.pressure_field, lid_cell, N);
 			pvec.resize(Ntot, 0.0);
 			for (const auto& w : wells)
 			{
-				if (w.mode == WellDOF::Mode::Pressure) pvec[w.lid] = w.target; // BHP ×÷Îª¾®Ñ¹³õ²Â
-				else                                   pvec[w.lid] = pvec[0];   // ¶¨Á÷£ºËæ±ã¸ø¸ö³õ²Â
+				if (w.mode == WellDOF::Mode::Pressure) pvec[w.lid] = w.target; // BHP ä½œä¸ºäº•å‹åˆçŒœ
+				else                                   pvec[w.lid] = pvec[0];   // å®šæµï¼šéšä¾¿ç»™ä¸ªåˆçŒœ
 			}
 
 			double linRes = 0.0;
@@ -222,7 +222,7 @@ namespace SinglePhase {
 			dpInf = GeneralTools::maxAbsDiff(reg, ctrl.pressure_field, ctrl.pressure_prev_field);
 			GeneralTools::underRelaxInPlace(reg, ctrl.pressure_field, ctrl.pressure_prev_field, sol_ctrl.under_relax);
 
-			// e Êä³ö½á¹û
+			// e è¾“å‡ºç»“æœ
 			rep.dp_inf = dpInf;
 			rep.lin_residual = linRes;
 			rep.lin_iterations = linIters;

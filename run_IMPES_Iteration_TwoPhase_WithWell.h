@@ -63,7 +63,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
 
     // 初始场
     InitFields ic;
-    ic.p_w0 = 9e6;      // 初始水相压力 9 MPa
+    ic.p_w0 = 7e6;      // 初始水相压力 7 MPa
     ic.dp_wdx = 0.0;
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
@@ -112,8 +112,10 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
 
         inj.Tin = 300.0;                            // 注入温度，随意设置一个值，占位
         inj.s_w_bh = 1.0;                           // 纯水注入
+		inj.mu_w_inj = 1e-4;                       // 注入水相粘度
+		inj.rho_w_inj = 1000.0;                     // 注入水相密度
 
-        inj.geom.pos = Vector{ 0.4 * lengthX,0.4 * lengthY ,0.0 };
+        inj.geom.pos = Vector{ 0.25 * lengthX, 0.25 * lengthY, 0.0 };
         inj.geom.rw = 0.001;                        // 井筒半径
         inj.geom.skin = 0.0;
         inj.geom.H = 1.0;                           // 有效厚度
@@ -135,11 +137,11 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         prod.s_w_bh = 1.0;    // 占位
 
         prod.geom.pos = Vector{ 0.43 * lengthX, 0.43 * lengthY, 0.0 };
-        prod.geom.rw = 0.001;
+        prod.geom.rw = 0.01;
         prod.geom.skin = 0.0;
         prod.geom.H = 1.0;
         prod.geom.perfRadius = 0.0;
-        prod.geom.maxHitCells = 1;
+        prod.geom.maxHitCells = 5;
 
         wells_cfg.push_back(prod);
     }
@@ -158,7 +160,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     satCfg.dS_max = 0.15;
     satCfg.CFL_safety = 0.9;
     satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::SimpleCFL;
-    satCfg.time_integration_scheme = IMPES_Iteration::SatTimeIntegrationScheme::HeunRK2;
+    satCfg.time_integration_scheme = IMPES_Iteration::SatTimeIntegrationScheme::ExplicitEuler;
 
     // ---------- 8. 压力方程组装与求解控制参数 ----------   
     IMPES_Iteration::PressureSolveControls pCtrl;
@@ -170,7 +172,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
 
     pCtrl.max_outer = 1000;        // 常物性可保持很小
-    pCtrl.tol_abs = 1e8;
+    pCtrl.tol_abs = 1e6;
     pCtrl.tol_rel = 1e-4;
     pCtrl.under_relax = 1;
     pCtrl.verbose = true;
@@ -191,15 +193,20 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
 
     // ---------- 11. IMPES 主时间推进 ----------
     const int    nSteps = 500;
-    double       dt_initial = 1e-7;   // 更保守的初始时间步
+    double       dt_initial = 1e-5; 
+
+	IMPES_Iteration::TimeStepControl timeCtrl;
+    timeCtrl.dt_min = 1e-5;
+	timeCtrl.dt_max = 1.0;
+    timeCtrl.grow_factor = 100;
 
     const int writeEveryP = 10;
     const int writeEverySw = 10;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/Case11/p_impes_ps_withwell/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/Case11/s_impes_ps_withwell/s_ps";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/p_impes_ps_withwell/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/s_impes_ps_withwell/s_ps";
     const int snapshotEveryCsv = 10;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/Case11/ps_state_withwell";
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/IMPES_ExplicitEuler/ps_state_withwell_case2";
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
     const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);

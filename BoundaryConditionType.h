@@ -1,6 +1,4 @@
 #pragma once
-
-
 //±ﬂΩÁ¿‡–Õ
 enum class  BCType {Dirichlet, Neumann, Robin};
 

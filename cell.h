@@ -37,12 +37,6 @@ public:
     };
     RegionType region = RegionType::Medium; // 默认中等
     
-    
-    //-----------------储存物性信息----------------------//
-    SolidProperties_RockMatrix SolidMaterialProps;
-	WaterProperties WaterMaterialProps;
-	CO2Properties   CO2MaterialProps;
-    
     //------------------裂缝交互信息----------------------//
     vector<int> fractureIDs;          // 与该单元交互的裂缝编号
     vector<double> fracturePressure;  // 存储与该单元交互的裂缝的压力
@@ -58,9 +52,7 @@ public:
     vector<int> CI_belongFraction;   // 存储相邻单元ID
     double error;                     // 误差，用于收敛判断
 
-    // 构造函数
-    Cell(int id, const vector<int>& nodeIDs);
-
+    Cell(int id, const vector<int>& nodeIDs);  // 构造函数
 
 	void computeCenterAndVolume(const unordered_map<int, Node>& allNodes); //计算单元的几何中心和面积
 

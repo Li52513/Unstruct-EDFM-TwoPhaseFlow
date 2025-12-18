@@ -45,7 +45,7 @@ public:
 
 
     /// 处理裂缝几何：交点→排序→subdivide
-    void DetectAndSubdivideFractures();
+    void DetectAndSubdivideFractures(bool useAABBAccelerationctrl);
     void setDistanceMetric(DistanceMetric m) { distanceMetric_ = m; }
     DistanceMetric distanceMetric() const { return distanceMetric_; }
 

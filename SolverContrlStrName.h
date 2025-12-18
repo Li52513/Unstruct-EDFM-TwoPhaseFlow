@@ -140,7 +140,6 @@ namespace IMPES_Iteration
 
 }
 
-
 namespace SinglePhase 
 {
     struct PhysicalParameters_String

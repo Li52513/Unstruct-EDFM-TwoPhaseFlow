@@ -10,13 +10,10 @@
 #include <numeric>      // accumulate
 #include <cmath>
 
-
-
 // 自定义 PI
 static constexpr double PI = 3.14159265358979323846;
 
-// Helpers ------------------------------------------------------------------
-
+///------------DFN生成相关辅助函数-------------///
 // uniform [0,1)
 static double uniformRand() {
     return double(std::rand()) / double(RAND_MAX);
@@ -65,8 +62,9 @@ void FractureNetwork::setRandomSeed(unsigned seed)
 {
 	std::srand(seed);
 }
-
 // ----------------------------------------------------------------------------
+
+
 void FractureNetwork::generateDFN(
     int N,
     const Vector& minPoint,
@@ -135,59 +133,16 @@ void FractureNetwork::generateDFN(
     }
 }
 
+//-------------------------------------------------------------------------------------------------//
+
+//-------------添加一条裂缝--------------//
+
 void FractureNetwork::addFracture(const Vector& s, const Vector& e)
 {
     fractures.emplace_back(s, e);           // 1. 先放进容器
     auto& f = fractures.back();             // 2. 取出刚刚插入的那条
     f.id = nextFracID_++;                // 3. 写入唯一 ID
 }
-
-////针对多条裂缝以星型相交方式的情况，TI系数暂时无法计算
-//void FractureNetwork::processFractures(const std::vector<Face>& meshFaces,const vector<Cell>& meshCells,const unordered_map<int, Node>& meshNodes, const Fluid& fluid,const Matrix& matrix, Mesh& mesh)
-//{
-//    /* 0) 先检测交点 */
-//    DetectFracturetoFractureIntersections();
-//
-//    /* 1. 裂缝-网格交点 -------------------------------------*/
-//    for (auto& F : fractures)
-//        F.DetectFracturetoMeshFaceIntersections(meshFaces, meshCells, meshNodes);
-//
-//    DeduplicateAndRenumberFractureToFractureIntersections();
-//
-//    /* 2. 把 FF 交点插入对应裂缝的 intersections  ------------*/
-//    for (auto& g : globalFFPts) {
-//        // 裂缝 A
-//        auto& FA = fractures[g.fracA];
-//        FA.intersections.emplace_back(
-//            /*local id*/   -1,      // 稍后重新排序
-//            /*point*/      g.point,
-//            /*edgeID*/     -1,
-//            /*param*/      g.paramA,
-//            /*isFF*/       true,
-//            /*globalID*/   g.id
-//        );
-//
-//        // 裂缝 B
-//        auto& FB = fractures[g.fracB];
-//        FB.intersections.emplace_back(-1, g.point, -1, g.paramB, true, g.id);
-//    }
-//
-//    /* 3. 排序并重新编号 ------------------------------------*/
-//    for (auto& F : fractures)
-//        F.sortAndRenumberIntersections();
-//
-//    /* 4. 现在再做分段 --------------------------------------*/
-//    for (auto& F : fractures)
-//        F.subdivide(meshCells, meshNodes);
-//
-//    ///* 5. 计算离散系数、CI ----------------------------------*/
-//    //for (auto& F : fractures)
-//    //    F.computeFractureDiscreteCoefficients(fluid, matrix, mesh);
-//
-//    ///* 6. 计算 TI（星形公式） -------------------------------*/
-//    //computeFractureFractureTI(fluid);
-//
-//}
 
 /// 检测裂缝之间的交点
 void FractureNetwork::DetectFracturetoFractureIntersections()
@@ -217,6 +172,28 @@ void FractureNetwork::DetectFracturetoFractureIntersections()
         }
     }
 }
+
+/// 对裂缝与裂缝的交点进行去重并编号
+void FractureNetwork::DeduplicateAndRenumberFractureToFractureIntersections()
+{
+    vector<GlobalFFPoint> uniquePts; //
+    int gid = 1;
+    for (auto& g : globalFFPts)
+    {
+        bool found = false;
+        for (auto& u : uniquePts)
+        {
+            if (isClose(g.point, u.point)) { found = true; break; }
+        }
+        if (!found)
+        {
+            g.id = gid++;
+            uniquePts.push_back(g);
+        }
+    }
+    globalFFPts.swap(uniquePts);
+}
+
 
 void FractureNetwork::DistributeFracture_FractureIntersectionsToGlobalInersections()
 {
@@ -278,33 +255,13 @@ void FractureNetwork::DistributeFracture_FractureIntersectionsToGlobalInersectio
     }
 }
 
-/// 对裂缝与裂缝的交点进行去重并编号
-void FractureNetwork::DeduplicateAndRenumberFractureToFractureIntersections()
-{
-    vector<GlobalFFPoint> uniquePts; //
-    int gid = 1;
-    for (auto& g : globalFFPts) 
-    {
-        bool found = false;
-        for (auto& u : uniquePts)
-        {
-            if (isClose(g.point, u.point)) { found = true; break; }
-        }
-        if (!found) 
-        {
-            g.id = gid++;
-            uniquePts.push_back(g);
-        }
-    }
-    globalFFPts.swap(uniquePts);
-}
 
 /// 判断两个点是否在给定的公差范围内相等
 bool FractureNetwork::isClose(const Vector& a, const Vector& b, double tol) const
 {
     return (a - b).Mag() < tol;
 }
-//
+
 void FractureNetwork::printFractureInfo() const
 {
     std::cout << "\n========= Fracture Information =========\n";
@@ -314,13 +271,6 @@ void FractureNetwork::printFractureInfo() const
         std::cout << "Fracture #" << fid + 1 << "  ("
             << F.start.m_x << "," << F.start.m_y << ")  →  ("
             << F.end.m_x << "," << F.end.m_y << ")\n";
-
-
-
-        //std::cout << "  Porosity=" << F.porosity
-        //    << ",  k=" << F.permeability
-        //    << ",  w=" << F.aperture
-        //    << ",  Beta=" << F.compressibility << "\n";
 
         std::cout << "  --- Segments ------------------------------------------\n";
         for (const auto& E : F.elements)
@@ -446,69 +396,3 @@ void FractureNetwork::exportToTxt(const std::string& prefix) const
     }
     fsTI.close();
 }
-
-
-/* ---------------------------------------------------------
- *  Star-node 等效电阻法：一次性给交点处 n 段建立互联 TI
- *  α_k = 2 w_k k_k / μ_f     （式 2-10）
- *  TI_{ij} = α_i α_j / Σα_k  （式 2-9）
- * ---------------------------------------------------------*/
- //void FractureNetwork::computeFractureFractureTI(const Fluid& fluid) {
- //    // 定义：每个 globalFFID 对应的一组 (fractureIndex, segmentIndex)
- //    std::unordered_map<int, std::vector<std::pair<int, int>>> groups;
- //
- //    // 1) 遍历所有裂缝段，把所有带 isFFatStart/isFFatEnd 的段按 globalFFID 分类
- //    for (int fracID = 0; fracID < (int)fractures.size(); ++fracID) {
- //        Fracture& F = fractures[fracID];
- //        for (int segIdx = 0; segIdx < (int)F.elements.size(); ++segIdx) {
- //            FractureElement& E = F.elements[segIdx];
- //            if (E.isFFatStart && E.gIDstart > 0) {
- //                groups[E.gIDstart].push_back({ fracID, segIdx });
- //            }
- //            if (E.isFFatEnd && E.gIDend > 0) {
- //                groups[E.gIDend].push_back({ fracID, segIdx });
- //            }
- //        }
- //    }
- //
- //    // 2) 对每个交点组，至少两个段时才计算 TI
- //    for (auto& kv : groups) {
- //        int globalID = kv.first;
- //        auto& vec = kv.second;
- //        if (vec.size() < 2) continue;
- //
- //        // 2.1) 先算每条“星”边 α_i = 2·k·w / (μ·L)
- //        std::vector<double> alpha(vec.size());
- //        double sumAlpha = 0.0;
- //        for (int i = 0; i < (int)vec.size(); ++i) {
- //            int fID = vec[i].first;
- //            int sID = vec[i].second;
- //            Fracture& Fr = fractures[fID];
- //            auto& E = Fr.elements[sID];
- //            double      L = E.length;
- //            double      k = Fr.permeability;
- //            double      w = Fr.aperture;
- //            double      μ = fluid.fluid_viscosity;
- //            alpha[i] = 2.0 * k * w / (μ * L);
- //            sumAlpha += alpha[i];
- //        }
- //
- //        // 2.2) 两两配对，用 Δ→星等效公式 TI = α_i·α_j / Σα
- //        for (int i = 0; i < (int)vec.size(); ++i) {
- //            for (int j = i + 1; j < (int)vec.size(); ++j) {
- //                double TI = alpha[i] * alpha[j] / sumAlpha;
- //
- //                int fIDi = vec[i].first;
- //                int sIDi = vec[i].second;
- //                int fIDj = vec[j].first;
- //                int sIDj = vec[j].second;
- //
- //                auto& Ei = fractures[fIDi].elements[sIDi];
- //                auto& Ej = fractures[fIDj].elements[sIDj];
- //
- //                Ei.ffEx.push_back({ fIDj, sIDj, TI, &Ej.p_fr });
- //                Ej.ffEx.push_back({ fIDi, sIDi, TI, &Ei.p_fr });
- //            }
- //        }
- //    }
- //}

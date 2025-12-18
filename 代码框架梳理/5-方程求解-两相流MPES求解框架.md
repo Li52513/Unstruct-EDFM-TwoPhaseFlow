@@ -1,4 +1,5 @@
-﻿#pragma once
+```C++
+#pragma once
 #include <string>
 #include <vector>
 #include <iostream>
@@ -24,7 +25,6 @@
 #include "TwoPhaseWells_StrictRate.h"
 #include "IMPES_Iteration_WellHelpers.h"
 #include "PostProcess_OutputReport.h"
-#include "IMPES_ConservationDiagnostics.h"
 
 namespace IMPES_Iteration
 {
@@ -35,7 +35,7 @@ namespace IMPES_Iteration
         double dt_max = 100;   ///< 允许的最大时间步 [s]
         double grow_factor = 100;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
-        double safety_factor = 1;    ///< 步长的安全系数
+        double safety_factor = 0.9;    ///< 步长的安全系数
         int    max_retries = 8;      ///< 同一物理步最多重试次数
     };
     inline bool runTransient_IMPES_Iteration
@@ -144,8 +144,6 @@ namespace IMPES_Iteration
         }
         // 定义一个水相井源场名
         constexpr const char* Qw_well_name = "Qw_well";
-        // 定义一个气相井源场名（用于守恒诊断/后处理；不参与当前显式水相饱和度推进）
-        constexpr const char* Qg_well_name = "Qg_well";
 
         //===========================================================================================//
 
@@ -173,11 +171,6 @@ namespace IMPES_Iteration
             snapshotPrefix.empty()
             ? "well_boundary_timeseries.csv"
             : (snapshotPrefix + "__well_boundary_timeseries.csv");
-
-        const std::string phaseMassBalanceCsvFile =
-            snapshotPrefix.empty()
-            ? "phase_mass_balance.csv"
-            : (snapshotPrefix + "_phase_mass_balance.csv");
 
         for (int step = 0; step < nSteps; /* 手动控制 step++ */)
         {
@@ -419,15 +412,9 @@ namespace IMPES_Iteration
                 //);
             }
 
-            if (!IMPES_Iteration::buildWaterAndGasSourceFieldsFromWells(
-                mgr, reg, wells,
-                satCfg.VG_Parameter.vg_params,
-                satCfg.VG_Parameter.relperm_params,
-                pressureCtrl.assembly.pressure_field,
-                Qw_well_name,
-                Qg_well_name))
+            if (!IMPES_Iteration::buildWaterSourceFieldFromWells(mgr, reg, wells, satCfg.VG_Parameter.vg_params, satCfg.VG_Parameter.relperm_params, pressureCtrl.assembly.pressure_field, Qw_well_name))
             {
-                std::cerr << "[IMPES][Well] failed to build well phase sources, abort step.\n";
+                std::cerr << "[IMPES][Well] failed to build water well sources, abort step.\n";
                 return false;
             }
             satCfg.water_source_field = Qw_well_name;
@@ -477,52 +464,6 @@ namespace IMPES_Iteration
                         << "): max_CFL=" << satStats.max_CFL
                         << ", max_dS=" << satStats.max_dS
                         << ", dt_suggest=" << satStats.suggested_dt << "\n";
-                }
-            }
-
-            // ---- 1.6 两相逐单元守恒诊断（每步计算，输出到控制台 + CSV；并写入 cell 标量场） ----
-            // 逐单元离散守恒： r = ((φ V ρ S)^{n+1} - (φ V ρ S)^{n})/dt + div(F) - Q  [kg/s]
-            IMPES_Iteration::PhaseMassBalanceDiagnostics massDiag;
-            if (accept_step)
-            {
-                const std::string qg_field = Qg_well_name;
-
-                const bool okDiag = IMPES_Iteration::computePhaseMassBalanceDiagnostics(
-                    mgr, reg, freg,
-                    satCfg.saturation,
-                    satCfg.saturation_old,
-                    fluxCfg,
-                    satCfg.water_source_field,
-                    qg_field,
-                    dt,
-                    "mass_res_w",  // 输出：水相守恒残差 [kg/s]
-                    "mass_res_g",  // 输出：CO2 相守恒残差 [kg/s]
-                    massDiag);
-
-                if (!okDiag)
-                {
-                    std::cerr << "[MassDiag] computePhaseMassBalanceDiagnostics failed at step " << stepId << ".\n";
-                    // Ensure fields exist so that snapshot CSV output (if enabled) won't fail.
-                    reg.getOrCreate<volScalarField>("mass_res_w", cells.size(), 0.0);
-                    reg.getOrCreate<volScalarField>("mass_res_g", cells.size(), 0.0);
-                }
-                else
-                {
-                    std::cout << "[MassDiag] step " << stepId
-                        << " (t=" << t_next << " s)\n"
-                        << "  Water: global_res=" << massDiag.global_res_w_rate
-                        << " kg/s, max|res|=" << massDiag.max_abs_res_w_rate
-                        << " (cell " << massDiag.max_abs_res_w_cellId << ")\n"
-                        << "  CO2:   global_res=" << massDiag.global_res_g_rate
-                        << " kg/s, max|res|=" << massDiag.max_abs_res_g_rate
-                        << " (cell " << massDiag.max_abs_res_g_cellId << ")\n";
-
-                    IMPES_Iteration::appendPhaseMassBalanceCSVRow(
-                        phaseMassBalanceCsvFile,
-                        stepId,
-                        t_next,
-                        dt,
-                        massDiag);
                 }
             }
 
@@ -674,9 +615,7 @@ namespace IMPES_Iteration
                     snapshotFields =
                     {
                         pressureCtrl.assembly.pressure_field,
-                        satCfg.saturation,
-                        "mass_res_w",
-                        "mass_res_g"
+                        satCfg.saturation
                     };
                 }
                 // CSV snapshot（cell 标量场）
@@ -878,3 +817,5 @@ namespace IMPES_Iteration
     }
 
 } // namespace IMPES_Iteration
+```
+

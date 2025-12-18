@@ -18,6 +18,7 @@ enum class IntersectionOrigin
     FracEnd         // 裂缝终点
 };
 
+
 enum class DistanceMetric 
 {
 	CellCenter, // 使用单元中心点距离
@@ -26,7 +27,7 @@ enum class DistanceMetric
     CrossAwareGauss 
 };
 
-struct FractureIntersectionPointByMatrixMesh  //// 用于描述裂缝与基岩网格边界交点的结构体
+struct FractureIntersectionPointByMatrixMesh  //// 用于描述裂缝与基岩网格面交点的结构体
 {
 	int id; // 交点编号
 	Vector point; // 交点坐标
@@ -69,10 +70,7 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     //——————裂缝段类型———————
     FractureElementType type = FractureElementType::Conductive;
 	///< 裂缝段类型（阻塞/导流）
-	// —————— 储存物性参数 —————— （特性是什么）
-    SolidProperties_Frac solidProps;  ///< 固相骨架物性
-    WaterProperties fluidProps;  ///< 水相物性
-    CO2Properties   gasProps;    ///< CO₂ 相物性
+
     // —————— 物性耦合 & 离散系数 —————— （储存离散系数）
     double alpha_fr = 0.0;   ///< TI 计算用 α_phys = 2·w·k / (μ·L)
     double k_eff = 0.0;   ///< 并联系统有效渗透率
@@ -87,10 +85,10 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
     // —— 裂缝–裂缝 TI 交换信息 ——
     struct FFF_Exchange
     {
-        int peerFracID{ -1 };
-        int peerSegID{ -1 };
+		int peerFracID{ -1 }; // 对端裂缝编号
+		int peerSegID{ -1 };  // 对端裂缝段编号
         int peerGlobalSeg{ -1 };   // 对端全局段索引（便于快速定位）
-        int atGlobalFF{-1};
+		int atGlobalFF{ -1 };	  // 所在全局 FF 交点编号
         double TIw{ 0.0 };         // 水相交汇导纳（Star–Delta 后的“边”）
         double TIg{ 0.0 };         // 气相交汇导纳
     };
@@ -104,9 +102,6 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
         , cellID(cellID_)
         , length(len)
         , avgDistance(avgDist)
-		, solidProps()
-        , fluidProps()
-        , gasProps()
     {
         // 其余成员已经在声明处给出默认值
     }
@@ -116,6 +111,8 @@ class Fracture
 {
 public:
 	
+    /*=====构造函数=====*/
+    Fracture(const Vector& s, const Vector& e);
 	/*===裂缝编号===*/ 
 	int id  ; // 裂缝编号
         
@@ -123,53 +120,40 @@ public:
     Vector start; // 裂缝起点坐标
 	Vector end;   // 裂缝终点坐标
 
-
 	/*===存储裂缝交点及裂缝段信息===*/
 	vector<FractureIntersectionPointByMatrixMesh> intersections; 
 	vector<FractureElement> elements;		  
-
-	///*===裂缝物性参数（考虑到流体物性的变化以及多物理场过程对裂缝物性的影响，将物性赋值在裂缝段内）===*/
-   
-    
+ 
     //构建每条裂缝的AABB
 	AABB fractureBox; // 裂缝的包围盒（用于碰撞检测等）
     int candidateFaceCount_ = 0; // 可选加 mutable
-
     
-    /*==裂缝与基岩交点计算====*/
+	// 计算裂缝与网格面交点
     void DetectFracturetoMeshFaceIntersections(const Mesh& mesh, const std::vector<Cell>& meshCells, const std::unordered_map<int, Node>& meshNodes, bool useAABBFilter);
-  
- /*=====构造函数=====*/
-    Fracture(const Vector& s, const Vector& e);
 
     void computeAABB();
 
+	// 排序交点并重新编号
+    void sortAndRenumberIntersections();
+
+    //裂缝段划分
+    void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes, DistanceMetric metric);
+
 /// -/*=== 计算几何耦合系数 geomCI 和 geomAlpha======*/
-/// 仅基于几何：计算每段的 geomCI 和 geomAlpha
-/// geomCI   = (段长 ) / avgDistance
-/// geomAlpha= 2 / 段长
     void computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
         
     /*==裂缝段离散====*/
-
-    void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes, DistanceMetric metric);
-
-    // 兼容旧：无第三参数（默认采用 AreaWeighted）
-    void subdivide(const std::vector<Cell>& meshCells,const std::unordered_map<int, Node>& meshNodes);
-
-    // 兼容旧：只有两分支的 bool（true=CellCenter, false=NodeAverage）
-    void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes,  bool useCenterDistance = false);
+  
 
     /*== 给定 param，定位它属于哪一段====*/
     int locateSegment(double param) const;
 
     static bool lineSegmentIntersection(const Vector& p, const Vector& q, const Vector& r, const Vector& s, Vector& ip);
     
-    void sortAndRenumberIntersections();
+
 
 private:
-    static double pointToSegmentDistance(const Vector& p, const Vector& s, const Vector& e);
-    static bool pointInTriangle(const Vector& p, const Vector& a, const Vector& b, const Vector& c);
+    
     double computeSegmentLength(const Vector& a, const Vector& b);
     Vector computeMidpoint(const Vector& a, const Vector& b);
     int findContainingCell(const Vector& point, const std::vector<Cell>& cells, const std::unordered_map<int, Node>& nodes);

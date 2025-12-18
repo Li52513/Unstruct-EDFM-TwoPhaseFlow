@@ -201,40 +201,6 @@ double WaterPropertyTable::bicubicInterpolate(
 
 WaterProperties WaterPropertyTable::getProperties(const double& P, const double& T) const
 {
-    //if (P < pressures_.front() || P > pressures_.back()
-    //    || T < temps_.front() || T > temps_.back())
-    //{
-    //    throw std::out_of_range("WaterPropertyTable: (P,T) outside bounds");
-    //}
-
-    //// 找压力区间 iP0,iP1 与分数 xFrac
-    //auto itP1 = std::upper_bound(pressures_.begin(), pressures_.end(), P);
-    //size_t iP1 = itP1 - pressures_.begin(), iP0 = iP1 - 1;
-    //double P0 = pressures_[iP0], P1 = pressures_[iP1];
-    //double xFrac = (P - P0) / (P1 - P0);
-
-    //// 找温度区间 iT0,iT1 与分数 yFrac
-    //auto itT1 = std::upper_bound(temps_.begin(), temps_.end(), T);
-    //size_t iT1 = itT1 - temps_.begin(), iT0 = iT1 - 1;
-    //double T0 = temps_[iT0], T1 = temps_[iT1];
-    //double yFrac = (T - T0) / (T1 - T0);
-
-    //WaterProperties R;
-    //// 对每个字段分别做 bicubicInterpolate
-    //R.rho = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
-    //    [&](const WaterProperties& w) { return w.rho; });
-    //R.mu = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
-    //    [&](const WaterProperties& w) { return w.mu;  });
-    //R.cp = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
-    //    [&](const WaterProperties& w) { return w.cp;  });
-    //R.cv = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
-    //    [&](const WaterProperties& w) { return w.cv;  });
-    //R.h = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
-    //    [&](const WaterProperties& w) { return w.h;   });
-    //R.k = bicubicInterpolate(data_, pressures_, temps_, iP0, iT0, xFrac, yFrac,
-    //    [&](const WaterProperties& w) { return w.k;   });
-
-    //return R;
 
     if (P < pressures_.front() || P > pressures_.back()
         || T < temps_.front() || T > temps_.back())

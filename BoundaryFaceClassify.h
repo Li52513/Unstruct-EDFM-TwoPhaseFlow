@@ -4,7 +4,7 @@
 #include <limits>
 #include <cmath>
 #include <algorithm>
-#include "Mesh.h"  // 需要 Mesh/Face/Node/Vector 接口
+#include "Mesh.h"  
 
 namespace BoundaryFaceClassify
 {

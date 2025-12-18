@@ -16,8 +16,8 @@ namespace Water_Prop
 	///为常物性参数工况外部修改提供接口
 	struct waterProperties
 	{
-		double rho = 900;
-		double mu = 1.48e-5;
+		double rho = 1000;
+		double mu = 1e-4;
 		double cp = 1100;
 		double k = 0.03;
 		double dRho_dP = 0.0;
@@ -112,20 +112,37 @@ namespace Water_Prop
 		auto lambda_wF = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
 		auto k_rwF = reg.get<volScalarField>(PhysicalProperties_string::Water().k_rw_tag);
 
-		auto wt = WaterPropertyTable::instance();
+		auto& wt = WaterPropertyTable::instance();
 
+		size_t oorCount = 0;
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
 			const auto& c = cells[ic];
+			if (c.id < 0) continue;
+
 			const size_t i = mesh.getCellId2Index().at(c.id);
-			double p = (*pF)[i], T = (*TF)[i]; 
-			double rho = 1000, mu = 1e-3, cp = 4200, k = 0.6;
-			try { const auto W = wt.getProperties(p, T); rho = W.rho; mu = W.mu; cp = W.cp; k = W.k; }
-			catch (...) {  }
-			(*rho_wF)[i] = rho; (*mu_wF)[i] = mu; (*cp_wF)[i] = cp; (*k_wF)[i] = k;
-			//流度计算
+			double p = (*pF)[i], T = (*TF)[i];
+
+			try {
+				const auto W = wt.getProperties(p, T);
+				(*rho_wF)[i] = W.rho;
+				(*mu_wF)[i] = W.mu;
+				(*cp_wF)[i] = W.cp;
+				(*k_wF)[i] = W.k;
+			}
+			catch (...) {
+				++oorCount;
+				(*rho_wF)[i] = 1000;
+				(*mu_wF)[i] = 1e-3;
+				(*cp_wF)[i] = 4200;
+				(*k_wF)[i] = 0.6;
+			}
+
 			(*lambda_wF)[i] = (*k_rwF)[i] / std::max((*mu_wF)[i], 1e-20);
-		
+		}
+		if (oorCount) {
+			std::cerr << "[WaterProps] OOR count = " << oorCount
+				<< " (using fallback constants)\n";
 		}
 		return true;
 	}

@@ -1,3 +1,5 @@
+#pragma once
+#include "Mesh.h"
 #include "MeshManager.h"
 #include "FractureNetwork.h"
 
@@ -36,12 +38,12 @@ void MeshManager::addFracture(const Vector& s, const Vector& e)
     frNet_.addFracture(s, e);
 }
 
-void MeshManager::DetectAndSubdivideFractures() 
+void MeshManager::DetectAndSubdivideFractures(bool useAABBAccelerationctrl = false)
 {
     // 1) 先找裂缝–裂缝的交点
     frNet_.DetectFracturetoFractureIntersections();
     
-    bool useAABBAcceleration = false;  // 或 false 用于对比测试
+    bool useAABBAcceleration = useAABBAccelerationctrl;  // 或 false 用于对比测试
     int totalFaces = mesh_.getFaces().size();
     int totalCandidates = 0;
 
@@ -78,9 +80,9 @@ void MeshManager::DetectAndSubdivideFractures()
     for (auto& F : frNet_.fractures)
     {
         F.sortAndRenumberIntersections();
-        /*F.subdivide(mesh_.getCells(), mesh_.getNodesMap(),true);*/
         F.subdivide(mesh_.getCells(), mesh_.getNodesMap(), distanceMetric_);
     }
+	frNet_.printFractureInfo();
 }
 
 
