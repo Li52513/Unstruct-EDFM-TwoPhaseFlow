@@ -28,8 +28,8 @@
 int run_IMPES_Iteration_TwoPhase_WellCase()
 {
     // ---------------- 0. 网格设置与场注册 ----------------
-    const double lengthX = 1.0;   // [m]
-    const double lengthY = 1.0;    // 几乎 1D
+    const double lengthX = 100.0;   // [m]
+    const double lengthY = 100.0;    // 几乎 1D
     const double lengthZ = 0.0;
 
     const int sectionNumX = 50;    // 细一点，方便看前沿
@@ -63,11 +63,11 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
 
     // 初始场
     InitFields ic;
-    ic.p_w0 = 7e6;      // 初始水相压力 7 MPa
+    ic.p_w0 = 1e7;      // 初始水相压力 7 MPa
     ic.dp_wdx = 0.0;
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
-    ic.s_w = 0.2;      // 初始水相饱和度
+    ic.s_w = 0.85;      // 初始水相饱和度
 
     IMPES_Iteration::PressureEquation_String P_Eq;
     IMPES_Iteration::SaturationEquation_String S_Eq;
@@ -107,21 +107,16 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         WellConfig_TwoPhase inj;
         inj.name = "INJ";
         inj.role = WellDOF_TwoPhase::Role::Injector;
-        inj.mode = WellDOF_TwoPhase::Mode::Rate;    // 质量流量控制
-        inj.target = 0.03;                           // 5 kg/s 总质量注入
-
-        inj.Tin = 300.0;                            // 注入温度，随意设置一个值，占位
-        inj.s_w_bh = 1.0;                           // 纯水注入
-		inj.mu_w_inj = 1e-4;                       // 注入水相粘度
-		inj.rho_w_inj = 1000.0;                     // 注入水相密度
-
-        inj.geom.pos = Vector{ 0.25 * lengthX, 0.25 * lengthY, 0.0 };
-        inj.geom.rw = 0.001;                        // 井筒半径
+        inj.mode = WellDOF_TwoPhase::Mode::Rate;
+        inj.target = 1; // kg/s total mass rate
+        inj.Tin = 300.0;
+        inj.s_w_bh = 0.0; // pure water injection
+        inj.geom.pos = Vector{ 0.1 * lengthX, 0.1 * lengthY, 0.0 };
+        inj.geom.rw = 0.1;
         inj.geom.skin = 0.0;
-        inj.geom.H = 1.0;                           // 有效厚度
-        inj.geom.perfRadius = 0.0;                  // 0 => 用最近 maxHitCells 个单元
-        inj.geom.maxHitCells = 1;                   // 只完井最近的 1 个单元
-        
+        inj.geom.H = 10;
+        inj.geom.perfRadius = 0.0;
+        inj.geom.maxHitCells = 5;
         wells_cfg.push_back(inj);
     }
 
@@ -130,19 +125,16 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         WellConfig_TwoPhase prod;
         prod.name = "PROD";
         prod.role = WellDOF_TwoPhase::Role::Producer;
-        prod.mode = WellDOF_TwoPhase::Mode::Pressure; // BHP 控制
-        prod.target = 5e6;                             // 8 MPa
-
-        prod.Tin = 300.0;  // 对产井无实际意义，仅占位
-        prod.s_w_bh = 1.0;    // 占位
-
-        prod.geom.pos = Vector{ 0.43 * lengthX, 0.43 * lengthY, 0.0 };
-        prod.geom.rw = 0.01;
+        prod.mode = WellDOF_TwoPhase::Mode::Pressure;
+        prod.target = 8e6;
+        prod.Tin = 300.0;
+        prod.s_w_bh = 1.0;
+        prod.geom.pos = Vector{ 0.9 * lengthX, 0.9 * lengthY, 0.0 };
+        prod.geom.rw = 0.1;
         prod.geom.skin = 0.0;
-        prod.geom.H = 1.0;
+        prod.geom.H = 10;
         prod.geom.perfRadius = 0.0;
         prod.geom.maxHitCells = 5;
-
         wells_cfg.push_back(prod);
     }
 
@@ -161,15 +153,17 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     satCfg.CFL_safety = 0.9;
     satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::SimpleCFL;
     satCfg.time_integration_scheme = IMPES_Iteration::SatTimeIntegrationScheme::ExplicitEuler;
+	satCfg.useTraditionMethod = false;
+    satCfg.primary_phase = IMPES_Iteration::SaturationPrimaryPhase::Water;
 
     // ---------- 8. 压力方程组装与求解控制参数 ----------   
     IMPES_Iteration::PressureSolveControls pCtrl;
     //组装
     pCtrl.assembly.VG_Parameter.vg_params = vg_params;
     pCtrl.assembly.VG_Parameter.relperm_params = rp_params;
-    pCtrl.assembly.enable_buoyancy = false;
+    pCtrl.assembly.enable_buoyancy = true;
     pCtrl.assembly.gradient_smoothing = 6;
-    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
+    pCtrl.assembly.gravity = Vector{ 0.0, -9.8, 0.0 };
 
     pCtrl.max_outer = 1000;        // 常物性可保持很小
     pCtrl.tol_abs = 1e6;
@@ -192,7 +186,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     fluxCfg.pressure_bc = &PbcA;
 
     // ---------- 11. IMPES 主时间推进 ----------
-    const int    nSteps = 500;
+    const int    nSteps = 5000;
     double       dt_initial = 1e-5; 
 
 	IMPES_Iteration::TimeStepControl timeCtrl;
@@ -203,10 +197,10 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     const int writeEveryP = 10;
     const int writeEverySw = 10;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/p_impes_ps_withwell/p_ps";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/s_impes_ps_withwell/s_ps";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/p_impes_ps_withwell/p_ps_withGravity";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/s_impes_ps_withwell/s_ps_withGravity";
     const int snapshotEveryCsv = 10;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/IMPES_ExplicitEuler/ps_state_withwell_case2";
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/IMPES_ExplicitEuler/ps_state_withwell_case4";
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
     const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);

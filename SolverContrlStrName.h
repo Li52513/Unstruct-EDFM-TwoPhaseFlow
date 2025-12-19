@@ -54,8 +54,8 @@ namespace PhysicalProperties_string
     struct Rock
     {
         // Bsic properties
-        std::string phi_tag = "phi_r";				//porosity
-        std::string phi_old_tag = "phi_r_old";      //porosity (old time layer)
+        std::string phi_tag = "phi_r";	
+        std::string phi_old_tag = "phi_r_old";      //porosity (old time layer)//porosity
         std::string rho_tag = "rho_r";				//rock density
         std::string cp_tag = "cp_r";				//rock specific heat capacity
         std::string lambda_tag = "lambda_r";				//rock thermal conductivity
@@ -141,6 +141,28 @@ namespace IMPES_Iteration
 
 }
 
+namespace FC_P_IMPES_I
+{
+    struct PressureEquation_String
+    {
+        std::string operator_tag = "p_w_IMPES"; // pressure operator tag for nm
+        std::string pressure_field = "p_w";    // current eval pressure field
+        std::string pressure_old_field = "p_w_old";
+        std::string pressure_prev_field = "p_w_prev";
+        std::string pressure_g = "p_g";   //current CO2 pressure
+        std::string Pc_field = "Pc";
+
+        //扩散项离散系数临时储存名称
+        std::string rho_coeff_field = "rho_coeff_mass";              ///< ρ_coeff = λ_w ρ_w + λ_g ρ_g
+        std::string rho_capillary_field = "rho_capillary_mass";      ///< ρ_cap = λ_g ρ_g
+        std::string rho_gravity_field = "rho_gravity_mass";          ///< ρ_gra = (λ_w ρ_w² + λ_g ρ_g²)/(λ_w ρ_w + λ_g ρ_g)
+        std::string rho_mix_field = "rho_mix"; 			             ///< ρ_mix = ρ_w s_w + ρ_g s_g
+        std::string lambda_gravity_field = "lambda_gravity_mass";   ///< λ_gra = λ_w ρ_w + λ_g ρ_g
+        std::string gravity_dummy_field = "gravity_dummy_scalar";   /// 用于占位的重力场
+    };
+}
+
+
 namespace SinglePhase 
 {
     struct PhysicalParameters_String
@@ -182,6 +204,7 @@ namespace SinglePhase
         std::string total_velocity_name = "ufn_total";
     };
 }
+
 
 
 

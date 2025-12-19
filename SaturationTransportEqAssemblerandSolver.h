@@ -13,55 +13,71 @@
 
 namespace IMPES_Iteration
 {
-    /// ±¥ºÍ¶ÈÊ±¼ä»ı·Ö¸ñÊ½
+    /// é¥±å’Œåº¦æ—¶é—´ç§¯åˆ†æ ¼å¼
     enum class SatTimeIntegrationScheme
     {
-        ExplicitEuler,  ///< Ò»½×ÏÔÊ½ Euler
-        HeunRK2         ///< ¶ş½× Heun / RK2
+        ExplicitEuler,  ///< ä¸€é˜¶æ˜¾å¼ Euler
+        HeunRK2         ///< äºŒé˜¶ Heun / RK2
+    };
+
+    /// Explicit saturation update: choose which phase mass balance drives the saturation update.
+    /// - Water: conserves water-phase mass (when no clamping occurs).
+    /// - Gas:   conserves gas-phase (CO2) mass (when no clamping occurs).
+    enum class SaturationPrimaryPhase
+    {
+        Water,
+        Gas
     };
 
     /**
-     * \brief ÅäÖÃÁ½Ïà±¥ºÍ¶ÈÊäÔËËùĞèµÄ³¡Ãû³ÆÓë VG/Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı¡£
+     * \brief é…ç½®ä¸¤ç›¸é¥±å’Œåº¦è¾“è¿æ‰€éœ€çš„åœºåç§°ä¸ VG/ç›¸å¯¹æ¸—é€ç‡å‚æ•°ã€‚
      *
-     *  ¸ÃÅäÖÃ²»¸ºÔğ¸üĞÂÎïĞÔ£¬½öÔ¼¶¨£º
-     *  - Ê¹ÓÃÄÄ¸öµ¥Ôª±êÁ¿³¡×÷ÎªË®Ïà±¥ºÍ¶È S_w£»
-     *  - ÀúÊ·Ê±¼ä²ã S_w^n ´æÔÚÄÄÀï£»
-     *  - £¨¿ÉÑ¡£©ÉÏÒ»Íâµü´ú»ò RK2 ÖĞ¼ä²ã S_w^{prev} ´æÔÚÄÄÀï£»
-     *  - Ë®ÏàÖÊÁ¿Í¨Á¿Ãæ³¡ mf_w µÄÃû³Æ£»
-     *  - ¿×Ï¶¶ÈÓëË®ÏàÃÜ¶ÈµÄ³¡Ãû³Æ£¬ÓÃÓÚÊ±¼äÏîÓëÏÔÊ½¸üĞÂ£»
-     *  - VG/Ïà¶ÔÉøÍ¸ÂÊÄ£ĞÍ²ÎÊı£¨¹©Íâ²¿¸üĞÂÎïĞÔÊ±Ê¹ÓÃ£©¡£
+     *  è¯¥é…ç½®ä¸è´Ÿè´£æ›´æ–°ç‰©æ€§ï¼Œä»…çº¦å®šï¼š
+     *  - ä½¿ç”¨å“ªä¸ªå•å…ƒæ ‡é‡åœºä½œä¸ºæ°´ç›¸é¥±å’Œåº¦ S_wï¼›
+     *  - å†å²æ—¶é—´å±‚ S_w^n å­˜åœ¨å“ªé‡Œï¼›
+     *  - ï¼ˆå¯é€‰ï¼‰ä¸Šä¸€å¤–è¿­ä»£æˆ– RK2 ä¸­é—´å±‚ S_w^{prev} å­˜åœ¨å“ªé‡Œï¼›
+     *  - æ°´ç›¸è´¨é‡é€šé‡é¢åœº mf_w çš„åç§°ï¼›
+     *  - å­”éš™åº¦ä¸æ°´ç›¸å¯†åº¦çš„åœºåç§°ï¼Œç”¨äºæ—¶é—´é¡¹ä¸æ˜¾å¼æ›´æ–°ï¼›
+     *  - VG/ç›¸å¯¹æ¸—é€ç‡æ¨¡å‹å‚æ•°ï¼ˆä¾›å¤–éƒ¨æ›´æ–°ç‰©æ€§æ—¶ä½¿ç”¨ï¼‰ã€‚
      */
     struct SaturationTransportConfig
     {
         SaturationEquation_String           S_Eq_str;
-        std::string saturation =            S_Eq_str.saturation;                 ///µ±Ç°Ê±¼ä²ãµÄË®Ïà±¥ºÍ¶È£¨ÕıÔÚÇó½âµÄ£©
-        std::string saturation_old =        S_Eq_str.saturation_old;         ///ÉÏÒ»Ê±¼ä²½µÄË®Ïà±¥ºÍ¶È £¨ÒÑÖª½â£¬ÓÃÓÚÊ±¼äÏî£©
-        std::string saturation_prev =       S_Eq_str.saturation_prev;       ///Íâµü´ú / RK2 stage ±¸ÓÃµÄ±¥ºÍ¶È¿½±´£¨¿ÉÑ¡£©  
-        std::string water_source_field;                                      /// £¨¿ÉÑ¡£©Ë®ÏàÔ´»ãÏî£¬µ¥Î» [kg/s]£¬ÀıÈç¾®Ô´µÄË®ÏàÖÊÁ¿Ô´ ÈôÎª¿Õ×Ö·û´®ÔòÊÓÎªÎŞÏÔÊ½ÌåÔ´Ïî
+        std::string saturation =            S_Eq_str.saturation;                 ///å½“å‰æ—¶é—´å±‚çš„æ°´ç›¸é¥±å’Œåº¦ï¼ˆæ­£åœ¨æ±‚è§£çš„ï¼‰
+        std::string saturation_old =        S_Eq_str.saturation_old;         ///ä¸Šä¸€æ—¶é—´æ­¥çš„æ°´ç›¸é¥±å’Œåº¦ ï¼ˆå·²çŸ¥è§£ï¼Œç”¨äºæ—¶é—´é¡¹ï¼‰
+        std::string saturation_prev =       S_Eq_str.saturation_prev;       ///å¤–è¿­ä»£ / RK2 stage å¤‡ç”¨çš„é¥±å’Œåº¦æ‹·è´ï¼ˆå¯é€‰ï¼‰  
+        std::string water_source_field;                                      /// ï¼ˆå¯é€‰ï¼‰æ°´ç›¸æºæ±‡é¡¹ï¼Œå•ä½ [kg/s]ï¼Œä¾‹å¦‚äº•æºçš„æ°´ç›¸è´¨é‡æº è‹¥ä¸ºç©ºå­—ç¬¦ä¸²åˆ™è§†ä¸ºæ— æ˜¾å¼ä½“æºé¡¹
+
+        std::string gas_source_field;                                        /// (optional) gas/CO2 mass source [kg/s] (e.g. well source)
 
         TwoPhase_VG_Parameters              VG_Parameter;
 
-        /// Ê±¼ä»ı·Ö¸ñÊ½£¨ĞÂ¼Ó£©
+        /// æ—¶é—´ç§¯åˆ†æ ¼å¼ï¼ˆæ–°åŠ ï¼‰
         SatTimeIntegrationScheme time_integration_scheme = SatTimeIntegrationScheme::HeunRK2;
-        /// Ê±¼ä²½¿ØÖÆ¿ª¹Ø£ºSimpleCFL / RedondoLike
+        SaturationPrimaryPhase primary_phase = SaturationPrimaryPhase::Water;
+        /// æ—¶é—´æ­¥æ§åˆ¶å¼€å…³ï¼šSimpleCFL / RedondoLike
         SatTimeControlScheme time_control_scheme = SatTimeControlScheme::RedondoLike;
 
-        /// Redondo ·ç¸ñ & ¦¤S_max Ìõ¼şÊ¹ÓÃµÄ²ÎÊı£¨SimpleCFL Ò²»áÓÃ dS_max£©
-        double CFL_safety = 0.8;  ///< C_CFL °²È«ÏµÊı, dt_CFL = CFL_safety * ...
-        double dS_max = 0.1;  ///< µ¥²½ÔÊĞíµÄ×î´ó |¦¤S_w|, ÓÃÓÚ ¦¤S_max Ìõ¼ş
+        /// Redondo é£æ ¼ & Î”S_max æ¡ä»¶ä½¿ç”¨çš„å‚æ•°ï¼ˆSimpleCFL ä¹Ÿä¼šç”¨ dS_maxï¼‰
+        double CFL_safety = 0.8;  ///< C_CFL å®‰å…¨ç³»æ•°, dt_CFL = CFL_safety * ...
+        double dS_max = 0.1;  ///< å•æ­¥å…è®¸çš„æœ€å¤§ |Î”S_w|, ç”¨äº Î”S_max æ¡ä»¶
+
+        bool useTraditionMethod = false;
     };
 
     /**
-     * \brief µ¥¸öÊ±¼ä²½ÄÚ±¥ºÍ¶ÈÍÆ½øµÄÕï¶ÏÊı¾İ¡£
+     * \brief å•ä¸ªæ—¶é—´æ­¥å†…é¥±å’Œåº¦æ¨è¿›çš„è¯Šæ–­æ•°æ®ã€‚
      *
-     * max_CFL / max_dS ¿ÉÓÃÓÚÊ±¼ä²½×ÔÊÊÓ¦¿ØÖÆ£»
-     * suggested_dt ¿ÉÓÉµ±Ç°²½¸ø³öÏÂÒ»¸öÊ±¼ä²½µÄ½¨ÒéÉÏÏŞ¡£
+     * max_CFL / max_dS å¯ç”¨äºæ—¶é—´æ­¥è‡ªé€‚åº”æ§åˆ¶ï¼›
+     * suggested_dt å¯ç”±å½“å‰æ­¥ç»™å‡ºä¸‹ä¸€ä¸ªæ—¶é—´æ­¥çš„å»ºè®®ä¸Šé™ã€‚
      */
     struct SaturationStepStats
     {
-        double max_CFL = 0.0;   ///< ¶ÔÁ÷ CFL ×î´óÖµ£¨»ùÓÚË®ÏàÖÊÁ¿Í¨Á¿£©
-        double max_dS = 0.0;   ///< µ¥ÔªÄÚ |¦¤S_w| ×î´óÖµ
-        double suggested_dt = 1e100; ///< ÓÉ CFL Óë ¦¤S_max Ô¼Êø¸ø³öµÄ dt ½¨ÒéÉÏÏŞ
+        double max_CFL = 0.0;   ///< å¯¹æµ CFL æœ€å¤§å€¼ï¼ˆåŸºäºæ°´ç›¸è´¨é‡é€šé‡ï¼‰
+        double max_dS = 0.0;   ///< å•å…ƒå†… |Î”S_w| æœ€å¤§å€¼
+        double suggested_dt = 1e100; ///< ç”± CFL ä¸ Î”S_max çº¦æŸç»™å‡ºçš„ dt å»ºè®®ä¸Šé™
+        int    n_clamped_cells = 0; ///< æœ¬æ­¥å‘ç”Ÿé¥±å’Œåº¦å¤¹å–(clamp)çš„å•å…ƒæ•°ï¼ˆå¤¹å–ä¼šç ´åä¸¥æ ¼å®ˆæ’ï¼‰
+        double max_abs_clamp_deltaS = 0.0; ///< |S_clamped - S_raw| çš„æœ€å¤§å€¼
     };
 
     namespace detail
@@ -78,17 +94,17 @@ namespace IMPES_Iteration
     } // namespace detail
 
     /**
-     * \brief ÏÔÊ½ Euler ĞÎÊ½ÍÆ½øÁ½ÏàË®Ïà±¥ºÍ¶È£¨µ¥Ò»²½³¤£©£¬
-     *        Ö»ÒÀÀµ splitTwoPhaseMassFlux ¸ø³öµÄË®ÏàÖÊÁ¿Í¨Á¿ mf_w¡£
+     * \brief æ˜¾å¼ Euler å½¢å¼æ¨è¿›ä¸¤ç›¸æ°´ç›¸é¥±å’Œåº¦ï¼ˆå•ä¸€æ­¥é•¿ï¼‰ï¼Œ
+     *        åªä¾èµ– splitTwoPhaseMassFlux ç»™å‡ºçš„æ°´ç›¸è´¨é‡é€šé‡ mf_wã€‚
      *
-     * ÀëÉ¢ĞÎÊ½£¨ÖÊÁ¿ĞÍ£©£º
+     * ç¦»æ•£å½¢å¼ï¼ˆè´¨é‡å‹ï¼‰ï¼š
      * \f[
      *   \phi_i V_i \rho_{w,i} \frac{S_{w,i}^{n+1} - S_{w,i}^n}{\Delta t}
      *   + \sum_{f \in \partial i} F_{w,f}^{(n)}
      *   = Q_{w,i}^{(n)},
      * \f]
-     * ÆäÖĞ \f$F_{w,f}\f$ ÎªÃæË®ÏàÖÊÁ¿Í¨Á¿£¨owner¡úneighbor ÎªÕı·½Ïò£©¡£
-     * ÏÔÊ½¸üĞÂÎª£º
+     * å…¶ä¸­ \f$F_{w,f}\f$ ä¸ºé¢æ°´ç›¸è´¨é‡é€šé‡ï¼ˆownerâ†’neighbor ä¸ºæ­£æ–¹å‘ï¼‰ã€‚
+     * æ˜¾å¼æ›´æ–°ä¸ºï¼š
      * \f[
      *   S_{w,i}^{n+1}
      *   = S_{w,i}^n
@@ -96,23 +112,23 @@ namespace IMPES_Iteration
      *     \big( Q_{w,i}^{(n)} - \sum_{f} F_{w,f}^{(n)} \big).
      * \f]
      *
-     * Ê±¼ä²½¿ØÖÆ£º
-     *  - ¼ÇÂ¼±¾²½ max_dS = max_i |S_{w,i}^{n+1} - S_{w,i}^n|;
-     *  - ¼ÇÂ¼¼òµ¥ CFL£º
+     * æ—¶é—´æ­¥æ§åˆ¶ï¼š
+     *  - è®°å½•æœ¬æ­¥ max_dS = max_i |S_{w,i}^{n+1} - S_{w,i}^n|;
+     *  - è®°å½•ç®€å• CFLï¼š
      *      CFL_i = |F_div_i| * dt / (phi_i * V_i * rho_{w,i});
-     *  - ÓÉÁ½ÀàÔ¼Êø¸ø³ö½¨Òé dt ÉÏÏŞ£º
+     *  - ç”±ä¸¤ç±»çº¦æŸç»™å‡ºå»ºè®® dt ä¸Šé™ï¼š
      *      dt_dS,i   = dS_max * phi_i * V_i * rho_{w,i} / |Qw_i - F_div_i|;
      *      dt_CFL,i  = CFL_safety * phi_i * V_i * rho_{w,i} / |F_div_i|;
-     *    ×îÖÕ suggested_dt = min_i( dt_dS,i, dt_CFL,i ).
+     *    æœ€ç»ˆ suggested_dt = min_i( dt_dS,i, dt_CFL,i ).
      *
-     * @param mgr     Íø¸ñ¹ÜÀíÆ÷£¨Ìá¹©µ¥Ôª/Ìå»ıµÈ£©
-     * @param reg     µ¥Ôª³¡×¢²á±í£¨S_w¡¢phi_r¡¢rho_w¡¢Ô´ÏîµÈ£©
-     * @param freg    Ãæ³¡×¢²á±í£¨mf_w£©
-     * @param cfg     ±¥ºÍ¶ÈÊäÔËÅäÖÃ£¨³¡Ãû¡¢VG ²ÎÊı¡¢dS_max¡¢CFL_safety£©
-     * @param FluxCfg Í¨Á¿²ğ·ÖÅäÖÃ£¨Ìá¹© water_mass_flux Ãû³Æ£©
-     * @param dt      Ê±¼ä²½³¤
-     * @param stats   Êä³ö±¾Ê±¼ä²½µÄ CFL / ¦¤S_max / ½¨Òé dt
-     * @return true  ±íÊ¾ÍÆ½ø³É¹¦£»false ±íÊ¾¹Ø¼ü×Ö¶ÎÈ±Ê§»ò¼¸ºÎÒì³£
+     * @param mgr     ç½‘æ ¼ç®¡ç†å™¨ï¼ˆæä¾›å•å…ƒ/ä½“ç§¯ç­‰ï¼‰
+     * @param reg     å•å…ƒåœºæ³¨å†Œè¡¨ï¼ˆS_wã€phi_rã€rho_wã€æºé¡¹ç­‰ï¼‰
+     * @param freg    é¢åœºæ³¨å†Œè¡¨ï¼ˆmf_wï¼‰
+     * @param cfg     é¥±å’Œåº¦è¾“è¿é…ç½®ï¼ˆåœºåã€VG å‚æ•°ã€dS_maxã€CFL_safetyï¼‰
+     * @param FluxCfg é€šé‡æ‹†åˆ†é…ç½®ï¼ˆæä¾› water_mass_flux åç§°ï¼‰
+     * @param dt      æ—¶é—´æ­¥é•¿
+     * @param stats   è¾“å‡ºæœ¬æ—¶é—´æ­¥çš„ CFL / Î”S_max / å»ºè®® dt
+     * @return true  è¡¨ç¤ºæ¨è¿›æˆåŠŸï¼›false è¡¨ç¤ºå…³é”®å­—æ®µç¼ºå¤±æˆ–å‡ ä½•å¼‚å¸¸
      */
     inline bool advanceSaturationExplicit_Euler(
         MeshManager& mgr,
@@ -125,13 +141,13 @@ namespace IMPES_Iteration
     {
         stats = SaturationStepStats{};
 
-        // ---- 0) »ù±¾¼ì²é ---- //
+        // ---- 0) åŸºæœ¬æ£€æŸ¥ ---- //
         if (dt <= 0.0) {
             std::cerr << "[Saturation] advanceSaturationExplicit_Euler: dt <= 0.\n";
             return false;
         }
 
-        // µ±Ç°Ê±¼ä²ã S_w ÓëÉÏÒ»Ê±¼ä²½ S_w_old£¨Ö»×ö³ß´ç¼ì²éÓë»Ø¹öÓÃ£©
+        // å½“å‰æ—¶é—´å±‚ S_w ä¸ä¸Šä¸€æ—¶é—´æ­¥ S_w_oldï¼ˆåªåšå°ºå¯¸æ£€æŸ¥ä¸å›æ»šç”¨ï¼‰
         auto s_w = reg.get<volScalarField>(cfg.saturation);
         auto s_w_old = reg.get<volScalarField>(cfg.saturation_old);
         if (!s_w || !s_w_old) {
@@ -140,29 +156,61 @@ namespace IMPES_Iteration
             return false;
         }
 
-        // ¿×Ï¶¶ÈÓëË®ÏàÃÜ¶È£¨Ê±¼äÏî£©
+        // å­”éš™åº¦ä¸æ°´ç›¸å¯†åº¦ï¼ˆæ—¶é—´é¡¹ï¼‰
         auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
-        auto rho_w = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
-        if (!phi || !rho_w) {
-            std::cerr << "[Saturation] missing porosity or water density field.\n";
+        auto phi_old = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_old_tag);
+        if (!phi || !phi_old) {
+            std::cerr << "[Saturation] missing porosity field (current/old).\n";
             return false;
         }
 
-        // Ë®ÏàÖÊÁ¿Í¨Á¿Ãæ³¡£¨ÓÉ splitTwoPhaseMassFlux Ìá¹©£©
-        auto mf_w = freg.get<faceScalarField>(FluxCfg.water_mass_flux);
-        if (!mf_w) {
-            std::cerr << "[Saturation] missing face field of water mass flux '"
-                << FluxCfg.water_mass_flux << "'.\n";
+        const bool advance_water = (cfg.primary_phase == SaturationPrimaryPhase::Water);
+        const bool advance_gas = (cfg.primary_phase == SaturationPrimaryPhase::Gas);
+
+        // density for the selected primary phase
+        std::shared_ptr<volScalarField> rho = nullptr;
+        std::shared_ptr<volScalarField> rho_old = nullptr;
+        if (advance_water) {
+            rho = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
+            rho_old = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_old_tag);
+        }
+        else if (advance_gas) {
+            rho = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
+            rho_old = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_old_tag);
+        }
+        else {
+            std::cerr << "[Saturation] unknown cfg.primary_phase.\n";
+            return false;
+        }
+        if (!rho || !rho_old) {
+            std::cerr << "[Saturation] missing density field (current/old) for primary phase.\n";
             return false;
         }
 
-        // ¿ÉÑ¡£ºµ¥ÔªÌåË®ÏàÖÊÁ¿Ô´£¨¾®Ô´µÈ£©£¬µ¥Î» [kg/s]
-        std::shared_ptr<volScalarField> q_w;
-        if (!cfg.water_source_field.empty()) {
-            q_w = reg.get<volScalarField>(cfg.water_source_field.c_str());
-            if (!q_w) {
+        // æ°´ç›¸è´¨é‡é€šé‡é¢åœºï¼ˆç”± splitTwoPhaseMassFlux æä¾›ï¼‰
+        std::shared_ptr<faceScalarField> mf;
+        if (advance_water) mf = freg.get<faceScalarField>(FluxCfg.water_mass_flux);
+        if (advance_gas)   mf = freg.get<faceScalarField>(FluxCfg.gas_mass_flux);
+        if (!mf) {
+            std::cerr << "[Saturation] missing face field of primary mass flux.\n";
+            return false;
+        }
+
+        // å¯é€‰ï¼šå•å…ƒä½“æ°´ç›¸è´¨é‡æºï¼ˆäº•æºç­‰ï¼‰ï¼Œå•ä½ [kg/s]
+        std::shared_ptr<volScalarField> q;
+        if (advance_water && !cfg.water_source_field.empty()) {
+            q = reg.get<volScalarField>(cfg.water_source_field.c_str());
+            if (!q) {
                 std::cerr << "[Saturation] requested water source field '"
                     << cfg.water_source_field << "' not found.\n";
+                return false;
+            }
+        }
+        if (advance_gas && !cfg.gas_source_field.empty()) {
+            q = reg.get<volScalarField>(cfg.gas_source_field.c_str());
+            if (!q) {
+                std::cerr << "[Saturation] requested gas source field '"
+                    << cfg.gas_source_field << "' not found.\n";
                 return false;
             }
         }
@@ -179,44 +227,48 @@ namespace IMPES_Iteration
             std::cerr << "[Saturation] saturation field size mismatch with mesh cells.\n";
             return false;
         }
-        if (phi->data.size() != nCells || rho_w->data.size() != nCells) {
-            std::cerr << "[Saturation] porosity/rho_w field size mismatch with mesh cells.\n";
+        if (phi->data.size() != nCells || rho->data.size() != nCells || rho_old->data.size() != nCells) {
+            std::cerr << "[Saturation] porosity/rho/rho_old field size mismatch with mesh cells.\n";
             return false;
         }
-        if (mf_w->data.size() != nFaces) {
-            std::cerr << "[Saturation] water mass flux face field size mismatch with mesh faces.\n";
+        if (mf->data.size() != nFaces) {
+            std::cerr << "[Saturation] primary mass flux face field size mismatch with mesh faces.\n";
+            return false;
+        }
+        if (q && q->data.size() != nCells) {
+            std::cerr << "[Saturation] primary source field size mismatch with mesh cells.\n";
             return false;
         }
 
-        // ---- 1) ¹¹ÔìÃ¿¸öµ¥ÔªµÄË®ÏàÖÊÁ¿Í¨Á¿É¢¶È F_div[i] ---- //
+        // ---- 1) æ„é€ æ¯ä¸ªå•å…ƒçš„ç›¸è´¨é‡é€šé‡æ•£åº¦ F_div[i] ---- //
         // F_div[i] = sum_{faces} sigma(i,f) * Fw_f
-        // ÆäÖĞ sigma(i,f) = +1 (owner) / -1 (neighbor)
-        volScalarField F_div("div_mf_w", nCells, 0.0);
+        // å…¶ä¸­ sigma(i,f) = +1 (owner) / -1 (neighbor)
+        volScalarField F_div("div_mf_primary", nCells, 0.0);
 
         for (const auto& F : faces)
         {
             const int iF = F.id - 1;
             if (iF < 0 || static_cast<size_t>(iF) >= nFaces) continue;
 
-            const double Fw_face = (*mf_w)[iF];
+            const double F_face = (*mf)[iF];
             const int ownerId = F.ownerCell;
             const int neighId = F.neighborCell;
 
             if (ownerId >= 0)
             {
                 const size_t iOwner = id2idx.at(ownerId);
-                // owner -> neighbor ÎªÕı£º¶Ô owner ÊÇ¡°Á÷³ö¡±¹±Ï×
-                F_div[iOwner] += Fw_face;
+                // owner -> neighbor ä¸ºæ­£ï¼šå¯¹ owner æ˜¯â€œæµå‡ºâ€è´¡çŒ®
+                F_div[iOwner] += F_face;
             }
             if (neighId >= 0)
             {
                 const size_t iNeigh = id2idx.at(neighId);
-                // ¶Ô neighbor ¶øÑÔ same Fw_face ÊÇ¡°Á÷Èë¡±£¬È¡¸ººÅ
-                F_div[iNeigh] -= Fw_face;
+                // å¯¹ neighbor è€Œè¨€ same Fw_face æ˜¯â€œæµå…¥â€ï¼Œå–è´Ÿå·
+                F_div[iNeigh] -= F_face;
             }
         }
 
-        // ---- 2) ÏÔÊ½¸üĞÂ S_w£¬²¢Í³¼Æ CFL Óë ¦¤S_max¡¢½¨Òé dt ---- //
+        // ---- 2) æ˜¾å¼æ›´æ–° S_wï¼Œå¹¶ç»Ÿè®¡ CFL ä¸ Î”S_maxã€å»ºè®® dt ---- //
         const double CFL_safety = cfg.CFL_safety;
         const double dS_target = cfg.dS_max;
         const double tiny = 1e-30;
@@ -225,8 +277,6 @@ namespace IMPES_Iteration
         double max_dS = 0.0;
         double min_dt_dS = 1e100;
         double min_dt_CFL = 1e100;
-
-        const auto& vg = cfg.VG_Parameter.vg_params;
 
         for (size_t ic = 0; ic < nCells; ++ic)
         {
@@ -240,52 +290,92 @@ namespace IMPES_Iteration
                 continue;
             }
 
-            const double phi_i = std::max((*phi)[ic], 1e-12);
-            const double rho_i = std::max((*rho_w)[ic], 1e-12);
+            const double phi_np1 = std::max((*phi)[ic], 1e-12);
+            const double phi_n = std::max((*phi_old)[ic], 1e-12);
+            const double rho_np1 = std::max((*rho)[ic], 1e-12);
+            const double rho_n = std::max((*rho_old)[ic], 1e-12);
             const double Sw_n = (*s_w)[ic];
 
             const double F_div_i = F_div[ic];
-            const double Qw_i = q_w ? (*q_w)[ic] : 0.0;
+            const double Q_i = q ? (*q)[ic] : 0.0;
 
-            // 2.1 ÏÔÊ½¸üĞÂ S_w
-            const double coef = dt / (phi_i * V * rho_i);
-            const double dS = coef * (Qw_i - F_div_i);
+            // 2.1 æ˜¾å¼æ›´æ–°ï¼ˆè´¨é‡å®ˆæ’å½¢å¼ï¼‰ï¼š
+            //   M_w^{n+1} = M_w^n + dt*(Qw - div(Fw)),
+            //   S_w^{n+1} = M_w^{n+1} / (phi * V * rho_w^{n+1})
+            //
+            // è¿™æ ·åœ¨ rho_w éšå‹åŠ›å˜åŒ–æ—¶ï¼Œä¹Ÿèƒ½ä¿è¯ï¼ˆä¸å‘ç”Ÿ clamp æ—¶ï¼‰ç¦»æ•£æ°´ç›¸è´¨é‡ä¸¥æ ¼å®ˆæ’ã€‚
+            double Sw_raw = Sw_n;
+            double Sw_new = Sw_n;
+            if (cfg.useTraditionMethod)
+            {
+                // ä¼ ç»Ÿæ˜¾ç¤ºæ›´æ–°ï¼ˆä¸ä¸¥æ ¼å®ˆæ’ï¼‰
+				const double coef = dt / (phi_np1 * V * rho_np1);
+				const double dS = coef * (Q_i - F_div_i);
+				Sw_raw = Sw_n + dS;
+				Sw_new = std::max(0.0, std::min(1.0, Sw_raw));
+            }
+            else
+            {
+				// æ–°æ–¹æ³•ï¼šåŸºäºç›¸è´¨é‡å®ˆæ’çš„æ˜¾ç¤ºæ›´æ–°
+                if (advance_water)
+                {
+                    const double Mw_n = phi_n * V * rho_n * Sw_n;
+                    const double Mw_np1 = Mw_n + dt * (Q_i - F_div_i);
 
-            double Sw_new = Sw_n + dS;
+                    const double denom = std::max(phi_np1 * V * rho_np1, tiny);
+                    Sw_raw = Mw_np1 / denom;
+                    Sw_new = std::max(0.0, std::min(1.0, Sw_raw));
+                }
+                else
+                {
+                    const double Sg_n = 1.0 - Sw_n;
+                    const double Mg_n = phi_n * V * rho_n * Sg_n;
+                    const double Mg_np1 = Mg_n + dt * (Q_i - F_div_i);
 
-            // ÏÈ´Ö¼ôµ½ [0,1]£¬ÔÙ¼ôµ½ [Swr, 1-Sgr]
-            Sw_new = std::max(0.0, std::min(1.0, Sw_new));
-            Sw_new = detail::clampSw(Sw_new, vg);
+                    const double denom = std::max(phi_np1 * V * rho_np1, tiny);
+                    const double Sg_raw = Mg_np1 / denom;
+                    const double Sg_new = std::max(0.0, std::min(1.0, Sg_raw));
+
+                    Sw_raw = 1.0 - Sg_raw;
+                    Sw_new = 1.0 - Sg_new;
+
+                }
+            }
+            const double clamp_delta = std::abs(Sw_new - Sw_raw);
+            if (clamp_delta > 1e-4) {
+                ++stats.n_clamped_cells;
+                if (clamp_delta > stats.max_abs_clamp_deltaS) stats.max_abs_clamp_deltaS = clamp_delta;
+            }
 
             (*s_w)[ic] = Sw_new;
 
-            // 2.2 Í³¼Æ |¦¤S| Óë ¦¤S_max Ô¼Êø¶ÔÓ¦µÄ dt
+            // 2.2 ç»Ÿè®¡ |Î”S| ä¸ Î”S_max çº¦æŸå¯¹åº”çš„ dt
             const double dS_abs = std::fabs(Sw_new - Sw_n);
             if (dS_abs > max_dS) max_dS = dS_abs;
 
-            const double denom_loc = std::fabs(Qw_i - F_div_i);
+            const double denom_loc = std::fabs(Q_i - F_div_i);
             if (denom_loc > tiny) {
-                const double dt_loc = dS_target * phi_i * V * rho_i / denom_loc;
+                const double dt_loc = dS_target * phi_np1 * V * rho_np1 / denom_loc;
                 if (dt_loc < min_dt_dS) min_dt_dS = dt_loc;
             }
 
-            // 2.3 ¼òµ¥ CFL£º»ùÓÚ¶ÔÁ÷É¢¶È F_div
-            const double CFL_i = std::fabs(F_div_i) * dt / (phi_i * V * rho_i);
+            // 2.3 ç®€å• CFLï¼šåŸºäºå¯¹æµæ•£åº¦ F_div
+            const double CFL_i = std::fabs(F_div_i) * dt / (phi_np1 * V * rho_np1);
             if (CFL_i > max_CFL) max_CFL = CFL_i;
 
             const double adv_denom = std::fabs(F_div_i);
             if (adv_denom > tiny) {
-                const double dt_CFL_i = CFL_safety * phi_i * V * rho_i / adv_denom;
+                const double dt_CFL_i = CFL_safety * phi_np1 * V * rho_np1 / adv_denom;
                 if (dt_CFL_i < min_dt_CFL) min_dt_CFL = dt_CFL_i;
             }
         }
 
-        // ---- 3) ¸ù¾İÁ½ÀàÔ¼Êø¸ø³öÕûÌå dt ½¨Òé ---- //
+        // ---- 3) æ ¹æ®ä¸¤ç±»çº¦æŸç»™å‡ºæ•´ä½“ dt å»ºè®® ---- //
         double dt_suggest = 1e100;
         if (min_dt_dS < dt_suggest) dt_suggest = min_dt_dS;
         if (min_dt_CFL < dt_suggest) dt_suggest = std::min(dt_suggest, min_dt_CFL);
 
-        // Èç¹ûÃ»ÓĞÈÎºÎÔ¼ÊøÆğ×÷ÓÃ£¬¾ÍÍË»¯Îªµ±Ç° dt
+        // å¦‚æœæ²¡æœ‰ä»»ä½•çº¦æŸèµ·ä½œç”¨ï¼Œå°±é€€åŒ–ä¸ºå½“å‰ dt
         if (!(dt_suggest > 0.0 && dt_suggest < 1e90)) {
             dt_suggest = dt;
         }
@@ -297,37 +387,37 @@ namespace IMPES_Iteration
         return true;
     }
 
-    // Ô¤Áô£ºRK2 °æ±¾½Ó¿Ú£¨ºóĞøÊµÏÖ£©
+    // é¢„ç•™ï¼šRK2 ç‰ˆæœ¬æ¥å£ï¼ˆåç»­å®ç°ï¼‰
    /**
-    * \brief Á½½×¶Î RK2 ĞÎÊ½ÍÆ½øË®Ïà±¥ºÍ¶È£¨½Ó¿ÚÔ¤Áô£¬´ıÊµÏÖ£©¡£
+    * \brief ä¸¤é˜¶æ®µ RK2 å½¢å¼æ¨è¿›æ°´ç›¸é¥±å’Œåº¦ï¼ˆæ¥å£é¢„ç•™ï¼Œå¾…å®ç°ï¼‰ã€‚
     *
-    * µäĞÍ¹ı³Ì£º
-    *  1. ÒÔ S_w^n ¸üĞÂÎïĞÔ£¬½âÑ¹Á¦ ¡ú µÃµ½Í¨Á¿£¬¼ÆËã dS/dt^{(1)}£»
-    *  2. ÓÃ S_w^{(1)} = S_w^n + dt * dS/dt^{(1)} ¸üĞÂÎïĞÔ£¬ÔÙ½âÑ¹Á¦ ¡ú dS/dt^{(2)}£»
+    * å…¸å‹è¿‡ç¨‹ï¼š
+    *  1. ä»¥ S_w^n æ›´æ–°ç‰©æ€§ï¼Œè§£å‹åŠ› â†’ å¾—åˆ°é€šé‡ï¼Œè®¡ç®— dS/dt^{(1)}ï¼›
+    *  2. ç”¨ S_w^{(1)} = S_w^n + dt * dS/dt^{(1)} æ›´æ–°ç‰©æ€§ï¼Œå†è§£å‹åŠ› â†’ dS/dt^{(2)}ï¼›
     *  3. S_w^{n+1} = S_w^n + dt/2 * (dS/dt^{(1)} + dS/dt^{(2)}).
     *
-    * ¾ßÌåÊµÏÖ½«½áºÏÏÖÓĞ assemblePressureTwoPhase Óë splitTwoPhaseMassFlux¡£
+    * å…·ä½“å®ç°å°†ç»“åˆç°æœ‰ assemblePressureTwoPhase ä¸ splitTwoPhaseMassFluxã€‚
     */
     /**
-        * \brief Heun / RK2 ĞÎÊ½ÍÆ½øË®Ïà±¥ºÍ¶È£¨µ¥Ò»²½³¤£©£¬
-        *        ĞèÒªÔÚÁ½¸ö stage Ö®¼äÖØ½¨Ë®ÏàÖÊÁ¿Í¨Á¿ mf_w¡£
+        * \brief Heun / RK2 å½¢å¼æ¨è¿›æ°´ç›¸é¥±å’Œåº¦ï¼ˆå•ä¸€æ­¥é•¿ï¼‰ï¼Œ
+        *        éœ€è¦åœ¨ä¸¤ä¸ª stage ä¹‹é—´é‡å»ºæ°´ç›¸è´¨é‡é€šé‡ mf_wã€‚
         *
-        * ĞÎÊ½ÉÏ£º
+        * å½¢å¼ä¸Šï¼š
         *   dS/dt = R(S),  R(S) = (Qw - div Fw) / (phi V rho_w)
         *   k1    = R(S^n)
         *   S*    = S^n + dt * k1
         *   k2    = R(S*)
         *   S^{n+1} = S^n + dt/2 * (k1 + k2)
         *
-        * Ê¹ÓÃÔ¼¶¨£º
-        *  - µ÷ÓÃ±¾º¯ÊıÇ°£¬µ÷ÓÃÕßÓ¦»ùÓÚµ±Ç° S_w ¹¹½¨ºÃ mf_w£¨FluxCfg.water_mass_flux£©¡£
-        *  - rebuildFlux(stageId) »áÔÚ stage=1 Ê±±»µ÷ÓÃÒ»´Î£¬´ËÊ± cfg.saturation
-        *    ÖĞÒÑ¾­±£´æÁËÔ¤²â³¡ S*£»rebuildFlux ¸ºÔğ£º
-        *      * ¸üĞÂÏà¶ÔÉøÍ¸ÂÊ/¶¯¶ÈµÈÎïĞÔ£»
-        *      * ²ğ·ÖÁ½ÏàÍ¨Á¿£¬¸üĞÂ water_mass_flux Ãæ³¡£»
-        *      * ÈçĞè£¬¿ÉÍ¬²½¸üĞÂË®ÏàÌåÔ´Ïî q_w£¨ÀıÈç¾®Ô´ Qw_well£©¡£
+        * ä½¿ç”¨çº¦å®šï¼š
+        *  - è°ƒç”¨æœ¬å‡½æ•°å‰ï¼Œè°ƒç”¨è€…åº”åŸºäºå½“å‰ S_w æ„å»ºå¥½ mf_wï¼ˆFluxCfg.water_mass_fluxï¼‰ã€‚
+        *  - rebuildFlux(stageId) ä¼šåœ¨ stage=1 æ—¶è¢«è°ƒç”¨ä¸€æ¬¡ï¼Œæ­¤æ—¶ cfg.saturation
+        *    ä¸­å·²ç»ä¿å­˜äº†é¢„æµ‹åœº S*ï¼›rebuildFlux è´Ÿè´£ï¼š
+        *      * æ›´æ–°ç›¸å¯¹æ¸—é€ç‡/åŠ¨åº¦ç­‰ç‰©æ€§ï¼›
+        *      * æ‹†åˆ†ä¸¤ç›¸é€šé‡ï¼Œæ›´æ–° water_mass_flux é¢åœºï¼›
+        *      * å¦‚éœ€ï¼Œå¯åŒæ­¥æ›´æ–°æ°´ç›¸ä½“æºé¡¹ q_wï¼ˆä¾‹å¦‚äº•æº Qw_wellï¼‰ã€‚
         *
-        * @tparam FluxRebuilder  ¿Éµ÷ÓÃ¶ÔÏó£¬Ç©ÃûÎª bool(int stageId)
+        * @tparam FluxRebuilder  å¯è°ƒç”¨å¯¹è±¡ï¼Œç­¾åä¸º bool(int stageId)
         */
    
     inline bool advanceSaturationHeun_RK2(
@@ -346,10 +436,10 @@ namespace IMPES_Iteration
             return false;
         }
 
-        // --- 0) »ù±¾³¡·ÃÎÊÓë³ß´ç¼ì²é --- //
+        // --- 0) åŸºæœ¬åœºè®¿é—®ä¸å°ºå¯¸æ£€æŸ¥ --- //
         auto s_w = reg.get<volScalarField>(cfg.saturation);
-        auto s_w_old = reg.get<volScalarField>(cfg.saturation_old);   // ½ö×÷³ß´ç¼ì²é/»Ø¹öÓÃ
-        auto s_w_prev = reg.get<volScalarField>(cfg.saturation_prev);  // ¿ÉÑ¡£º´æ´¢ S^n
+        auto s_w_old = reg.get<volScalarField>(cfg.saturation_old);   // ä»…ä½œå°ºå¯¸æ£€æŸ¥/å›æ»šç”¨
+        auto s_w_prev = reg.get<volScalarField>(cfg.saturation_prev);  // å¯é€‰ï¼šå­˜å‚¨ S^n
 
         if (!s_w || !s_w_old) {
             std::cerr << "[Saturation] advanceSaturationHeun_RK2: missing saturation fields '"
@@ -406,16 +496,16 @@ namespace IMPES_Iteration
             return false;
         }
 
-        // --- 0.1) ±¸·İµ±Ç° S^n£¨µ½¾Ö²¿Êı×é + ¿ÉÑ¡µÄ saturation_prev£© --- //
+        // --- 0.1) å¤‡ä»½å½“å‰ S^nï¼ˆåˆ°å±€éƒ¨æ•°ç»„ + å¯é€‰çš„ saturation_prevï¼‰ --- //
         std::vector<double> S_old(nCells, 0.0);
         for (size_t ic = 0; ic < nCells; ++ic) {
             S_old[ic] = (*s_w)[ic];
         }
         if (s_w_prev) {
-            s_w_prev->data = S_old; // ·½±ãÍâ²¿ĞèÒª·ÃÎÊ S^n Ê±Ê¹ÓÃ
+            s_w_prev->data = S_old; // æ–¹ä¾¿å¤–éƒ¨éœ€è¦è®¿é—® S^n æ—¶ä½¿ç”¨
         }
 
-        // --- Í¨ÓÃĞ¡¹¤¾ß£º´Óµ±Ç° mf_w ¹¹½¨ F_div --- //
+        // --- é€šç”¨å°å·¥å…·ï¼šä»å½“å‰ mf_w æ„å»º F_div --- //
         auto build_div_from_mf = [&](faceScalarField& mf, volScalarField& F_div) {
             std::fill(F_div.data.begin(), F_div.data.end(), 0.0);
             for (const auto& F : faces) {
@@ -428,11 +518,11 @@ namespace IMPES_Iteration
 
                 if (ownerId >= 0) {
                     const size_t iOwner = id2idx.at(ownerId);
-                    F_div[iOwner] += Fw_face;  // owner->neighbor ÎªÕı£¬ÊÓÎª owner µÄ¡°Á÷³ö¡±
+                    F_div[iOwner] += Fw_face;  // owner->neighbor ä¸ºæ­£ï¼Œè§†ä¸º owner çš„â€œæµå‡ºâ€
                 }
                 if (neighId >= 0) {
                     const size_t iNeigh = id2idx.at(neighId);
-                    F_div[iNeigh] -= Fw_face;  // ¶Ô neighbor ÔòÎª¡°Á÷Èë¡±
+                    F_div[iNeigh] -= Fw_face;  // å¯¹ neighbor åˆ™ä¸ºâ€œæµå…¥â€
                 }
             }
             };
@@ -440,9 +530,7 @@ namespace IMPES_Iteration
         const double CFL_safety = cfg.CFL_safety;
         const double dS_target = cfg.dS_max;
         const double tiny = 1e-30;
-        const auto& vg = cfg.VG_Parameter.vg_params;
-
-        // --- Stage 1: »ùÓÚ S^n ºÍ mf_w^n ¼ÆËã k1 ²¢µÃµ½Ô¤²â S* --- //
+        // --- Stage 1: åŸºäº S^n å’Œ mf_w^n è®¡ç®— k1 å¹¶å¾—åˆ°é¢„æµ‹ S* --- //
         volScalarField F_div_stage1("div_mf_w_stage1", nCells, 0.0);
         build_div_from_mf(*mf_w, F_div_stage1);
 
@@ -477,25 +565,24 @@ namespace IMPES_Iteration
             const double rate1 = RHS1 / std::max(mass_coeff, tiny); // dS/dt
             k1[ic] = rate1;
 
-            // Ô¤²â S*
+            // é¢„æµ‹ S*
             double S_star = Sw_n + dt * rate1;
             S_star = std::max(0.0, std::min(1.0, S_star));
-            S_star = detail::clampSw(S_star, vg);
 
             (*s_w)[ic] = S_star;
 
-            // ¦¤S_stage1 ½öÓÃÓÚÕï¶Ï£¬²»ÊÇ×îÖÕ ¦¤S
+            // Î”S_stage1 ä»…ç”¨äºè¯Šæ–­ï¼Œä¸æ˜¯æœ€ç»ˆ Î”S
             const double dS_stage1 = std::fabs(S_star - Sw_n);
             if (dS_stage1 > max_dS_stage1) max_dS_stage1 = dS_stage1;
 
-            // dt_dS Ô¼Êø£º»ùÓÚ |RHS1|
+            // dt_dS çº¦æŸï¼šåŸºäº |RHS1|
             const double denom_loc = std::fabs(RHS1);
             if (denom_loc > tiny) {
                 const double dt_loc = dS_target * mass_coeff / denom_loc;
                 if (dt_loc < min_dt_dS) min_dt_dS = dt_loc;
             }
 
-            // CFL Ô¼Êø£º»ùÓÚ |F_div|
+            // CFL çº¦æŸï¼šåŸºäº |F_div|
             const double CFL_i = std::fabs(F_div_i) * dt / std::max(mass_coeff, tiny);
             if (CFL_i > max_CFL) max_CFL = CFL_i;
 
@@ -511,13 +598,13 @@ namespace IMPES_Iteration
             return false;
         }
 
-        // --- Stage 2: »ùÓÚ S* ºÍ mf_w^* ¼ÆËã k2£¬²¢ºÏ³É S^{n+1} --- //
+        // --- Stage 2: åŸºäº S* å’Œ mf_w^* è®¡ç®— k2ï¼Œå¹¶åˆæˆ S^{n+1} --- //
         volScalarField F_div_stage2("div_mf_w_stage2", nCells, 0.0);
         build_div_from_mf(*mf_w, F_div_stage2);
 
         std::vector<double> k2(nCells, 0.0);
 
-        double max_dS_final = 0.0;  // ×îÖÕ |S^{n+1} - S^n|
+        double max_dS_final = 0.0;  // æœ€ç»ˆ |S^{n+1} - S^n|
         double min_dt_dS2 = 1e100;
         double min_dt_CFL2 = 1e100;
         double max_CFL2 = 0.0;
@@ -542,10 +629,9 @@ namespace IMPES_Iteration
             const double rate2 = RHS2 / std::max(mass_coeff, tiny);
             k2[ic] = rate2;
 
-            // Heun ºÏ³É£ºS^{n+1} = S^n + dt/2 * (k1 + k2)
+            // Heun åˆæˆï¼šS^{n+1} = S^n + dt/2 * (k1 + k2)
             double S_new = Sw_n + 0.5 * dt * (k1[ic] + k2[ic]);
             S_new = std::max(0.0, std::min(1.0, S_new));
-            S_new = detail::clampSw(S_new, vg);
 
             (*s_w)[ic] = S_new;
 
@@ -566,7 +652,7 @@ namespace IMPES_Iteration
             }
         }
 
-        // --- 3) »ã×Ü CFL / ¦¤S / dt ½¨Òé --- //
+        // --- 3) æ±‡æ€» CFL / Î”S / dt å»ºè®® --- //
         stats.max_CFL = std::max(max_CFL, max_CFL2);
         stats.max_dS = max_dS_final;
 
@@ -577,7 +663,7 @@ namespace IMPES_Iteration
         if (min_dt_CFL2 < dt_suggest) dt_suggest = min_dt_CFL2;
 
         if (!(dt_suggest > 0.0 && dt_suggest < 1e90)) {
-            dt_suggest = dt; // »ØÍË£ºÎŞÓĞĞ§Ô¼ÊøÊ±±£³Öµ±Ç° dt
+            dt_suggest = dt; // å›é€€ï¼šæ— æœ‰æ•ˆçº¦æŸæ—¶ä¿æŒå½“å‰ dt
         }
         stats.suggested_dt = dt_suggest;
 

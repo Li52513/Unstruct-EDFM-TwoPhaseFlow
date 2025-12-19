@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -31,11 +32,12 @@ namespace FC_P_IMPES_I
 {
     struct TimeStepControl
     {
+        // Keep defaults consistent with legacy IMPES time-step control for easier A/B comparison.
         double dt_min = 1e-5;
         double dt_max = 100;
-        double grow_factor = 1.1;
+        double grow_factor = 100;
         double shrink_factor = 0.7;
-        double safety_factor =10000;
+        double safety_factor = 1.0;
         int    max_retries = 8;
     };
 
@@ -57,7 +59,8 @@ namespace FC_P_IMPES_I
         const std::string& outPrefixSw = "",
         int                           snapshotEveryCsv = 0,
         const std::string& snapshotPrefix = "",
-        PhaseOperatorConfig fccfg = PhaseOperatorConfig{}
+        PhaseOperatorConfig fccfg = PhaseOperatorConfig{},
+        const TimeStepControl& timeCtrl = TimeStepControl{}
     )
     {
         if (nSteps <= 0)
@@ -114,7 +117,7 @@ namespace FC_P_IMPES_I
             }
         }
 
-        TimeStepControl Tsc;
+        TimeStepControl Tsc = timeCtrl;
         Mesh& mesh = mgr.mesh();
         const auto& cells = mesh.getCells();
         const auto& id2idx = mesh.getCellId2Index();
@@ -200,6 +203,14 @@ namespace FC_P_IMPES_I
                         pressureCtrl.assembly.pressure_g,
                         "p_g_old",
                         "p_g_prev");
+
+                    // Rock porosity might have been updated after the pressure step; restore it on rollback.
+                    if (!copyField(reg,
+                        PhysicalProperties_string::Rock().phi_old_tag,
+                        PhysicalProperties_string::Rock().phi_tag))
+                    {
+                        std::cerr << "[FC-IMPES-I][Iteration] revert porosity failed during rollback.\n";
+                    }
 
                     TwoPhase::updateTwoPhasePropertiesAtTimeStep(
                         mgr, reg,
@@ -317,6 +328,16 @@ namespace FC_P_IMPES_I
                 continue;
             }
 
+            // Update rock porosity for this time layer (needed for consistent mass balance with rock compressibility).
+            if (!TwoPhase::updateRockPorosityFromCompressibilityAtStep(
+                mgr, reg,
+                pressureCtrl.assembly.pressure_old_field,
+                pressureCtrl.assembly.pressure_field))
+            {
+                std::cerr << "[FC-IMPES-I][Iteration] rock porosity update failed at step " << stepId << ".\n";
+                return false;
+            }
+
             // Wells -> phase source fields (kg/s per cell)
             if (!IMPES_Iteration::buildWaterAndGasSourceFieldsFromWells(
                 mgr, reg, wells,
@@ -330,6 +351,7 @@ namespace FC_P_IMPES_I
                 return false;
             }
             satCfg.water_source_field = Qw_well_name;
+            satCfg.gas_source_field = Qg_well_name;
 
             // Saturation explicit step (uses fluxCfg.water_mass_flux = mf_w_fc)
             IMPES_Iteration::SaturationStepStats satStats;
@@ -359,7 +381,21 @@ namespace FC_P_IMPES_I
                 << " (" << (satCfg.time_integration_scheme == IMPES_Iteration::SatTimeIntegrationScheme::HeunRK2 ? "Heun/RK2" : "Euler")
                 << "): max_CFL=" << satStats.max_CFL
                 << ", max_dS=" << satStats.max_dS
-                << ", dt_suggest=" << satStats.suggested_dt << "\n";
+                << ", dt_suggest=" << satStats.suggested_dt
+                << ", n_clamped=" << satStats.n_clamped_cells
+                << ", max_clamp=" << satStats.max_abs_clamp_deltaS << "\n";
+
+            // Clamp 会破坏显式更新的严格守恒；若 clamp 非常明显则回滚并缩小 dt 重试
+            constexpr double clamp_tol = 1e-6;
+            if (satStats.n_clamped_cells > 0 && satStats.max_abs_clamp_deltaS > clamp_tol)
+            {
+                std::cerr << "[FC-IMPES-I][Iteration] saturation clamp detected (n="
+                    << satStats.n_clamped_cells
+                    << ", max|delta_S_clamp|=" << satStats.max_abs_clamp_deltaS
+                    << "), rollback and shrink dt.\n";
+                if (!rollback_after_failure("saturation_clamp")) return false;
+                continue;
+            }
 
             // Mass-balance diagnostics (per-phase residual + global mismatch)
             IMPES_Iteration::PhaseMassBalanceDiagnostics massDiag;
@@ -513,7 +549,10 @@ namespace FC_P_IMPES_I
 
             dt = std::min(Tsc.dt_max, dt * Tsc.grow_factor);
             if (satStats.suggested_dt > 0.0)
-                dt = std::min(dt, satStats.suggested_dt * Tsc.safety_factor);
+            {
+                const double safety = std::max(0.0, std::min(1.0, Tsc.safety_factor));
+                dt = std::min(dt, satStats.suggested_dt * safety);
+            }
         }
 
         return true;

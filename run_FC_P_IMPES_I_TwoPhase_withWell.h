@@ -16,8 +16,8 @@
 inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
 {
     // ---------------- 0. Mesh + registries ----------------
-    const double lengthX = 1.0;
-    const double lengthY = 1.0;
+    const double lengthX = 100;
+    const double lengthY = 100;
     const double lengthZ = 0.0;
 
     const int sectionNumX = 50;
@@ -48,7 +48,7 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
     rp_params.L = 0.5;
 
     InitFields ic;
-    ic.p_w0 = 7e6;
+    ic.p_w0 = 1e7;
     ic.dp_wdx = 0.0;
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
@@ -91,13 +91,13 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
         inj.name = "INJ";
         inj.role = WellDOF_TwoPhase::Role::Injector;
         inj.mode = WellDOF_TwoPhase::Mode::Rate;
-        inj.target = 0.03; // kg/s total mass rate
+        inj.target = 1; // kg/s total mass rate
         inj.Tin = 300.0;
         inj.s_w_bh = 1.0; // pure water injection
-        inj.geom.pos = Vector{ 0.25 * lengthX, 0.25 * lengthY, 0.0 };
-        inj.geom.rw = 0.01;
+        inj.geom.pos = Vector{ 0.1 * lengthX, 0.1 * lengthY, 0.0 };
+        inj.geom.rw = 0.1;
         inj.geom.skin = 0.0;
-        inj.geom.H = 1.0;
+        inj.geom.H = 10;
         inj.geom.perfRadius = 0.0;
         inj.geom.maxHitCells = 5;
         wells_cfg.push_back(inj);
@@ -107,15 +107,15 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
         prod.name = "PROD";
         prod.role = WellDOF_TwoPhase::Role::Producer;
         prod.mode = WellDOF_TwoPhase::Mode::Pressure;
-        prod.target = 5e6;
+        prod.target = 8e6;
         prod.Tin = 300.0;
         prod.s_w_bh = 1.0;
-        prod.geom.pos = Vector{ 0.43 * lengthX, 0.43 * lengthY, 0.0 };
-        prod.geom.rw = 0.001;
+        prod.geom.pos = Vector{ 0.9 * lengthX, 0.9 * lengthY, 0.0 };
+        prod.geom.rw = 0.1;
         prod.geom.skin = 0.0;
-        prod.geom.H = 1.0;
+        prod.geom.H = 10;
         prod.geom.perfRadius = 0.0;
-        prod.geom.maxHitCells = 1;
+        prod.geom.maxHitCells = 5;
         wells_cfg.push_back(prod);
     }
 
@@ -133,6 +133,7 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
     satCfg.CFL_safety = 0.9;
     satCfg.time_control_scheme = IMPES_Iteration::SatTimeControlScheme::SimpleCFL;
     satCfg.time_integration_scheme = IMPES_Iteration::SatTimeIntegrationScheme::ExplicitEuler;
+	satCfg.primary_phase = IMPES_Iteration::SaturationPrimaryPhase::Water;
 
     // ---------------- 6. Pressure controls ----------------
     IMPES_Iteration::PressureSolveControls pCtrl;
@@ -171,7 +172,7 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
     const int    nSteps = 1000;
     double       dt_initial = 1e-5;
 
-    IMPES_Iteration::TimeStepControl timeCtrl;
+    FC_P_IMPES_I::TimeStepControl timeCtrl;
     timeCtrl.dt_min = 1e-5;
     timeCtrl.dt_max = 100;
     timeCtrl.grow_factor = 100;
@@ -200,7 +201,8 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
         outPrefixSw,
         snapshotEveryCsv,
         snapshotPrefix,
-        fccfg);
+        fccfg,
+        timeCtrl);
 
     if (!ok)
     {

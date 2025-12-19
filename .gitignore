@@ -386,3 +386,9 @@ FodyWeavers.xsd
 /cell_nodes_coords.txt
 /mesh_cell_node_face.txt
 /OutPutMesh.h
+/代码框架梳理/5-IMPES-以水相压力为Primary的总压力方程求解函数.md
+/代码框架梳理/5-IMPES-压力-饱和度方程求解时间步推进loop框架函数.md
+/代码框架梳理/PeacemanWell-压力方程源项-质量源项计算-new.md
+/代码框架梳理/PeacemanWell-压力方程源项-质量源项计算-old.md
+/代码框架梳理/显示饱和度方程求解_new.md
+/代码框架梳理/显示饱和度方程求解_old.md
