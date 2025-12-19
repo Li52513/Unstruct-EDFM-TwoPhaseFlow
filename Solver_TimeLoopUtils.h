@@ -4,6 +4,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "PhysicalProperties_CO2.h"
+#include "WaterPropertyTable.h"
 #include <cassert>
 #include "Solver_AssemblerCOO.h" 
 

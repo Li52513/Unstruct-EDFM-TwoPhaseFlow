@@ -8,9 +8,7 @@
 #include <ctime>     // time
 #include <cmath>     // cos, sin, M_PI
 #include "FracIndex.h" 
-
-class Fracture;          // 如果你原来就 forward declare 也可以
-struct FracElemIndex;    // 已在 FracIndex.h 定义
+#include "Fracture.h"
 
 class FractureNetwork 
 {
@@ -28,12 +26,29 @@ public:
 
 	vector<Fracture> fractures;  // 裂缝集合
 	vector<GlobalFFPoint> globalFFPts; // 裂缝-裂缝交点
-    /** \brief 将缓存索引标记为失效（当 fractures/elements 发生变化时调用）。 */
+   
+    // ---- Cached fracture-element index ----
     inline void invalidateFracElemIndex()
     {
         fracElemIndexValid_ = false;
         fracElemIndex_.offset.clear();
         fracElemIndex_.total = 0;
+    }
+
+    inline void rebuildFracElemIndex()
+    {
+        fracElemIndex_ = buildFracElemIndex(*this); // 复用你现成函数
+        fracElemIndexValid_ = true;
+    }
+
+    inline bool hasValidFracElemIndex() const { return fracElemIndexValid_; }
+
+    inline const FracElemIndex& fracElemIndexFast() const
+    {
+        if (!fracElemIndexValid_) {
+            std::cerr << "[FractureNetwork] FracElemIndex invalid. Call rebuildFracElemIndex() first.\n";
+        }
+        return fracElemIndex_;
     }
 
     void setRandomSeed(unsigned seed);  //unsigned 是什么数据类型？

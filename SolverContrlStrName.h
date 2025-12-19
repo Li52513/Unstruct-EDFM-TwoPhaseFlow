@@ -55,6 +55,7 @@ namespace PhysicalProperties_string
     {
         // Bsic properties
         std::string phi_tag = "phi_r";				//porosity
+        std::string phi_old_tag = "phi_r_old";      //porosity (old time layer)
         std::string rho_tag = "rho_r";				//rock density
         std::string cp_tag = "cp_r";				//rock specific heat capacity
         std::string lambda_tag = "lambda_r";				//rock thermal conductivity
@@ -181,7 +182,6 @@ namespace SinglePhase
         std::string total_velocity_name = "ufn_total";
     };
 }
-
 
 
 

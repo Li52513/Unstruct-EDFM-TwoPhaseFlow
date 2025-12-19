@@ -4,6 +4,8 @@
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include "FractureNetwork.h"
+
 using namespace std;
 struct BaseField
 {
@@ -25,3 +27,20 @@ struct VolField : BaseField
 };
 using volScalarField = VolField<double>;
 using volVectorField = VolField<Vector>;
+
+template<class Fn>
+inline void forEachFracElem(const FractureNetwork& frNet,
+    const FracElemIndex& idx,
+    Fn&& fn)
+{
+    for (std::size_t f = 0; f < frNet.fractures.size(); ++f)
+    {
+        const auto& F = frNet.fractures[f];
+        const std::size_t base = idx.offset[f];
+        for (std::size_t e = 0; e < F.elements.size(); ++e)
+        {
+            const std::size_t g = base + e;
+            fn(f, e, g, F.elements[e]);
+        }
+    }
+}

@@ -84,9 +84,11 @@ namespace IMPES_Iteration
         }
 
         auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
-        if (!phi)
+        auto phi_old = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_old_tag);
+        if (!phi || !phi_old)
         {
-            std::cerr << "[MassDiag] missing porosity field '" << PhysicalProperties_string::Rock().phi_tag << "'.\n";
+            std::cerr << "[MassDiag] missing porosity field '" << PhysicalProperties_string::Rock().phi_tag
+                      << "' or '" << PhysicalProperties_string::Rock().phi_old_tag << "'.\n";
             return false;
         }
 
@@ -182,7 +184,8 @@ namespace IMPES_Iteration
             const double V = c.volume;
             if (V <= tiny) continue;
 
-            const double ph = (*phi)[i];
+            const double ph_n = std::max((*phi_old)[i], 0.0);
+            const double ph_np1 = std::max((*phi)[i], 0.0);
 
             const double sw_n = (*sw_old)[i];
             const double sw_np1 = (*sw)[i];
@@ -199,10 +202,10 @@ namespace IMPES_Iteration
             const double Qg = q_g ? (*q_g)[i] : 0.0;
 
             // mass totals (kg)
-            const double Mw_n = ph * V * rw_old * sw_n;
-            const double Mw_np1 = ph * V * rw * sw_np1;
-            const double Mg_n = ph * V * rg_old * sg_n;
-            const double Mg_np1 = ph * V * rg * sg_np1;
+            const double Mw_n = ph_n * V * rw_old * sw_n;
+            const double Mw_np1 = ph_np1 * V * rw * sw_np1;
+            const double Mg_n = ph_n * V * rg_old * sg_n;
+            const double Mg_np1 = ph_np1 * V * rg * sg_np1;
 
             diag.Mw_old += Mw_n;
             diag.Mw_new += Mw_np1;

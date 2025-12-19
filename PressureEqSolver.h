@@ -183,6 +183,11 @@ namespace IMPES_Iteration
             {
                 w.p_bh = pvec[w.lid];
             }
+            if (w.mode == WellDOF_TwoPhase::Mode::Pressure)
+            {
+                // Pressure-controlled wells: keep BHP exactly at target for downstream modules.
+                w.p_bh = w.target;
+            }
         }
         // ===== 6) 对 cell 压力做欠松弛（相对于 *_prev） ===== //
         double dpInf = 0.0;

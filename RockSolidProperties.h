@@ -34,7 +34,7 @@ namespace rock
     static constexpr double BASE_RHO = 2650.0;  // 密度
     static constexpr double BASE_CP = 1000.0;   // 比热容
     static constexpr double BASE_K = 2.5;       // 导热系数
-    static constexpr double BASE_COMP = 1e-8;   // 可压缩系数
+    static constexpr double BASE_COMP = 0;   // 可压缩系数
 
     inline bool ensure_RockProp_Fields(FieldRegistry& reg, std::size_t n)
     {
@@ -43,6 +43,7 @@ namespace rock
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().lambda_tag, n, BASE_K);       // k，W/(m·K)
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().c_r_tag, n, BASE_COMP);       // 可压缩系数，1/Pa
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().phi_tag, n, 0.2);            // 孔隙度
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().phi_old_tag, n, 0.2);        // 孔隙度（old time layer）
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().k_xx_tag, n, 1e-14);          // 渗透率，m²
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().k_yy_tag, n, 1e-14);
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Rock().k_zz_tag, n, 1e-14);

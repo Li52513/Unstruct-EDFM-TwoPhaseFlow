@@ -17,8 +17,8 @@ public:
     // --------------------- 只读参数 ------------------- //
 	const vector<Node>& getNodes() const { return nodes_; } // 提供只读访问
 	const vector<Face>& getFaces() const { return faces_; } // 提供只读访问
-	vector<Cell>& getCells() { return cells_; } // 提供访问  考虑到物性会更新，所以是可修改的
-    const std::vector<Cell>& getCells() const { return cells_; }  // 新增
+	vector<Cell>& getCells() { return cells_; } 
+    const std::vector<Cell>& getCells() const { return cells_; }  
 	const unordered_map<int, Node>& getNodesMap() const { return nodesMap_; } // 提供只读访问
 	const unordered_map<int, int>& getCellId2Index() const { return cellId2index_; } // 提供只读访问
 

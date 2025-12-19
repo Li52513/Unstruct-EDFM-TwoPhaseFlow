@@ -196,6 +196,10 @@ namespace IMPES_Iteration
                 copyField(reg,
                     satCfg.saturation_old,
                     satCfg.saturation);
+                // Rock porosity might have been updated after the pressure step; restore it on rollback.
+                copyField(reg,
+                    PhysicalProperties_string::Rock().phi_old_tag,
+                    PhysicalProperties_string::Rock().phi_tag);
                 TwoPhase::updateTwoPhasePropertiesAtTimeStep(
                     mgr, reg,
                     satCfg.saturation,
@@ -339,6 +343,19 @@ namespace IMPES_Iteration
                 //    return false;   // dt 已经小于 dt_min
                 //}
                 continue;           // 重新计算该时间段（step 不自增）
+            }
+
+            // Update rock porosity for this time layer (needed for consistent mass balance with rock compressibility).
+            if (accept_step)
+            {
+                if (!TwoPhase::updateRockPorosityFromCompressibilityAtStep(
+                    mgr, reg,
+                    pressureCtrl.assembly.pressure_old_field,
+                    pressureCtrl.assembly.pressure_field))
+                {
+                    std::cerr << "[IMPES][Iteration] rock porosity update failed at step " << stepId << ".\n";
+                    return false;
+                }
             }
 
             if (accept_step)

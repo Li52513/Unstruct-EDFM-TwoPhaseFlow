@@ -7,7 +7,7 @@
 #include "Face.h"
 #include "Node.h"
 #include "Mesh.h"
-#include "FractureSolidProperties.h "
+#include "FractureSolidProperties.h"
 
 /// 交点来源类型进行枚举
 enum class IntersectionOrigin 

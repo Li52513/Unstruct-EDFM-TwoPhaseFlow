@@ -1,4 +1,6 @@
 ﻿#pragma once
+#include <algorithm>
+#include <cmath>
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "InitConfig.h"					// Where VGParams and RelPermParams are defined
@@ -206,6 +208,60 @@ namespace TwoPhase
 		copyField(reg, PhysicalProperties_string::CO2().k_tag, PhysicalProperties_string::CO2().k_old_tag);
 		copyField(reg, PhysicalProperties_string::CO2().c_g_tag, PhysicalProperties_string::CO2().c_g_old_tag);
 		copyField(reg, PhysicalProperties_string::CO2().drho_g_dp_tag, PhysicalProperties_string::CO2().drho_g_dp_old_tag);
+
+		// Rock properties (porosity only)
+		auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
+		auto phi_old = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_old_tag);
+		if (!phi || !phi_old)
+		{
+			std::cerr << "[TwoPhase][Rock] Missing porosity fields for copying to old layer.\n";
+			return false;
+		}
+		copyField(reg, PhysicalProperties_string::Rock().phi_tag, PhysicalProperties_string::Rock().phi_old_tag);
+
+		return true;
+	}
+
+	/// \brief Update rock porosity `phi` from `phi_old` using c_r and pressure change.
+	///
+	/// Uses: phi^{n+1} = phi^{n} * exp(c_r * (p^{n+1} - p^{n})).
+	inline bool updateRockPorosityFromCompressibilityAtStep(
+		MeshManager& mgr,
+		FieldRegistry& reg,
+		const std::string& p_old_field,
+		const std::string& p_field)
+	{
+		auto& mesh = mgr.mesh();
+		const auto& cells = mesh.getCells();
+		const auto& id2idx = mesh.getCellId2Index();
+
+		auto p_old = reg.get<volScalarField>(p_old_field);
+		auto p = reg.get<volScalarField>(p_field);
+		auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
+		auto phi_old = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_old_tag);
+		auto c_r = reg.get<volScalarField>(PhysicalProperties_string::Rock().c_r_tag);
+
+		if (!p_old || !p || !phi || !phi_old || !c_r)
+		{
+			std::cerr << "[TwoPhase][Rock] Missing fields for porosity update (p/phi/c_r).\n";
+			return false;
+		}
+
+		const double phi_min = 1e-12;
+		const double phi_max = 1.0 - 1e-12;
+
+		for (const auto& c : cells)
+		{
+			if (c.id < 0) continue;
+			const size_t i = id2idx.at(c.id);
+
+			const double phi_n = std::max((*phi_old)[i], phi_min);
+			const double cr = (*c_r)[i];
+			const double dp = (*p)[i] - (*p_old)[i];
+
+			const double phi_np1 = clamp_local(phi_n * std::exp(cr * dp), phi_min, phi_max);
+			(*phi)[i] = phi_np1;
+		}
 
 		return true;
 	}

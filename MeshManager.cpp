@@ -40,6 +40,8 @@ void MeshManager::addFracture(const Vector& s, const Vector& e)
 
 void MeshManager::DetectAndSubdivideFractures(bool useAABBAccelerationctrl = false)
 {
+    frNet_.invalidateFracElemIndex();
+
     // 1) 先找裂缝–裂缝的交点
     frNet_.DetectFracturetoFractureIntersections();
     
@@ -82,6 +84,7 @@ void MeshManager::DetectAndSubdivideFractures(bool useAABBAccelerationctrl = fal
         F.sortAndRenumberIntersections();
         F.subdivide(mesh_.getCells(), mesh_.getNodesMap(), distanceMetric_);
     }
+	frNet_.rebuildFracElemIndex(); // 重建裂缝段索引
 	frNet_.printFractureInfo();
 }
 

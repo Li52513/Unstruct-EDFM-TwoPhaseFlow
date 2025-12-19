@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 
 #include "MeshManager.h"
@@ -15,17 +16,17 @@ namespace FVM {
     namespace TwoPhaseWellsStrict 
     {
 
-        /// Ğ¡³£Êı£¬±ÜÃâ³ıÁã
+        /// å°å¸¸æ•°ï¼Œé¿å…é™¤é›¶
         static constexpr double kTiny = 1e-30;
 
         /**
-         * @brief ×¢Èë»ìºÏÎïÔÚ¾®µ×Ìõ¼şÏÂµÄÁ÷ĞÔ²ÎÊı£¨ÖÊÁ¿ĞÎÊ½£©¡£
+         * @brief æ³¨å…¥æ··åˆç‰©åœ¨äº•åº•æ¡ä»¶ä¸‹çš„æµæ€§å‚æ•°ï¼ˆè´¨é‡å½¢å¼ï¼‰ã€‚
          *
-         * - krw, krg: ÓÉ VG+Mualem Ä£ĞÍ»ùÓÚ¾®µ×¸ø¶¨±¥ºÍ¶È s_w_bh ¼ÆËã
-         * - lambda_w, lambda_g: Ìå»ı¶¯¶È£¨²»º¬ÉøÍ¸ÂÊ£»ÉøÍ¸ÂÊ°üº¬ÔÚ WI ÖĞ£©
-         * - lambda_mass_w, lambda_mass_g: ÖÊÁ¿¶¯¶È = ¦Ë * ¦Ñ
-         * - lambda_mass: ×ÜÖÊÁ¿¶¯¶È = ¦Ë_mass_w + ¦Ë_mass_g
-         * - fw_mass: ×¢Èë»ìºÏÎïµÄË®ÏàÖÊÁ¿·ÖÂÊ
+         * - krw, krg: ç”± VG+Mualem æ¨¡å‹åŸºäºäº•åº•ç»™å®šé¥±å’Œåº¦ s_w_bh è®¡ç®—
+         * - lambda_w, lambda_g: ä½“ç§¯åŠ¨åº¦ï¼ˆä¸å«æ¸—é€ç‡ï¼›æ¸—é€ç‡åŒ…å«åœ¨ WI ä¸­ï¼‰
+         * - lambda_mass_w, lambda_mass_g: è´¨é‡åŠ¨åº¦ = Î» * Ï
+         * - lambda_mass: æ€»è´¨é‡åŠ¨åº¦ = Î»_mass_w + Î»_mass_g
+         * - fw_mass: æ³¨å…¥æ··åˆç‰©çš„æ°´ç›¸è´¨é‡åˆ†ç‡
          */
         struct InjectionMixtureProps
         {
@@ -40,13 +41,13 @@ namespace FVM {
         };
 
         /**
-         * @brief ¸ù¾İ¾®µ×¸ø¶¨×´Ì¬¼ÆËã×¢Èë»ìºÏÎïµÄÖÊÁ¿¶¯¶ÈºÍÖÊÁ¿·ÖÂÊ¡£
+         * @brief æ ¹æ®äº•åº•ç»™å®šçŠ¶æ€è®¡ç®—æ³¨å…¥æ··åˆç‰©çš„è´¨é‡åŠ¨åº¦å’Œè´¨é‡åˆ†ç‡ã€‚
          *
-         * Ê¹ÓÃÍ³Ò»µÄ VG + Mualem Ïà¶ÔÉøÍ¸ÂÊÄ£ĞÍ£¬±£Ö¤¾®Ô´ÓëÌå·½³ÌÔÚÎïĞÔÉÏµÄÒ»ÖÂĞÔ¡£
+         * ä½¿ç”¨ç»Ÿä¸€çš„ VG + Mualem ç›¸å¯¹æ¸—é€ç‡æ¨¡å‹ï¼Œä¿è¯äº•æºä¸ä½“æ–¹ç¨‹åœ¨ç‰©æ€§ä¸Šçš„ä¸€è‡´æ€§ã€‚
          *
-         * @param well      Á½Ïà¾® DOF£¨°üº¬ s_w_bh, mu_w_inj, mu_g_inj, rho_w_inj, rho_g_inj µÈ£©
-         * @param vg_params van Genuchten ²ÎÊı
-         * @param rp_params Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı£¨Mualem£©
+         * @param well      ä¸¤ç›¸äº• DOFï¼ˆåŒ…å« s_w_bh, mu_w_inj, mu_g_inj, rho_w_inj, rho_g_inj ç­‰ï¼‰
+         * @param vg_params van Genuchten å‚æ•°
+         * @param rp_params ç›¸å¯¹æ¸—é€ç‡å‚æ•°ï¼ˆMualemï¼‰
          */
         inline InjectionMixtureProps computeInjectionMixtureProps(
             const WellDOF_TwoPhase& well,
@@ -55,15 +56,15 @@ namespace FVM {
         {
             InjectionMixtureProps props;
 
-            // 1) VG + Mualem Ä£ĞÍ£º»ùÓÚ¾®µ×¸ø¶¨±¥ºÍ¶È s_w_bh ¼ÆËã krw, krg
+            // 1) VG + Mualem æ¨¡å‹ï¼šåŸºäºäº•åº•ç»™å®šé¥±å’Œåº¦ s_w_bh è®¡ç®— krw, krg
             kr_Mualem_vG(well.s_w_bh, vg_params, rp_params,
                 props.krw, props.krg);
 
-            // 2) Ìå»ı¶¯¶È£¨²»º¬ÉøÍ¸ÂÊ£»ÉøÍ¸ÂÊÔÚ WI ÖĞ£©
+            // 2) ä½“ç§¯åŠ¨åº¦ï¼ˆä¸å«æ¸—é€ç‡ï¼›æ¸—é€ç‡åœ¨ WI ä¸­ï¼‰
             props.lambda_w = props.krw / std::max(well.mu_w_inj, 1e-12);
             props.lambda_g = props.krg / std::max(well.mu_g_inj, 1e-12);
 
-            // 3) ÖÊÁ¿¶¯¶È£º¦Ë_mass = ¦Ë * ¦Ñ
+            // 3) è´¨é‡åŠ¨åº¦ï¼šÎ»_mass = Î» * Ï
             props.lambda_mass_w = props.lambda_w * well.rho_w_inj;
             props.lambda_mass_g = props.lambda_g * well.rho_g_inj;
             props.lambda_mass = props.lambda_mass_w + props.lambda_mass_g;
@@ -79,23 +80,23 @@ namespace FVM {
         }
 
         /**
-         * @brief ½«Á½Ïà¾®ñîºÏµ½Ñ¹Á¦·½³Ì£¬Ê¹ÓÃ¡°ÖÊÁ¿¶¯¶È¡±ÊµÏÖÑÏ¸ñµÄ Rate Ô¼Êø¡£
+         * @brief å°†ä¸¤ç›¸äº•è€¦åˆåˆ°å‹åŠ›æ–¹ç¨‹ï¼Œä½¿ç”¨â€œè´¨é‡åŠ¨åº¦â€å®ç°ä¸¥æ ¼çš„ Rate çº¦æŸã€‚
          *
-         * ¶Ô Injector + Mode::Rate£º
-         *   - Ê¹ÓÃ×¢Èë»ìºÏÎïÖÊÁ¿¶¯¶È ¦Ë_mass,inj ×÷Îª PI µÄ¶¯¶È²¿·Ö
-         *   - ¹¹ÔìÀëÉ¢·½³Ì£º¦² WI_i ¦Ë_mass,inj (p_bh - p_i) = well.target (kg/s)
-         *   - ÆäÖĞ well.target Ã÷È·½âÊÍÎª¡°×Ü×¢ÈëÖÊÁ¿Á÷Á¿¡± (kg/s)
+         * å¯¹ Injector + Mode::Rateï¼š
+         *   - ä½¿ç”¨æ³¨å…¥æ··åˆç‰©è´¨é‡åŠ¨åº¦ Î»_mass,inj ä½œä¸º PI çš„åŠ¨åº¦éƒ¨åˆ†
+         *   - æ„é€ ç¦»æ•£æ–¹ç¨‹ï¼šÎ£ WI_i Î»_mass,inj (p_bh - p_i) = well.target (kg/s)
+         *   - å…¶ä¸­ well.target æ˜ç¡®è§£é‡Šä¸ºâ€œæ€»æ³¨å…¥è´¨é‡æµé‡â€ (kg/s)
          *
-         * ¶Ô Producer »ò Pressure Ä£Ê½£º
-         *   - Ê¹ÓÃµ±Ç°´¢²ã³¡ ¦Ë_w, ¦Ë_g, ¦Ñ_w, ¦Ñ_g ¹¹Ôì¾Ö²¿ÖÊÁ¿¶¯¶È½øĞĞñîºÏ
+         * å¯¹ Producer æˆ– Pressure æ¨¡å¼ï¼š
+         *   - ä½¿ç”¨å½“å‰å‚¨å±‚åœº Î»_w, Î»_g, Ï_w, Ï_g æ„é€ å±€éƒ¨è´¨é‡åŠ¨åº¦è¿›è¡Œè€¦åˆ
          *
-         * @param sys          Ñ¹Á¦·½³ÌÏ¡ÊèÏµÍ³ (A, b)
-         * @param mgr          Íø¸ñ¹ÜÀíÆ÷
-         * @param reg          ³¡±äÁ¿×¢²á±í£¨Ìá¹© lambda_w, lambda_g, rho_w, rho_g, mask, WI£©
-         * @param well         µ±Ç°¾®µÄ DOF ÅäÖÃ£¨°üº¬ mode, role, target, lid µÈ£©
-         * @param lid_of_cell  cell.id -> È«¾Ö×ÔÓÉ¶È±àºÅµÄÓ³Éä£¨³¤¶È=µ¥ÔªÊı£©
-         * @param vg_params    VG ²ÎÊı£¨ÓÃÓÚ×¢Èë¾® kr ¼ÆËã£©
-         * @param rp_params    Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı
+         * @param sys          å‹åŠ›æ–¹ç¨‹ç¨€ç–ç³»ç»Ÿ (A, b)
+         * @param mgr          ç½‘æ ¼ç®¡ç†å™¨
+         * @param reg          åœºå˜é‡æ³¨å†Œè¡¨ï¼ˆæä¾› lambda_w, lambda_g, rho_w, rho_g, mask, WIï¼‰
+         * @param well         å½“å‰äº•çš„ DOF é…ç½®ï¼ˆåŒ…å« mode, role, target, lid ç­‰ï¼‰
+         * @param lid_of_cell  cell.id -> å…¨å±€è‡ªç”±åº¦ç¼–å·çš„æ˜ å°„ï¼ˆé•¿åº¦=å•å…ƒæ•°ï¼‰
+         * @param vg_params    VG å‚æ•°ï¼ˆç”¨äºæ³¨å…¥äº• kr è®¡ç®—ï¼‰
+         * @param rp_params    ç›¸å¯¹æ¸—é€ç‡å‚æ•°
          */
         inline void couple_well_to_pressure_equation_strict_rate(
             SparseSystemCOO& sys,
@@ -116,19 +117,13 @@ namespace FVM {
                 return;
             }
 
-            // 0) ¾®×Ô¼ºµÄ DOF ĞĞ£ºPressure Ä£Ê½Ö±½Ó¶¤×¡ P_bh
+            // 0) well mode flags
             const bool isPressureMode = (well.mode == WellDOF_TwoPhase::Mode::Pressure);
             const bool isPureRateMode = (well.mode == WellDOF_TwoPhase::Mode::Rate);
 
-            if (well.mode == WellDOF_TwoPhase::Mode::Pressure) 
-            {
-                sys.addA(well_lid, well_lid, 1.0);
-                sys.addb(well_lid, well.target);   ///< P_bh = target (Pa)
-            }
-
-            // 1) ±ØÒª×Ö¶Î£ºÍê¾®ÑÚÂë & ¼¸ºÎ¾®Ö¸Êı WI£¨²»º¬¶¯¶È£©
+            // 1) å¿…è¦å­—æ®µï¼šå®Œäº•æ©ç  & å‡ ä½•äº•æŒ‡æ•° WIï¼ˆä¸å«åŠ¨åº¦ï¼‰
             auto mask_field = reg.get<volScalarField>(well.mask_field.c_str());
-            auto WI_field = reg.get<volScalarField>(well.PI_field_w.c_str()); // ´æ WI
+            auto WI_field = reg.get<volScalarField>(well.PI_field_w.c_str()); // å­˜ WI
 
             if (!mask_field || !WI_field) {
                 std::cerr << "[TwoPhaseWellsStrict] Missing mask or WI field for well "
@@ -136,7 +131,7 @@ namespace FVM {
                 return;
             }
 
-            // 2) ´¢²ãÏà¶¯¶ÈÓëÃÜ¶È³¡£¨ÓÃÓÚ Producer / Pressure Ä£Ê½£©´úÌæ»»
+            // 2) å‚¨å±‚ç›¸åŠ¨åº¦ä¸å¯†åº¦åœºï¼ˆç”¨äº Producer / Pressure æ¨¡å¼ï¼‰ä»£æ›¿æ¢
             auto lambda_w_field = reg.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);
             auto lambda_g_field = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
             auto rho_w_field = reg.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);
@@ -150,7 +145,7 @@ namespace FVM {
 
             const bool isInjector = (well.role == WellDOF_TwoPhase::Role::Injector);
 
-            // 3) ¶Ô×¢Èë¾®Ô¤¼ÆËã»ìºÏÎïÖÊÁ¿¶¯¶È£¨Î»ÖÃÎŞ¹Ø£©
+            // 3) å¯¹æ³¨å…¥äº•é¢„è®¡ç®—æ··åˆç‰©è´¨é‡åŠ¨åº¦ï¼ˆä½ç½®æ— å…³ï¼‰
             InjectionMixtureProps injProps;
             if (isInjector) {
                 injProps = computeInjectionMixtureProps(well, vg_params, rp_params);
@@ -161,8 +156,10 @@ namespace FVM {
                 }
             }
 
-            // 4) ±éÀúÍê¾®µ¥Ôª£¬×°Åä Cell ĞĞºÍ Well ĞĞ
-            double rate_diag_sum = 0.0; ///< Rate Ä£Ê½¾®ĞĞµÄ¶Ô½ÇÏî ¦² PI_i
+            // 4) éå†å®Œäº•å•å…ƒï¼Œè£…é… Cell è¡Œå’Œ Well è¡Œ
+           
+            double pi_mass_sum = 0.0;   ///< Î£ PI_mass_i over perforated cells (kg/s/Pa)
+            double rate_diag_sum = 0.0; ///< Rate æ¨¡å¼äº•è¡Œçš„å¯¹è§’é¡¹ Î£ PI_mass_i (kg/s/Pa)
 
             const size_t nCells = std::min(
                 static_cast<size_t>(Nc),
@@ -171,20 +168,20 @@ namespace FVM {
 
             for (size_t cidx = 0; cidx < nCells; ++cidx)
             {
-                if ((*mask_field)[cidx] <= 1e-12) continue;  // Î´Íê¾®µ¥ÔªÌø¹ı
+                if ((*mask_field)[cidx] <= 1e-12) continue;  // æœªå®Œäº•å•å…ƒè·³è¿‡
 
                 const double WI_i = (*WI_field)[cidx];
                 if (WI_i <= 0.0) continue;
 
-                // 4.1 È·¶¨¸Ãµ¥ÔªµÄÖÊÁ¿¶¯¶È ¦Ë_mass_i
+                // 4.1 ç¡®å®šè¯¥å•å…ƒçš„è´¨é‡åŠ¨åº¦ Î»_mass_i
                 double lambda_mass_i = 0.0;
 
                 if (isInjector) {
-                    // ×¢Èë¾®£ºÊ¹ÓÃ¾®µ×»ìºÏÎïÖÊÁ¿¶¯¶È£¨²»ËæÎ»ÖÃ±ä£©
+                    // æ³¨å…¥äº•ï¼šä½¿ç”¨äº•åº•æ··åˆç‰©è´¨é‡åŠ¨åº¦ï¼ˆä¸éšä½ç½®å˜ï¼‰
                     lambda_mass_i = injProps.lambda_mass;
                 }
                 else {
-                    // Éú²ú¾®£ºÊ¹ÓÃ´¢²ãÏà¶¯¶È+ÃÜ¶È¹¹ÔìÖÊÁ¿¶¯¶È
+                    // ç”Ÿäº§äº•ï¼šä½¿ç”¨å‚¨å±‚ç›¸åŠ¨åº¦+å¯†åº¦æ„é€ è´¨é‡åŠ¨åº¦
                     const double lambda_w_res = (*lambda_w_field)[cidx];
                     const double lambda_g_res = (*lambda_g_field)[cidx];
                     const double rho_w_res = (*rho_w_field)[cidx];
@@ -201,70 +198,85 @@ namespace FVM {
                 const int cell_lid = lid_of_cell[cidx];
                 if (cell_lid < 0) continue;
 
-                // 4.2 Cell ĞĞ£º+PI_mass_i * p_i - PI_mass_i * p_bh
+                pi_mass_sum += PI_mass_i;
+
+                // 4.2 Cell è¡Œï¼š+PI_mass_i * p_i - PI_mass_i * p_bh
                 sys.addA(cell_lid, cell_lid, PI_mass_i);
 
                 if (isPressureMode) {
-                    // P_bh ÒÑÖª£¬-PI * P_bh -> RHS
+                    // P_bh å·²çŸ¥ï¼Œ-PI * P_bh -> RHS
                     sys.addb(cell_lid, PI_mass_i * well.target);
                 }
                 else {
-                    // Rate Ä£Ê½£ºp_bh ÊÇÎ´Öª DOF (well_lid)
+                    // Rate æ¨¡å¼ï¼šp_bh æ˜¯æœªçŸ¥ DOF (well_lid)
                     sys.addA(cell_lid, well_lid, -PI_mass_i);
 
-                    // ¾®ĞĞ·½³Ì ¦² PI_i (p_bh - p_i) = target_mass
-                    // ÆäÖĞ ¦²(PI_i) ¶ÔÓ¦¾®ĞĞ¶Ô½Ç£»¦²(-PI_i ) ÊÇ¾®ĞĞµÄ·Ç¶Ô½Ç
+                    // äº•è¡Œæ–¹ç¨‹ Î£ PI_i (p_bh - p_i) = target_mass
+                    // å…¶ä¸­ Î£(PI_i) å¯¹åº”äº•è¡Œå¯¹è§’ï¼›Î£(-PI_i ) æ˜¯äº•è¡Œçš„éå¯¹è§’
                     rate_diag_sum += PI_mass_i;
                     sys.addA(well_lid, cell_lid, -PI_mass_i);
                 }
             }
-            // 5) Rate ¾®£º²¹¾®ĞĞ¶Ô½ÇºÍ RHS
+            // 5) Rate äº•ï¼šè¡¥äº•è¡Œå¯¹è§’å’Œ RHS
             if (isPureRateMode && rate_diag_sum > kTiny)
             {
                 sys.addA(well_lid, well_lid, rate_diag_sum);
-                sys.addb(well_lid, well.target); // target µ¥Î» kg/s
+                sys.addb(well_lid, well.target); // target å•ä½ kg/s
+            }
+
+
+            if (isPressureMode)
+            {
+                double scale = pi_mass_sum;
+                if (!(scale > kTiny))
+                {
+                    // fallback scaling (unitless/1/Pa), only to keep RHS magnitude moderate
+                    scale = 1.0 / std::max(std::abs(well.target), 1.0);
+                }
+                sys.addA(well_lid, well_lid, scale);
+                sys.addb(well_lid, scale * well.target);   ///< p_bh = target (Pa) (scaled row)
             }
         }
         //======================================================================//
-        // 2. Í³Ò»¼ÆËãÍê¾®µ¥ÔªÉÏµÄÏàÖÊÁ¿Á÷ÂÊ£¨¹©±¥ºÍ¶È/ÎÂ¶È·½³Ì¸´ÓÃ£©
+        // 2. ç»Ÿä¸€è®¡ç®—å®Œäº•å•å…ƒä¸Šçš„ç›¸è´¨é‡æµç‡ï¼ˆä¾›é¥±å’Œåº¦/æ¸©åº¦æ–¹ç¨‹å¤ç”¨ï¼‰
         //======================================================================//
 
         /**
-         * @brief »ùÓÚÒÑ¾­Çó½â³öµÄ p_bh ºÍµ¥ÔªÑ¹Á¦ p_cell£¬¼ÆËãÍê¾®µ¥ÔªÉÏµÄË®/ÆøÏàÖÊÁ¿Á÷ÂÊ¡£
+         * @brief åŸºäºå·²ç»æ±‚è§£å‡ºçš„ p_bh å’Œå•å…ƒå‹åŠ› p_cellï¼Œè®¡ç®—å®Œäº•å•å…ƒä¸Šçš„æ°´/æ°”ç›¸è´¨é‡æµç‡ã€‚
          *
-         * ¶Ô Injector£º
-         *   - Ê¹ÓÃ×¢Èë»ìºÏÎïÖÊÁ¿¶¯¶È ¦Ë_mass,inj ºÍÖÊÁ¿·ÖÂÊ f_w^mass
-         *   - dotM_tot_i = WI_i ¦Ë_mass,inj (p_bh - p_cell), Èô <0 Ôò½Ø¶ÏÎª 0£¨Ö»ÔÊĞíÁ÷Èë£©
+         * å¯¹ Injectorï¼š
+         *   - ä½¿ç”¨æ³¨å…¥æ··åˆç‰©è´¨é‡åŠ¨åº¦ Î»_mass,inj å’Œè´¨é‡åˆ†ç‡ f_w^mass
+         *   - dotM_tot_i = WI_i Î»_mass,inj (p_bh - p_cell), è‹¥ <0 åˆ™æˆªæ–­ä¸º 0ï¼ˆåªå…è®¸æµå…¥ï¼‰
          *   - dotM_w_i   =  f_w^mass dotM_tot_i
          *   - dotM_g_i   = (1-f_w^mass) dotM_tot_i
          *
-         * ¶Ô Producer£º
-         *   - Ê¹ÓÃ´¢²ãÖÊÁ¿¶¯¶È ¦Ë_mass,res = ¦Ë_w ¦Ñ_w + ¦Ë_g ¦Ñ_g
-         *   - ·ÖÏàÖÊÁ¿·ÖÂÊ f_w^mass,res = ¦Ë_w ¦Ñ_w / ¦Ë_mass,res
-         *   - dotM_tot_i = WI_i ¦Ë_mass,res (p_bh - p_cell)£¬¶ÔÉú²ú¾®Îª¸º£¨Á÷³öµ¥Ôª£©
+         * å¯¹ Producerï¼š
+         *   - ä½¿ç”¨å‚¨å±‚è´¨é‡åŠ¨åº¦ Î»_mass,res = Î»_w Ï_w + Î»_g Ï_g
+         *   - åˆ†ç›¸è´¨é‡åˆ†ç‡ f_w^mass,res = Î»_w Ï_w / Î»_mass,res
+         *   - dotM_tot_i = WI_i Î»_mass,res (p_bh - p_cell)ï¼Œå¯¹ç”Ÿäº§äº•ä¸ºè´Ÿï¼ˆæµå‡ºå•å…ƒï¼‰
          *   - dotM_w_i   = f_w^mass,res dotM_tot_i
          *   - dotM_g_i   = (1-f_w^mass,res) dotM_tot_i
          *
-         * @param mgr                  Íø¸ñ¹ÜÀíÆ÷
-         * @param reg                  ³¡±äÁ¿×¢²á±í£¨Ìá¹© p_field, ¦Ë_w, ¦Ë_g, ¦Ñ_w, ¦Ñ_g£©
-         * @param well                 ¾® DOF£¨°üº¬ p_bh£©
-         * @param vg_params            VG ²ÎÊı
-         * @param rp_params            Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı
-         * @param pressure_field_name  µ¥ÔªÑ¹Á¦³¡Ãû³Æ£¨Í¨³£Îª p_w£©
-         * @param[out] Mw_cell         µ¥ÔªË®ÏàÖÊÁ¿Á÷ÂÊ£¨kg/s£©£¬Á÷Èëµ¥ÔªÎªÕı
-         * @param[out] Mg_cell         µ¥ÔªÆøÏàÖÊÁ¿Á÷ÂÊ£¨kg/s£©£¬Á÷Èëµ¥ÔªÎªÕı
+         * @param mgr                  ç½‘æ ¼ç®¡ç†å™¨
+         * @param reg                  åœºå˜é‡æ³¨å†Œè¡¨ï¼ˆæä¾› p_field, Î»_w, Î»_g, Ï_w, Ï_gï¼‰
+         * @param well                 äº• DOFï¼ˆåŒ…å« p_bhï¼‰
+         * @param vg_params            VG å‚æ•°
+         * @param rp_params            ç›¸å¯¹æ¸—é€ç‡å‚æ•°
+         * @param pressure_field_name  å•å…ƒå‹åŠ›åœºåç§°ï¼ˆé€šå¸¸ä¸º p_wï¼‰
+         * @param[out] Mw_cell         å•å…ƒæ°´ç›¸è´¨é‡æµç‡ï¼ˆkg/sï¼‰ï¼Œæµå…¥å•å…ƒä¸ºæ­£
+         * @param[out] Mg_cell         å•å…ƒæ°”ç›¸è´¨é‡æµç‡ï¼ˆkg/sï¼‰ï¼Œæµå…¥å•å…ƒä¸ºæ­£
          */
 
          /**
-          * \brief »ùÓÚÒÑÇó½âµÄ¾®µ×Ñ¹Á¦Óëµ¥ÔªÑ¹Á¦£¬¼ÆËãÍê¾®µ¥ÔªÉÏµÄÏàÖÊÁ¿Á÷ÂÊ¡£
+          * \brief åŸºäºå·²æ±‚è§£çš„äº•åº•å‹åŠ›ä¸å•å…ƒå‹åŠ›ï¼Œè®¡ç®—å®Œäº•å•å…ƒä¸Šçš„ç›¸è´¨é‡æµç‡ã€‚
           *
-          * Pressure Ä£Ê½¹Ø¼üĞŞ¸´£º
-          *  - Ñ¹Á¦·½³ÌÖĞ£¬¶¨Ñ¹¾®²ÉÓÃ well.target ×÷Îª¾®µ×Ñ¹Á¦ P_bh ²ÎÓëñîºÏ£»
-          *  - Îª±£³ÖÒ»ÖÂĞÔ£¬ÕâÀïÒ²Ó¦Ê¹ÓÃ P_bh = well.target À´¼ÆËãÖÊÁ¿Á÷ÂÊ£¬
-          *    ¶ø²»ÄÜÒÀÀµ¿ÉÄÜÎ´¸üĞÂµÄ well.p_bh¡£
+          * Pressure æ¨¡å¼å…³é”®ä¿®å¤ï¼š
+          *  - å‹åŠ›æ–¹ç¨‹ä¸­ï¼Œå®šå‹äº•é‡‡ç”¨ well.target ä½œä¸ºäº•åº•å‹åŠ› P_bh å‚ä¸è€¦åˆï¼›
+          *  - ä¸ºä¿æŒä¸€è‡´æ€§ï¼Œè¿™é‡Œä¹Ÿåº”ä½¿ç”¨ P_bh = well.target æ¥è®¡ç®—è´¨é‡æµç‡ï¼Œ
+          *    è€Œä¸èƒ½ä¾èµ–å¯èƒ½æœªæ›´æ–°çš„ well.p_bhã€‚
           *
-          * Rate Ä£Ê½£º
-          *  - P_bh À´×ÔÏßĞÔÏµÍ³½â³öµÄÎ´ÖªÁ¿ well.p_bh£¬Î¬³ÖÔ­ÓĞÉè¼Æ¡£
+          * Rate æ¨¡å¼ï¼š
+          *  - P_bh æ¥è‡ªçº¿æ€§ç³»ç»Ÿè§£å‡ºçš„æœªçŸ¥é‡ well.p_bhï¼Œç»´æŒåŸæœ‰è®¾è®¡ã€‚
           */
         inline bool compute_well_phase_mass_rates_strict(
             MeshManager& mgr,
@@ -322,24 +334,26 @@ namespace FVM {
                 }
             }
 
-            // ---- ¹Ø¼üĞŞ¸´£º¶¨Òå¡°ÓĞĞ§¾®µ×Ñ¹Á¦¡± p_bh_eff ----
-            // Pressure Ä£Ê½£ºp_bh_eff = target (Pa)
-            // Rate    Ä£Ê½£ºp_bh_eff = well.p_bh£¨ÏßĞÔÏµÍ³½â³öµÄÎ´ÖªÁ¿£©
+            // ---- å…³é”®ä¿®å¤ï¼šå®šä¹‰â€œæœ‰æ•ˆäº•åº•å‹åŠ›â€ p_bh_eff ----
+            // Pressure æ¨¡å¼ï¼šp_bh_eff = target (Pa)
+            // Rate    æ¨¡å¼ï¼šp_bh_eff = well.p_bhï¼ˆçº¿æ€§ç³»ç»Ÿè§£å‡ºçš„æœªçŸ¥é‡ï¼‰
             double p_bh_eff = 0.0;
             if (isPressureMode) {
-                p_bh_eff = well.target;     // ÕâÀïµÄ target µ¥Î»Îª Pa
+                p_bh_eff = well.target;     // è¿™é‡Œçš„ target å•ä½ä¸º Pa
             }
             else if (isRateMode) {
-                p_bh_eff = well.p_bh;       // ÓÉÑ¹Á¦Çó½âÆ÷¸üĞÂ
+                p_bh_eff = well.p_bh;       // ç”±å‹åŠ›æ±‚è§£å™¨æ›´æ–°
             }
             else {
-                // ÀíÂÛÉÏ²»»áµ½ÕâÀï£¬¶µ¸öµ×
+                // ç†è®ºä¸Šä¸ä¼šåˆ°è¿™é‡Œï¼Œå…œä¸ªåº•
                 p_bh_eff = well.p_bh;
             }
 
             const auto& id2idx = mesh.getCellId2Index();
 
-            double Mtot_well = 0.0; // Í³¼Æ×ÜÖÊÁ¿Á÷Á¿£¨ÓÃÓÚÈÕÖ¾£©
+            double Mtot_well = 0.0; // ç»Ÿè®¡å‡€æ€»è´¨é‡æµé‡ï¼ˆç”¨äºæ—¥å¿—ï¼‰
+            double Mpos_well = 0.0; // Î£ max(dotM_tot_i, 0)  (æµå…¥å•å…ƒä¸ºæ­£)
+            double Mneg_well = 0.0; // Î£ min(dotM_tot_i, 0)  (æµå‡ºå•å…ƒä¸ºè´Ÿ)
 
             for (int ic = 0; ic < Nc; ++ic)
             {
@@ -350,14 +364,14 @@ namespace FVM {
                 if (i >= mask_field->data.size() || i >= WI_field->data.size())
                     continue;
 
-                if ((*mask_field)[i] <= 1e-12) continue; // ·ÇÍê¾®µ¥Ôª
+                if ((*mask_field)[i] <= 1e-12) continue; // éå®Œäº•å•å…ƒ
 
                 const double WI_i = (*WI_field)[i];
                 if (WI_i <= 0.0) continue;
 
                 const double p_cell = (*p_field)[i];
 
-                // ¹¹Ôì¾Ö²¿ÖÊÁ¿¶¯¶È ¦Ë_mass_i
+                // æ„é€ å±€éƒ¨è´¨é‡åŠ¨åº¦ Î»_mass_i
                 double lambda_mass_i = 0.0;
                 double fw_mass_i = 0.0;
 
@@ -385,17 +399,8 @@ namespace FVM {
 
                 if (lambda_mass_i <= kTiny) continue;
 
-                // Ê¹ÓÃ p_bh_eff£¬±£Ö¤ Pressure ¾®ÓëÑ¹Á¦·½³ÌÖĞÓÃµ½µÄ BHP Ò»ÖÂ
-                double dotM_tot_i = WI_i * lambda_mass_i * (p_bh_eff - p_cell);
-
-                if (isInjector) {
-                    // ×¢Èë¾®£ºÖ»ÔÊĞíÁ÷ÈëµØ²ã£¨>0£©£¬Á÷³öÔò½Ø¶ÏÎª 0
-                    if (dotM_tot_i < 0.0) dotM_tot_i = 0.0;
-                }
-                else {
-                    // Éú²ú¾®£ºÖ»ÔÊĞíÁ÷³ö£¨<0£©£¬Á÷ÈëÔò½Ø¶ÏÎª 0
-                    if (dotM_tot_i > 0.0) dotM_tot_i = 0.0;
-                }
+               
+                const double dotM_tot_i = WI_i * lambda_mass_i * (p_bh_eff - p_cell);
 
                 const double dotM_w_i = fw_mass_i * dotM_tot_i;
                 const double dotM_g_i = dotM_tot_i - dotM_w_i;
@@ -404,9 +409,11 @@ namespace FVM {
                 Mg_cell[ic] += dotM_g_i;
 
                 Mtot_well += dotM_tot_i;
+                if (dotM_tot_i >= 0.0) Mpos_well += dotM_tot_i;
+                else                   Mneg_well += dotM_tot_i;
             }
 
-            // ---- ÈÕÖ¾Êä³ö£º¸ù¾İÄ£Ê½Çø·Ö target µÄÎïÀíº¬Òå ----
+            // ---- æ—¥å¿—è¾“å‡ºï¼šæ ¹æ®æ¨¡å¼åŒºåˆ† target çš„ç‰©ç†å«ä¹‰ ----
             if (isRateMode) {
                 std::cout << "[TwoPhaseWellsStrict] Well '" << well.name
                     << "' total mass rate (computed) = " << Mtot_well
@@ -418,6 +425,16 @@ namespace FVM {
                     << " kg/s, BHP target = " << well.target << " Pa\n";
             }
 
+            // crossflow è¯Šæ–­ï¼šè‹¥å®Œäº•æ®µåŒæ—¶å­˜åœ¨æ­£è´Ÿè´¡çŒ®ï¼Œè¯´æ˜â€œéƒ¨åˆ†æ®µæ³¨å…¥ + éƒ¨åˆ†æ®µå›æµ/é‡‡å‡ºâ€
+            // è¿™æ˜¯ç‰©ç†ä¸Šå¯èƒ½å‡ºç°çš„ï¼ˆå®šå‹äº•/å¤šå®Œäº•æ®µï¼‰ï¼Œä½†è‹¥ä¸‹æ¸¸æ¨¡å—å¯¹å…¶åšå•å‘æˆªæ–­ï¼Œä¼šå¯¼è‡´è´¨é‡ä¸å®ˆæ’ã€‚
+            if (Mpos_well > 0.0 && Mneg_well < 0.0)
+            {
+                std::cout << "[TwoPhaseWellsStrict] Well '" << well.name
+                    << "' crossflow: sum_in=" << Mpos_well
+                    << " kg/s, sum_out=" << Mneg_well
+                    << " kg/s, net=" << Mtot_well << " kg/s\n";
+            }
+
             double Mw_tot = 0.0;
             double Mg_tot = 0.0;
             for (int ic = 0; ic < Nc; ++ic) 
@@ -426,8 +443,8 @@ namespace FVM {
                 Mg_tot += Mg_cell[ic];
             }
 
-            // ×¢Òâ£º¶Ô²É³ö¾®£¬Mw_tot ºÍ Mg_tot ¶¼ÊÇ¸ºÊı£¨Á÷³öµ¥Ôª£©
-            // ÓÃ¾ø¶ÔÖµ¿´±ÈÀı¸üÖ±¹Û
+            // æ³¨æ„ï¼šå¯¹é‡‡å‡ºäº•ï¼ŒMw_tot å’Œ Mg_tot éƒ½æ˜¯è´Ÿæ•°ï¼ˆæµå‡ºå•å…ƒï¼‰
+            // ç”¨ç»å¯¹å€¼çœ‹æ¯”ä¾‹æ›´ç›´è§‚
             double Mw_abs = std::abs(Mw_tot);
             double Mg_abs = std::abs(Mg_tot);
             double fw_mass_well = Mw_abs / (Mw_abs + Mg_abs + 1e-30);
@@ -441,23 +458,23 @@ namespace FVM {
         }
 
         //======================================================================//
-        // 3. ±¥ºÍ¶È·½³ÌµÄ¾®Ô´Ïî£ºË®ÏàÖÊÁ¿Ô´£¨ÏÔÊ½¸üĞÂÓÃ£©
+        // 3. é¥±å’Œåº¦æ–¹ç¨‹çš„äº•æºé¡¹ï¼šæ°´ç›¸è´¨é‡æºï¼ˆæ˜¾å¼æ›´æ–°ç”¨ï¼‰
         //======================================================================//
 
         /**
-         * @brief ÎªËùÓĞ¾®¹¹½¨Ë®ÏàÖÊÁ¿Ô´Êı×é wellSources£¬ÓÃÓÚÏÔÊ½±¥ºÍ¶È¸üĞÂ¡£
+         * @brief ä¸ºæ‰€æœ‰äº•æ„å»ºæ°´ç›¸è´¨é‡æºæ•°ç»„ wellSourcesï¼Œç”¨äºæ˜¾å¼é¥±å’Œåº¦æ›´æ–°ã€‚
          *
-         * Ô¼¶¨£º
-         *   - wellSources[i] µ¥Î»Îª kg/s£¬±íÊ¾¡°Á÷Èëµ¥Ôª i µÄË®ÏàÖÊÁ¿Á÷ÂÊ¡±
-         *   - ×¢Èë¾®£ºMw_cell > 0£¬Éú²ú¾®£ºMw_cell < 0
+         * çº¦å®šï¼š
+         *   - wellSources[i] å•ä½ä¸º kg/sï¼Œè¡¨ç¤ºâ€œæµå…¥å•å…ƒ i çš„æ°´ç›¸è´¨é‡æµç‡â€
+         *   - æ³¨å…¥äº•ï¼šMw_cell > 0ï¼Œç”Ÿäº§äº•ï¼šMw_cell < 0
          *
-         * @param mgr          Íø¸ñ¹ÜÀíÆ÷
-         * @param reg          ³¡×¢²á±í
-         * @param wells        ËùÓĞÁ½Ïà¾® DOF
-         * @param vg_params    VG ²ÎÊı
-         * @param rp_params    Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı
-         * @param pressure_field_name Ñ¹Á¦³¡Ãû³Æ£¨Èç "p_w"£©
-         * @param[out] wellSources    µ¥ÔªË®ÏàÖÊÁ¿Ô´£¨³¤¶È=µ¥ÔªÊı£©
+         * @param mgr          ç½‘æ ¼ç®¡ç†å™¨
+         * @param reg          åœºæ³¨å†Œè¡¨
+         * @param wells        æ‰€æœ‰ä¸¤ç›¸äº• DOF
+         * @param vg_params    VG å‚æ•°
+         * @param rp_params    ç›¸å¯¹æ¸—é€ç‡å‚æ•°
+         * @param pressure_field_name å‹åŠ›åœºåç§°ï¼ˆå¦‚ "p_w"ï¼‰
+         * @param[out] wellSources    å•å…ƒæ°´ç›¸è´¨é‡æºï¼ˆé•¿åº¦=å•å…ƒæ•°ï¼‰
          */
         inline bool build_saturation_well_sources_strict
         (
@@ -486,7 +503,7 @@ namespace FVM {
                     return false;
                 }
 
-                // ½«Ã¿¿Ú¾®µÄ Mw_cell µş¼Óµ½È«³¡ wellSources ÖĞ
+                // å°†æ¯å£äº•çš„ Mw_cell å åŠ åˆ°å…¨åœº wellSources ä¸­
                 for (int ic = 0; ic < Nc; ++ic) {
                     wellSources[ic] += Mw_cell[ic];
                 }
@@ -495,33 +512,33 @@ namespace FVM {
         }
 
         //======================================================================//
-        // 4. ÎÂ¶È·½³Ì¾®Ô´Ïî£ºÊ¹ÓÃÍ¬Ò»ÅúÖÊÁ¿Á÷Á¿ + ¸ø¶¨×¢ÈëÎÂ¶È
+        // 4. æ¸©åº¦æ–¹ç¨‹äº•æºé¡¹ï¼šä½¿ç”¨åŒä¸€æ‰¹è´¨é‡æµé‡ + ç»™å®šæ³¨å…¥æ¸©åº¦
         //======================================================================//
 
         /**
-         * @brief ½«¾®ÓëÎÂ¶È·½³ÌñîºÏ£¬Ê¹ÓÃ¡°ÑÏ¸ñ Rate + Tin¡± µÄÖÊÁ¿/ÄÜÁ¿Ô´¡£
+         * @brief å°†äº•ä¸æ¸©åº¦æ–¹ç¨‹è€¦åˆï¼Œä½¿ç”¨â€œä¸¥æ ¼ Rate + Tinâ€ çš„è´¨é‡/èƒ½é‡æºã€‚
          *
-         * ×¢Èë¾®£º
-         *   - Ê¹ÓÃ compute_well_phase_mass_rates_strict µÃµ½ Mw_cell, Mg_cell (kg/s)
-         *   - ¶ÔÃ¿¸öÍê¾®µ¥Ôª i£¬Ìí¼ÓÈÈÔ´£ºQ_h,i = Mw_i cp_w_inj Tin + Mg_i cp_g_inj Tin
-         *     £¨µ¥Î» W£©
+         * æ³¨å…¥äº•ï¼š
+         *   - ä½¿ç”¨ compute_well_phase_mass_rates_strict å¾—åˆ° Mw_cell, Mg_cell (kg/s)
+         *   - å¯¹æ¯ä¸ªå®Œäº•å•å…ƒ iï¼Œæ·»åŠ çƒ­æºï¼šQ_h,i = Mw_i cp_w_inj Tin + Mg_i cp_g_inj Tin
+         *     ï¼ˆå•ä½ Wï¼‰
          *
-         * Éú²ú¾®£¨¿ÉÑ¡£©£º
-         *   - Ê¹ÓÃ Mw_cell, Mg_cell (<0) ¹¹Ôì³éÄÜÏî£º
+         * ç”Ÿäº§äº•ï¼ˆå¯é€‰ï¼‰ï¼š
+         *   - ä½¿ç”¨ Mw_cell, Mg_cell (<0) æ„é€ æŠ½èƒ½é¡¹ï¼š
          *       diag += -(Mw_i cp_w_cell + Mg_i cp_g_cell)
-         *     ¼´£ºM_tot cp T ÏîÏßĞÔ»¯µ½¶Ô½Ç£¬²»¶îÍâ¼Ó RHS
+         *     å³ï¼šM_tot cp T é¡¹çº¿æ€§åŒ–åˆ°å¯¹è§’ï¼Œä¸é¢å¤–åŠ  RHS
          *
-         * @param sysT                 ÎÂ¶È·½³ÌÏßĞÔÏµÍ³
-         * @param mgr                  Íø¸ñ¹ÜÀíÆ÷
-         * @param reg                  ³¡×¢²á±í£¨Ìá¹© cp_w, cp_g£©
-         * @param wells                ¾® DOF
-         * @param vg_params            VG ²ÎÊı
-         * @param rp_params            Ïà¶ÔÉøÍ¸ÂÊ²ÎÊı
-         * @param pressure_field_name  Ñ¹Á¦³¡Ãû³Æ£¨ÓÃÓÚÖÊÁ¿Á÷ÂÊ¼ÆËã£©
-         * @param cp_w_field_name      µ¥ÔªË®Ïà cp ×Ö¶ÎÃû£¨Èç "cp_w"£©
-         * @param cp_g_field_name      µ¥ÔªÆøÏà cp ×Ö¶ÎÃû£¨Èç "cp_g"£©
-         * @param lid_of_cell          cell.id -> ÎÂ¶ÈÏµÍ³×ÔÓÉ¶È±àºÅ
-         * @param thickness            2D Ä£ĞÍµÄ¡°ºñ¶È¡± [m]£¬3D ¿ÉÉèÎª 1.0
+         * @param sysT                 æ¸©åº¦æ–¹ç¨‹çº¿æ€§ç³»ç»Ÿ
+         * @param mgr                  ç½‘æ ¼ç®¡ç†å™¨
+         * @param reg                  åœºæ³¨å†Œè¡¨ï¼ˆæä¾› cp_w, cp_gï¼‰
+         * @param wells                äº• DOF
+         * @param vg_params            VG å‚æ•°
+         * @param rp_params            ç›¸å¯¹æ¸—é€ç‡å‚æ•°
+         * @param pressure_field_name  å‹åŠ›åœºåç§°ï¼ˆç”¨äºè´¨é‡æµç‡è®¡ç®—ï¼‰
+         * @param cp_w_field_name      å•å…ƒæ°´ç›¸ cp å­—æ®µåï¼ˆå¦‚ "cp_w"ï¼‰
+         * @param cp_g_field_name      å•å…ƒæ°”ç›¸ cp å­—æ®µåï¼ˆå¦‚ "cp_g"ï¼‰
+         * @param lid_of_cell          cell.id -> æ¸©åº¦ç³»ç»Ÿè‡ªç”±åº¦ç¼–å·
+         * @param thickness            2D æ¨¡å‹çš„â€œåšåº¦â€ [m]ï¼Œ3D å¯è®¾ä¸º 1.0
          */
         inline bool couple_wells_to_temperature_equation_strict(
             SparseSystemCOO& sysT,
@@ -551,7 +568,7 @@ namespace FVM {
 
             std::vector<double> Mw_cell(Nc, 0.0), Mg_cell(Nc, 0.0);
 
-            // Öğ¾®ñîºÏ£¨×¢Èë/Éú²ú·Ö±ğ´¦Àí£©
+            // é€äº•è€¦åˆï¼ˆæ³¨å…¥/ç”Ÿäº§åˆ†åˆ«å¤„ç†ï¼‰
             for (const auto& well : wells)
             {
                 if (!compute_well_phase_mass_rates_strict(
@@ -575,14 +592,14 @@ namespace FVM {
                     const int row = lid_of_cell[ic];
                     if (row < 0) continue;
 
-                    const double Mw_i = Mw_cell[ic];  // kg/s£¬Á÷Èëµ¥ÔªÎªÕı
+                    const double Mw_i = Mw_cell[ic];  // kg/sï¼Œæµå…¥å•å…ƒä¸ºæ­£
                     const double Mg_i = Mg_cell[ic];
 
                     if (std::abs(Mw_i) < 1e-20 && std::abs(Mg_i) < 1e-20)
                         continue;
 
                     if (isInjector) {
-                        // ×¢Èë¾®£º¹Ì¶¨ÎÂ¶È Tin µÄÈÈÔ´Ïî£¬Q_h = m_dot * cp_inj * Tin
+                        // æ³¨å…¥äº•ï¼šå›ºå®šæ¸©åº¦ Tin çš„çƒ­æºé¡¹ï¼ŒQ_h = m_dot * cp_inj * Tin
                         const double Q_h =
                             Mw_i * well.cp_w_inj * well.Tin  +
                             Mg_i * well.cp_g_inj * well.Tin;
@@ -590,11 +607,11 @@ namespace FVM {
                         sysT.addb(row, Q_h);
                     }
                     else {
-                        // Éú²ú¾®£º³éÄÜ£¬Ğ´³É¶Ô½ÇÏßĞÔÏî£º-(Mw cp_w + Mg cp_g) * T
+                        // ç”Ÿäº§äº•ï¼šæŠ½èƒ½ï¼Œå†™æˆå¯¹è§’çº¿æ€§é¡¹ï¼š-(Mw cp_w + Mg cp_g) * T
                         const double cp_w_i = (*cp_w_field)[i];
                         const double cp_g_i = (*cp_g_field)[i];
 
-                        // ×¢Òâ Mw_i/Mg_i ¶ÔÉú²ú¾®Îª¸ºÊı => diag_contrib > 0
+                        // æ³¨æ„ Mw_i/Mg_i å¯¹ç”Ÿäº§äº•ä¸ºè´Ÿæ•° => diag_contrib > 0
                         const double diag_contrib =
                             -(Mw_i * cp_w_i + Mg_i * cp_g_i);
 
