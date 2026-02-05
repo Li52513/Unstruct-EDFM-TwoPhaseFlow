@@ -60,7 +60,6 @@ namespace TemperatureBC
 						<< "  c=" << r.c << std::endl;
 				}
 			}
-			std::cout << "总共设置了 " << hit << " 个边界面（总边界面数 " << mgr.mesh().getBoundaryCells().size() << "）" << std::endl;
 		}
 
 	private:

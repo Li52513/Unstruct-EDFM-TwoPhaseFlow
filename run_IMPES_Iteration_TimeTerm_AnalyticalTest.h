@@ -31,21 +31,36 @@ int run_IMPES_Iteration_TimeTerm_AnalyticalTest()
 
     // ---------- 1. 初始主变量场 ----------
     std::cout << "--- IMPES: initializing primary fields ---\n";
-    InitFields ic;
-    ic.p_w0 = 6.5e6;
-    ic.dp_wdx = 0.0;
-    ic.T0 = 373.15;
-    ic.s_w = 1.0;
 
-    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(
-        mgr.mesh(), reg, "p_w", "s_w", "T");
-    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(
-        mgr.mesh(), reg, ic);
+    // 填充初始场
+        ///水相压力场，p_w
+    InitFields ic_pw; //创建一个新的 InitFields 结构体用于水相压力场初始化
+    ic_pw.x0 = 1e7;     // 初始水相压力 10 MPa
+    ic_pw.x_dx = 0.0;   // x方向梯度为 0
+    ic_pw.x_dy = 0.0;   // y方向梯度为 0
+    ic_pw.x_dz = 0.0;   // z方向梯度为 0
+    Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_pw, "p_w"); //填充水相压力场
+
+    ///水相饱和度场，s_w
+    InitFields ic_sw; //创建一个新的 InitFields 结构体用于水相饱和度场初始化
+    ic_sw.x0 = 0.95;    // 初始水相饱和度 0.95
+    ic_sw.x_dx = 0.0;   // x方向梯度为 0
+    ic_sw.x_dy = 0.0;   // y方向梯度为 0
+    ic_sw.x_dz = 0.0;   // z方向梯度为 0
+    Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_sw, "s_w"); //填充水相饱和度场
+
+    ///温度场，T
+    InitFields ic_T; //创建一个新的 InitFields 结构体用于温度场初始化
+    ic_T.x0 = 300.0;    // 初始温度 300 K
+    ic_T.x_dx = 0.0;   // x方向梯度为 0
+    ic_T.x_dy = 0.0;   // y方向梯度为 0
+    ic_T.x_dz = 0.0;   // z方向梯度为 0
+    Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_T, "T"); //填充温度场;
 
     // 时间相关辅助场 p_old/prev, s_old/prev, T_old/prev
-    ensureTransientFields_scalar(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
-    ensureTransientFields_scalar(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
-    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "p_w", "p_w_old", "p_w_prev");
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "s_w", "s_w_old", "s_w_prev");
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "T", "T_old", "T_prev");
 
     // 区域分类（这里只用一个 RegionType::Medium）
     PhysicalPropertiesManager ppm;

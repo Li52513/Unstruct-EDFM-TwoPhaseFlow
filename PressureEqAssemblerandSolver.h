@@ -442,6 +442,17 @@ namespace IMPES_Iteration
                 cfg.VG_Parameter.vg_params,        // 或 cfg.vg / cfg.vg_matrix，看你 InitConfig 怎么命名
                 cfg.VG_Parameter.relperm_params    // 同上，对应 RelPermParams
             );
+
+            //FVM::TwoPhaseWellsStrict::couple_well_to_pressure_equation_strict_rate_withGravity(
+            //    sys,
+            //    mgr,
+            //    reg,
+            //    well,
+            //    result.cell_lid,
+            //    cfg.VG_Parameter.vg_params,
+            //    cfg.VG_Parameter.relperm_params,
+            //    cfg.gravity
+            //);
         }
         result.system = std::move(sys);
         return true;

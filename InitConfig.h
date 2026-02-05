@@ -3,31 +3,6 @@
 #include <vector>
 #include <cmath>
 
-struct Gravity 
-{
-	double gx = 0.0;
-	double gy = 0.0;
-	double gz = -9.81; // 默认重力加速度指向负Z方向，单位 m/s²
-};
-
-//////////VG模型参数与相对渗透率参数//////////
-struct VGParams  //VG模型参数 Se=(1+（alpha*P）^n)^(-m) 表征毛细压力-饱和度关系
-{
-	double alpha = 1.0 / 5e4;  // [1/Pa] 例：5e4 Pa 尺度
-	double n = 2.0;            // 无量纲
-	double m() const { return 1.0 - 1.0 / n; }
-	double Swr = 0.25;       // 残余水
-	double Sgr = 0.05;       // 残余气（CO2）
-
-};
-
-struct RelPermParams
-{
-	double L = 0.5;  //无量纲Mualem 指数
-};
-
-
-
 ///////////////基岩物性参数//////////
 struct RockDefaults  //当前已经进行了分区处理
 {
@@ -53,16 +28,10 @@ struct InitFields
 
 	double s_w = 0.05; //基岩初始水相饱和度 (最好等于1-Sgr)
 
-};
-
-/////////////////运行选项开关//////////////////
-struct RuntypeSwitch
-{
-	bool enableWater = true;
-	bool enableCO2 = true;
-	bool enableEnergy = true;
-	bool cacheFluidPropsAsFields = true; //是否将流体物性参数作为场变量缓存
-
+	double x0 = 0;
+	double x_dx = 0;
+	double x_dy = 0;
+	double x_dz = 0;
 };
 
 

@@ -8,7 +8,7 @@
 namespace GeneralTools
 {
     //  复制标量场：dst <- src
-    inline bool copyField1
+    inline bool copyField
     (
         FieldRegistry& reg, // 需要确保 src 和 dst 都存在
         const std::string& src_name, //被复制的场
@@ -78,9 +78,9 @@ namespace GeneralTools
     {
         if (!ensureTransientFields_scalar1(mesh, reg, x_name, x_old_name, x_prev_name)) return false;
         // x^n
-        if (!copyField1(reg, x_name, x_old_name)) return false; //将x 复制到_old
+        if (!copyField(reg, x_name, x_old_name)) return false; //将x 复制到_old
         // prev ← old (给 k=0 的外迭代作为初值)
-        if (!copyField1(reg, x_old_name, x_prev_name)) return false; //将x_old 复制到 x_prev
+        if (!copyField(reg, x_old_name, x_prev_name)) return false; //将x_old 复制到 x_prev
         return true;
     }
 
@@ -94,7 +94,7 @@ namespace GeneralTools
     )
     {
         bool ok = true;
-        ok = ok && copyField1(reg, x_prev_name, x_name);
+        ok = ok && copyField(reg, x_prev_name, x_name);
         return ok;
 
     }
@@ -183,7 +183,7 @@ namespace GeneralTools
     {
         bool ok = true;
         for (const auto& pr : pairs) {
-            ok = ok && copyField1(reg, pr.first, pr.second);
+            ok = ok && copyField(reg, pr.first, pr.second);
         }
         return ok;
     }
@@ -234,6 +234,67 @@ namespace GeneralTools
         for (size_t i = 0; i < x->data.size(); ++i) {
             double denom = std::max(std::abs(xp->data[i]), eps);
             m = std::max(m, std::abs(x->data[i] - xp->data[i]) / denom);
+        }
+        return m;
+    }
+
+    inline void debugCheckMassFlux(
+        MeshManager& mgr,
+        FaceFieldRegistry& freg,
+        const std::string& mf_name = "mf_g",
+        double eps = 1e-18)
+    {
+        auto mfF = freg.get<faceScalarField>(mf_name.c_str());
+        if (!mfF) {
+            std::cerr << "[debugCheckMassFlux] face field '" << mf_name << "' not found.\n";
+            return;
+        }
+
+        const auto& faces = mgr.mesh().getFaces();
+        double minFlux = std::numeric_limits<double>::infinity();
+        double maxFlux = -std::numeric_limits<double>::infinity();
+        double sumFlux = 0.0;
+        size_t nPos = 0, nNeg = 0, nZero = 0;
+        double bIn = 0.0, bOut = 0.0;
+
+        for (const auto& F : faces) {
+            const double flux = (*mfF)[F.id - 1];
+            minFlux = std::min(minFlux, flux);
+            maxFlux = std::max(maxFlux, flux);
+            sumFlux += flux;
+
+            if (flux > eps) ++nPos;
+            else if (flux < -eps) ++nNeg;
+            else ++nZero;
+
+            if (F.isBoundary()) {
+                if (flux > eps)  bOut += flux;      // owner → boundary
+                if (flux < -eps) bIn += -flux;     // boundary → owner
+            }
+        }
+
+        std::cout << "[debugCheckMassFlux] field=" << mf_name
+            << " | min=" << minFlux << " | max=" << maxFlux
+            << " | sum=" << sumFlux << "\n";
+        std::cout << "   positives=" << nPos
+            << " | negatives=" << nNeg
+            << " | zeros=" << nZero << "\n";
+        std::cout << "   boundary inflow=" << bIn
+            << " | boundary outflow=" << bOut << std::endl;
+    }
+
+    inline double maxAbsDiff_excluding_mask(FieldRegistry& reg,
+        const std::string& fld,
+        const std::string& fld_prev,
+        const std::string& maskName)
+    {
+        auto* u = reg.get<volScalarField>(fld).get();
+        auto* v = reg.get<volScalarField>(fld_prev).get();
+        auto* mk = reg.get<volScalarField>(maskName).get();
+        double m = 0.0;
+        for (size_t i = 0; i < u->data.size(); ++i) {
+            if (mk && mk->data[i] > 0.5) continue; // 跳过强边界单元
+            m = std::max(m, std::abs(u->data[i] - v->data[i]));
         }
         return m;
     }

@@ -1,9 +1,8 @@
 #include "FractureNetwork.h"
+#include "8_DOP.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream> 
-#include "Fluid.h"
-#include "Matrix.h"
 #include <iomanip>  
 #include <unordered_map>
 #include <tuple>
@@ -262,6 +261,43 @@ bool FractureNetwork::isClose(const Vector& a, const Vector& b, double tol) cons
     return (a - b).Mag() < tol;
 }
 
+
+///
+const FractureElement* FractureNetwork::getElementByGlobalID(int globalID) const
+{
+    if (!fracElemIndexValid_) return nullptr;
+    const auto& offsets = fracElemIndex_.offset;
+
+    // 1. 越界检查
+    if (globalID < 0 || globalID >= (int)fracElemIndex_.total) return nullptr;
+
+    // 2. 二分查找：找到 globalID 落在哪个 offset 区间
+    // offsets 是递增序列，例如 [0, 5, 8, 12 ...]
+    // upper_bound 返回第一个 > globalID 的位置
+    auto it = std::upper_bound(offsets.begin(), offsets.end(), globalID);
+
+    // 对应的 Fracture 索引是 (it - begin) - 1
+    int fracID = std::distance(offsets.begin(), it) - 1;
+
+    // 3. 计算局部索引
+    // Local 0-based index = GlobalID - Offset[fracID]
+    int localIndex = globalID - offsets[fracID];
+
+    // 4. 返回对象
+    // fractures[fracID].elements 是 vector，0-based，直接对应 localIndex
+    if (fracID >= 0 && fracID < (int)fractures.size())
+    {
+        const auto& elems = fractures[fracID].elements;
+        if (localIndex >= 0 && localIndex < (int)elems.size())
+        {
+            return &elems[localIndex];
+        }
+    }
+    return nullptr;
+
+}
+
+
 void FractureNetwork::printFractureInfo() const
 {
     std::cout << "\n========= Fracture Information =========\n";
@@ -271,51 +307,6 @@ void FractureNetwork::printFractureInfo() const
         std::cout << "Fracture #" << fid + 1 << "  ("
             << F.start.m_x << "," << F.start.m_y << ")  →  ("
             << F.end.m_x << "," << F.end.m_y << ")\n";
-
-        std::cout << "  --- Segments ------------------------------------------\n";
-        for (const auto& E : F.elements)
-        {
-            /* ① 取该段的两端交点 */
-            const auto& I1 = F.intersections[E.id - 1];
-            const auto& I2 = F.intersections[E.id];
-
-            std::cout << "Seg:" << std::setw(2) << E.id
-                << "  Cell " << std::setw(2) << E.cellID
-                << " | L=" << E.length
-                << "  d=" << E.avgDistance << "\n";
-
-            /* ② 打印端点坐标及其在裂缝上的编号 */
-            std::cout << "     Pt" << I1.id << " (" << I1.point.m_x << "," << I1.point.m_y << ")"
-                << "  →  Pt" << I2.id << " (" << I2.point.m_x << "," << I2.point.m_y << ")\n";
-
-            /* ③ 打印离散系数 */
-            std::cout << "     aW=" << E.aW_fr
-                << "  aE=" << E.aE_fr
-                << "  aP=" << E.aP_fr
-                << "  CI—1=" << E.b_fr << "\n";
-
-            std::cout << "     alpha=" << E.geomAlpha << "\n";
-
-
-            std::cout << "     geomCI=" << E.geomCI
-                << "  CI_phys=" << E.b_fr
-                << "  alpha_phys=" << E.alpha_fr << "\n";
-
-
-
-            /* ④ 若存在 TI，与其它裂缝段的交换信息 */
-            if (!E.ffEx.empty())
-            {
-                std::cout << "     TI exchanges (" << E.ffEx.size() << "):\n";
-                for (const auto& ex : E.ffEx)
-                {
-                    std::cout << "        → Frac "
-                        << ex.peerFracID + 1 << "  Seg "
-                        << ex.peerSegID + 1 << " : TI=";
-                        //<< ex.TI << "\n";
-                }
-            }
-        }
     }
 
     /* 全局 FF 交点一览 ---------------------------------------------------*/
@@ -348,7 +339,7 @@ void FractureNetwork::exportToTxt(const std::string& prefix) const
 
             Vector mid = 0.5 * (p1 + p2);
 
-            fsSeg << fid + 1 << " "
+            fsSeg << fid << " "
                 << elem.id << " "
                 << p1.m_x << " " << p1.m_y << " "
                 << p2.m_x << " " << p2.m_y << " "
@@ -395,4 +386,60 @@ void FractureNetwork::exportToTxt(const std::string& prefix) const
         }
     }
     fsTI.close();
+
+    /*================ 4. [新增] 导出 8-DOP 几何尺寸数据 ================*/
+    // 格式: fid minX maxX minY maxY minD1 maxD1 minD2 maxD2
+    std::string filename8DOP = prefix + "_8DOP.txt";
+    std::ofstream fs8DOP(filename8DOP);
+
+    if (!fs8DOP.is_open()) {
+        std::cerr << "[Error] Unable to create 8-DOP export file: " << filename8DOP << std::endl;
+    }
+    else {
+        // 输出表头
+        fs8DOP << "fid minX maxX minY maxY minD1 maxD1 minD2 maxD2\n";
+
+        for (const auto& F : fractures)
+        {
+            // 实时构建 8-DOP (复用已验证的逻辑)
+            Box8DOP box;
+            box.fromSegment(F.start, F.end);
+
+            fs8DOP << F.id << " "
+                << box.minX << " " << box.maxX << " "
+                << box.minY << " " << box.maxY << " "
+                << box.minD1 << " " << box.maxD1 << " " // D1 = x + y
+                << box.minD2 << " " << box.maxD2 << "\n"; // D2 = x - y
+        }
+        fs8DOP.close();
+        std::cout << "[Export] 8-DOP data exported to " << filename8DOP << std::endl;
+    }
+
+    /*================ 5. [新增] 导出 AABB 几何尺寸数据 ================*/
+    // 格式: fid minX maxX minY maxY
+    std::string filenameAABB = prefix + "_AABB.txt";
+    std::ofstream fsAABB(filenameAABB);
+
+    if (!fsAABB.is_open()) {
+        std::cerr << "[Error] Unable to create AABB export file: " << filenameAABB << std::endl;
+    }
+    else {
+        // 输出表头
+        fsAABB << "fid minX maxX minY maxY\n";
+
+        for (const auto& F : fractures)
+        {
+            // 直接利用起点终点计算，确保数据绝对准确（避免依赖可能未更新的缓存状态）
+            double minX = std::min(F.start.m_x, F.end.m_x);
+            double maxX = std::max(F.start.m_x, F.end.m_x);
+            double minY = std::min(F.start.m_y, F.end.m_y);
+            double maxY = std::max(F.start.m_y, F.end.m_y);
+
+            fsAABB << F.id << " "
+                << minX << " " << maxX << " "
+                << minY << " " << maxY << "\n";
+        }
+        fsAABB.close();
+        std::cout << "[Export] AABB data exported to " << filenameAABB << std::endl;
+    }
 }

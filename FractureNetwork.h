@@ -7,6 +7,8 @@
 #include <cstdlib>   // rand, srand
 #include <ctime>     // time
 #include <cmath>     // cos, sin, M_PI
+#include <algorithm>
+
 #include "FracIndex.h" 
 #include "Fracture.h"
 
@@ -81,6 +83,14 @@ public:
 	
     //@brief 去重并重新编号裂缝–裂缝交点
     void DeduplicateAndRenumberFractureToFractureIntersections(); 
+
+    /**
+     * @brief 通过 GlobalID 反向查找裂缝段指针
+     * @param globalID 全局裂缝段 ID
+     * @return 指向 FractureElement 的常量指针，若越界返回 nullptr
+     */
+    const FractureElement* getElementByGlobalID(int globalID) const;
+
     
     //@brief 导出裂缝网络信息到文本文件
     void exportToTxt(const string& prefix) const;  

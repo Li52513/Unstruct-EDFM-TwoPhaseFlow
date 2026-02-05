@@ -1,13 +1,14 @@
 ﻿#pragma once
 #include <algorithm>
 #include <cmath>
+
 #include "MeshManager.h"
 #include "FieldRegistry.h"
-#include "InitConfig.h"					// Where VGParams and RelPermParams are defined
-#include "CapRelPerm_Simple.h"         // Simplified Pc/kr model (linear Pc + Corey kr)
-#include "Solver_TimeLoopUtils.h"		// CopyField here
+
+#include "Solver_Tools.h"
 #include "SolverContrlStrName.h"
 #include "PhysicalPropertiesManager.h"
+
 #include "CO2_Properties.h"
 #include "Water_Properties.h"
 #include "RockSolidProperties.h"
@@ -73,13 +74,6 @@ namespace TwoPhase
 	*/
 	inline void computerWaterandCO2TwoPhasePropertiesAtTimeStep(MeshManager& mgr, FieldRegistry& reg,const std::string& Sw_field, const VGParams& vg, const RelPermParams& rp)
 	{
-		// ===== Step 1: Sanity Checks & Setup =====
-		if (!SimpleCapRelPerm::params_valid(vg)) 
-		{
-			std::cerr << "ERROR [multiPhase::Rock]: Invalid Van Genuchten parameters provided." << std::endl;
-			return ;
-		}
-
 		auto& mesh = mgr.mesh();
 		const auto& cells = mesh.getCells();
 		const size_t n = cells.size();
@@ -175,12 +169,12 @@ namespace TwoPhase
 			std::cerr << "[TwoPhase][Water] Missing water property fields for copying to old layer.\n";
 			return false;
 		}
-		copyField(reg, PhysicalProperties_string::Water().rho_tag, PhysicalProperties_string::Water().rho_old_tag);
-		copyField(reg, PhysicalProperties_string::Water().mu_tag, PhysicalProperties_string::Water().mu_old_tag);
-		copyField(reg, PhysicalProperties_string::Water().cp_tag, PhysicalProperties_string::Water().cp_old_tag);
-		copyField(reg, PhysicalProperties_string::Water().k_tag, PhysicalProperties_string::Water().k_old_tag);
-		copyField(reg, PhysicalProperties_string::Water().c_w_tag, PhysicalProperties_string::Water().c_w_old_tag);
-		copyField(reg, PhysicalProperties_string::Water().drho_w_dp_tag, PhysicalProperties_string::Water().drho_w_dp_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Water().rho_tag, PhysicalProperties_string::Water().rho_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Water().mu_tag, PhysicalProperties_string::Water().mu_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Water().cp_tag, PhysicalProperties_string::Water().cp_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Water().k_tag, PhysicalProperties_string::Water().k_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Water().c_w_tag, PhysicalProperties_string::Water().c_w_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Water().drho_w_dp_tag, PhysicalProperties_string::Water().drho_w_dp_old_tag);
 
 		// CO2 properties
 		auto rho_g = reg.get<volScalarField>(PhysicalProperties_string::CO2().rho_tag);
@@ -202,12 +196,12 @@ namespace TwoPhase
 			std::cerr << "[TwoPhase][CO2] Missing CO2 property fields for copying to old layer.\n";
 			return false;
 		}
-		copyField(reg, PhysicalProperties_string::CO2().rho_tag, PhysicalProperties_string::CO2().rho_old_tag);
-		copyField(reg, PhysicalProperties_string::CO2().mu_tag, PhysicalProperties_string::CO2().mu_old_tag);
-		copyField(reg, PhysicalProperties_string::CO2().cp_tag, PhysicalProperties_string::CO2().cp_old_tag);
-		copyField(reg, PhysicalProperties_string::CO2().k_tag, PhysicalProperties_string::CO2().k_old_tag);
-		copyField(reg, PhysicalProperties_string::CO2().c_g_tag, PhysicalProperties_string::CO2().c_g_old_tag);
-		copyField(reg, PhysicalProperties_string::CO2().drho_g_dp_tag, PhysicalProperties_string::CO2().drho_g_dp_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::CO2().rho_tag, PhysicalProperties_string::CO2().rho_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::CO2().mu_tag, PhysicalProperties_string::CO2().mu_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::CO2().cp_tag, PhysicalProperties_string::CO2().cp_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::CO2().k_tag, PhysicalProperties_string::CO2().k_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::CO2().c_g_tag, PhysicalProperties_string::CO2().c_g_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::CO2().drho_g_dp_tag, PhysicalProperties_string::CO2().drho_g_dp_old_tag);
 
 		// Rock properties (porosity only)
 		auto phi = reg.get<volScalarField>(PhysicalProperties_string::Rock().phi_tag);
@@ -217,7 +211,7 @@ namespace TwoPhase
 			std::cerr << "[TwoPhase][Rock] Missing porosity fields for copying to old layer.\n";
 			return false;
 		}
-		copyField(reg, PhysicalProperties_string::Rock().phi_tag, PhysicalProperties_string::Rock().phi_old_tag);
+		GeneralTools::copyField(reg, PhysicalProperties_string::Rock().phi_tag, PhysicalProperties_string::Rock().phi_old_tag);
 
 		return true;
 	}
@@ -289,5 +283,22 @@ namespace TwoPhase
 		}
 	}
 
+	inline bool computer_CO2_DrhoDpAt(
+		MeshManager& mgr, FieldRegistry& reg,
+		const std::string& p_eval_name,
+		const std::string& T_eval_name,
+		double dp_rel = 1e-4, double dp_abs_min = 10.0)
+	{
+		return CO2_Prop::compute_CO2_DrhoDp(mgr, reg,p_eval_name,T_eval_name,dp_rel, dp_abs_min);
+	}
+
+	inline bool computer_water_DrhoDpAt(
+		MeshManager& mgr, FieldRegistry& reg,
+		const std::string& p_eval_name,
+		const std::string& T_eval_name,
+		double dp_rel = 1e-4, double dp_abs_min = 10.0)
+	{
+		return Water_Prop::compute_water_DrhoDp(mgr, reg, p_eval_name, T_eval_name, dp_rel, dp_abs_min);
+	}
 
 }

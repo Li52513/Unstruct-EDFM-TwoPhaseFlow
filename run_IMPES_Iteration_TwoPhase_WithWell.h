@@ -55,7 +55,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     // 4. VG / 相对渗透率参数：进一步减小 Pc
     VGParams vg_params;
     vg_params.Swr = 0.1;  // 少量束缚水
-    vg_params.Sgr = 0.15;  // 适当残余气，避免气相端点过头
+    vg_params.Sgr = 0.05;  // 适当残余气，避免气相端点过头
     vg_params.alpha = 1e-4;   // 保持 Pc 小
     vg_params.n = 2.0;   // 曲线更平缓，前沿不至于过陡
     RelPermParams rp_params;
@@ -67,21 +67,50 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     ic.dp_wdx = 0.0;
     ic.dp_wdy = 0.0;
     ic.dp_wdz = 0.0;
-    ic.s_w = 0.85;      // 初始水相饱和度
+    ic.s_w = 0.95;      // 初始水相饱和度
 
     IMPES_Iteration::PressureEquation_String P_Eq;
     IMPES_Iteration::SaturationEquation_String S_Eq;
     IMPES_Iteration::FaceMassRate_String Mf_Eq;
     IMPES_Iteration::FluxSplitConfig_String Fsp_Eq;
 
-    // 主变量场：水相压力 p_w、水相饱和度 s_w、温度 T
-    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, P_Eq.pressure_field, S_Eq.saturation, "T");
-    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+    // 主变量场：水相压力 p_w
+    Initializer::createPrimaryFields(mgr.mesh(), reg, P_Eq.pressure_field);
+	// 主变量场：水相饱和度 s_w
+	Initializer::createPrimaryFields(mgr.mesh(), reg, S_Eq.saturation);
+	// 主变量场：温度 T
+    Initializer::createPrimaryFields(mgr.mesh(), reg, "T");
+
+	// 填充初始场
+    ///水相压力场，p_w
+	InitFields ic_pw; //创建一个新的 InitFields 结构体用于水相压力场初始化
+	ic_pw.x0 = 1e7;     // 初始水相压力 10 MPa
+	ic_pw.x_dx = 0.0;   // x方向梯度为 0
+	ic_pw.x_dy = 0.0;   // y方向梯度为 0
+	ic_pw.x_dz = 0.0;   // z方向梯度为 0
+	Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_pw, P_Eq.pressure_field); //填充水相压力场
+
+	///水相饱和度场，s_w
+	InitFields ic_sw; //创建一个新的 InitFields 结构体用于水相饱和度场初始化
+	ic_sw.x0 = 0.95;    // 初始水相饱和度 0.95
+	ic_sw.x_dx = 0.0;   // x方向梯度为 0
+	ic_sw.x_dy = 0.0;   // y方向梯度为 0
+	ic_sw.x_dz = 0.0;   // z方向梯度为 0
+	Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_sw, S_Eq.saturation); //填充水相饱和度场
+
+	///温度场，T
+	InitFields ic_T; //创建一个新的 InitFields 结构体用于温度场初始化
+	ic_T.x0 = 300.0;    // 初始温度 300 K
+	ic_T.x_dx = 0.0;   // x方向梯度为 0
+	ic_T.x_dy = 0.0;   // y方向梯度为 0
+	ic_T.x_dz = 0.0;   // z方向梯度为 0
+	Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_T, "T"); //填充温度场
 
     // 时间层：old / prev（p_w、s_w、p_g 都准备好）
-    ensureTransientFields_scalar(mgr.mesh(), reg, P_Eq.pressure_field, P_Eq.pressure_old_field, P_Eq.pressure_prev_field);
-    ensureTransientFields_scalar(mgr.mesh(), reg, S_Eq.saturation, S_Eq.saturation_old, S_Eq.saturation_prev);
-    ensureTransientFields_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
+	GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, P_Eq.pressure_field, P_Eq.pressure_old_field, P_Eq.pressure_prev_field);
+	GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, S_Eq.saturation, S_Eq.saturation_old, S_Eq.saturation_prev);
+	GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, P_Eq.pressure_g, P_Eq.pressure_g_old, P_Eq.pressure_g_prev);
+
 
     // ---------- 2. 基岩区域分类与固相物性 ----------
     PhysicalPropertiesManager ppm;
@@ -100,7 +129,7 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         P_Left, P_Right, P_Down, P_Up);
     PressureBCAdapter PbcA{ pbc_pw };
 
-    // ---------- 4. 井配置（BL 测试：无井源） ----------
+    // ---------- 4. 井配置 ----------
     std::vector<WellConfig_TwoPhase> wells_cfg;
     // 4.1 注入井 INJ
     {
@@ -108,15 +137,15 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         inj.name = "INJ";
         inj.role = WellDOF_TwoPhase::Role::Injector;
         inj.mode = WellDOF_TwoPhase::Mode::Rate;
-        inj.target = 1; // kg/s total mass rate
+        inj.target = 10; // kg/s total mass rate
         inj.Tin = 300.0;
-        inj.s_w_bh = 0.0; // pure water injection
-        inj.geom.pos = Vector{ 0.1 * lengthX, 0.1 * lengthY, 0.0 };
+        inj.s_w_bh = 0.05; // pure water injection
+        inj.geom.pos = Vector{ 0.0, 0.0, 0.0 };
         inj.geom.rw = 0.1;
         inj.geom.skin = 0.0;
         inj.geom.H = 10;
         inj.geom.perfRadius = 0.0;
-        inj.geom.maxHitCells = 5;
+        inj.geom.maxHitCells = 1;
         wells_cfg.push_back(inj);
     }
 
@@ -129,12 +158,12 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
         prod.target = 8e6;
         prod.Tin = 300.0;
         prod.s_w_bh = 1.0;
-        prod.geom.pos = Vector{ 0.9 * lengthX, 0.9 * lengthY, 0.0 };
+        prod.geom.pos = Vector{  lengthX, lengthY, 0.0 };
         prod.geom.rw = 0.1;
         prod.geom.skin = 0.0;
         prod.geom.H = 10;
         prod.geom.perfRadius = 0.0;
-        prod.geom.maxHitCells = 5;
+        prod.geom.maxHitCells = 1;
         wells_cfg.push_back(prod);
     }
 
@@ -161,12 +190,12 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     //组装
     pCtrl.assembly.VG_Parameter.vg_params = vg_params;
     pCtrl.assembly.VG_Parameter.relperm_params = rp_params;
-    pCtrl.assembly.enable_buoyancy = true;
+    pCtrl.assembly.enable_buoyancy = false;
     pCtrl.assembly.gradient_smoothing = 6;
-    pCtrl.assembly.gravity = Vector{ 0.0, -9.8, 0.0 };
+    pCtrl.assembly.gravity = Vector{ 0.0, 0.0, 0.0 };
 
     pCtrl.max_outer = 1000;        // 常物性可保持很小
-    pCtrl.tol_abs = 1e6;
+    pCtrl.tol_abs = 1e2;
     pCtrl.tol_rel = 1e-4;
     pCtrl.under_relax = 1;
     pCtrl.verbose = true;
@@ -184,6 +213,8 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
     fluxCfg.enforce_boundary_inflow_fw = true;
     fluxCfg.flux_sign_epsilon = 1e-10;
     fluxCfg.pressure_bc = &PbcA;
+    fluxCfg.use_phase_potential_upwind = true;
+	fluxCfg.gravity = Vector{ 0.0, 0.0, 0.0 };
 
     // ---------- 11. IMPES 主时间推进 ----------
     const int    nSteps = 5000;
@@ -194,13 +225,14 @@ int run_IMPES_Iteration_TwoPhase_WellCase()
 	timeCtrl.dt_max = 1.0;
     timeCtrl.grow_factor = 100;
 
+
     const int writeEveryP = 10;
     const int writeEverySw = 10;
 
-    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/p_impes_ps_withwell/p_ps_withGravity";
-    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler/s_impes_ps_withwell/s_ps_withGravity";
+    const std::string outPrefixP = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler_withoutGravity_withoutPotentila_Upwind/p_impes_ps_withwell_case2/p_ps";
+    const std::string outPrefixSw = "./Postprocess_Data/IMPES_Iteration_Test/IMPES_ExplicitEuler_withoutGravity_withoutPotentila_Upwind/s_impes_ps_withwell_case2/s_ps";
     const int snapshotEveryCsv = 10;
-    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/IMPES_ExplicitEuler/ps_state_withwell_case4";
+    const std::string snapshotPrefix = "./Postprocess_Data/csv_snapshots/IMPES_ExplicitEuler_withoutGravity_withoutPotentila_Upwind_case2/ps_state_withwell";
 
     std::cout << "--- IMPES: start transient run (BL numerical test) ---\n";
     const bool ok = IMPES_Iteration::runTransient_IMPES_Iteration(mgr, reg, freg, PbcA, wells_dof, nSteps, dt_initial, pCtrl, satCfg, fluxCfg, m_FCtrl, writeEveryP, writeEverySw, outPrefixP, outPrefixSw, snapshotEveryCsv, snapshotPrefix);

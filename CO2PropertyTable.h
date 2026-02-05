@@ -29,17 +29,4 @@ private:
    static double clamp(double v, double lo, double hi) {
        return v < lo ? lo : (v > hi ? hi : v);
    }
-
-   /// 1D Catmull–Rom 三次 Hermite 插值
-   static double cubicHermite(double y0, double y1, double y2, double y3, double t);
-
-   /// 2D 双三次 Catmull–Rom 插值，用于任意 CO2Properties 字段
-   static double bicubicInterpolate(
-       const std::vector<std::vector<CO2Properties>>& data,
-       const std::vector<double>& X,
-       const std::vector<double>& Y,
-       size_t i, size_t j,
-       double xFrac, double yFrac,
-       const std::function<double(const CO2Properties&)>& field // Fixed type declaration
-   );
 };

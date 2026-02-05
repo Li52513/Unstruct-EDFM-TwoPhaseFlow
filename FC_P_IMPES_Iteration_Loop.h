@@ -186,9 +186,9 @@ namespace FC_P_IMPES_I
                                              const std::string& x_old_name,
                                              const std::string& x_prev_name) -> void
                         {
-                            copyField(reg, x_old_name, x_name);
+                            GeneralTools::copyField(reg, x_old_name, x_name);
                             if (!x_prev_name.empty())
-                                copyField(reg, x_old_name, x_prev_name);
+                                GeneralTools::copyField(reg, x_old_name, x_prev_name);
                         };
 
                     revert_scalar(
@@ -205,7 +205,7 @@ namespace FC_P_IMPES_I
                         "p_g_prev");
 
                     // Rock porosity might have been updated after the pressure step; restore it on rollback.
-                    if (!copyField(reg,
+                    if (!GeneralTools::copyField(reg,
                         PhysicalProperties_string::Rock().phi_old_tag,
                         PhysicalProperties_string::Rock().phi_tag))
                     {
@@ -238,7 +238,7 @@ namespace FC_P_IMPES_I
                     return true;
                 };
 
-            if (!startTimeStep_scalar(
+            if (!GeneralTools::startTimeStep_scalar(
                 mesh, reg,
                 pressureCtrl.assembly.pressure_field,
                 pressureCtrl.assembly.pressure_old_field,
@@ -247,7 +247,7 @@ namespace FC_P_IMPES_I
                 std::cerr << "[FC-IMPES-I][Iteration] startTimeStep for pressure failed.\n";
                 return false;
             }
-            if (!startTimeStep_scalar(
+            if (!GeneralTools::startTimeStep_scalar(
                 mesh, reg,
                 satCfg.saturation,
                 satCfg.saturation_old,

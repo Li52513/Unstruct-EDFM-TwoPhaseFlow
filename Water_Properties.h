@@ -13,17 +13,6 @@ namespace Water_Prop
 	static constexpr double BASE_Drho_Dp_w = 0;
 	static constexpr double BASE_c_w = 0; //压缩系数
 
-	///为常物性参数工况外部修改提供接口
-	struct waterProperties
-	{
-		double rho = 1000;
-		double mu = 1e-4;
-		double cp = 1100;
-		double k = 0.03;
-		double dRho_dP = 0.0;
-		double c = 0.0;
-	};
-
 	inline bool ensure_WaterProp_Fields(FieldRegistry& reg, std::size_t n)
 	{
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::Water().rho_tag, n, BASE_rho_w);				//rho，kg/m³
@@ -47,7 +36,8 @@ namespace Water_Prop
 
 		return true;
 	}
-
+ 	/// 计算基岩内部水的物性参数
+	////常数物性参数工况
 	inline bool compute_water_properties_const(MeshManager& mgr, FieldRegistry& reg, const std::string& p_w_field, const std::string& T_field)  //这里传入基岩的压力和温度 但是对于IMPES来说，不会更新这里的参数
 	{
 		auto& mesh = mgr.mesh();
@@ -77,20 +67,19 @@ namespace Water_Prop
 			double p_w = (*p_wF)[i];
 
 			//当前传入Base参数，开展常物性测试，但是提供温度和压力接口
-			(*rho_wF)[i] = waterProperties().rho;
-			(*cp_wF)[i] = waterProperties().cp;
-			(*k_wF)[i] = waterProperties().k;
-			(*mu_wF)[i] = waterProperties().mu;
-			(*Drho_Dp_wF)[i] = waterProperties().dRho_dP;
-			(*c_wF)[i] = waterProperties().c;
+			(*rho_wF)[i] = WaterProperties().rho;
+			(*cp_wF)[i] = WaterProperties().cp;
+			(*k_wF)[i] = WaterProperties().k;
+			(*mu_wF)[i] = WaterProperties().mu;
+			(*Drho_Dp_wF)[i] = WaterProperties().dRho_dP;
+			(*c_wF)[i] = WaterProperties().c;
 			//由于流度的计算涉及黏度，所以这里也需要更新流度,注意这里的相对渗透率采用的是在进入迭代层前计算好的值
 			(*lambda_wF)[i] = (*k_rwF)[i] / std::max((*mu_wF)[i], 1e-20);
 
 		}
 		return true;
 	}
-
-	//基于LAPWS模型，利用插值表计算水的物性参数
+	////基于LAPWS模型，利用插值表计算水的物性参数
 	inline bool computer_water_properties_LAPWS(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field)
 	{
 		auto& mesh = mgr.mesh();
@@ -146,8 +135,122 @@ namespace Water_Prop
 		}
 		return true;
 	}
+	/// 计算裂缝中的水的物性参数
+	/////常数物性参数工况
+	inline bool compute_Water_properties_const_inFracture(MeshManager& mgr, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field)
+	{
+		const FractureNetwork& frNet = mgr.fracture_network();
+		//调用裂缝段索引
+		const auto idx = buildFracElemIndex(frNet);
+		const size_t ne = idx.total;
+		if (!ne) {
+			std::cout << "[PPM] No fracture elements. Skip InitializeFractureElementsProperties.\n";
+			return false;
+		}
+		ensure_WaterProp_Fields(reg_fr, ne);
+		// 取出计算裂缝物性参数需要的主变量场指针
+		auto pfw = reg_fr.get<volScalarField>(pf_field);
+		auto Tf = reg_fr.get<volScalarField>(Tf_field);
+		// 取出裂缝物性参数场指针
+		auto rho_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);				//rho，kg/m³
+		auto cp_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);				//Cp，J/(kg·K)
+		auto k_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().k_tag);					//k，W/(m·K)
+		auto mu_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);				//mu，Pa·s
+		auto Drho_Dp_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag); 	//drho_dp，kg/(m³·Pa)
+		auto c_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().c_w_tag);				//二氧化碳的可压缩系数，1/Pa
+		auto k_rwF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().k_rw_tag);				// Relative permeability of Water
+		auto lambda_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);		// Mobility of Water
 
-	// 在 (p_eval, T_eval) 处评估 ρ 与 ∂ρ/∂p
+		// 遍历所有裂缝段
+		for (size_t f = 0; f < frNet.fractures.size(); ++f)
+		{
+			const auto& F = frNet.fractures[f];
+			const size_t base = idx.offset[f];
+			for (size_t e = 0; e < F.elements.size(); ++e)
+			{
+				const size_t g = base + e; //裂缝段全局索引
+
+				double P = (*pfw)[g]; // 裂缝段水相压力，Pa
+				double T = (*Tf)[g];  // 裂缝段温度，K
+				(*rho_wF)[g] = WaterProperties().rho;
+				(*cp_wF)[g] = WaterProperties().cp;
+				(*k_wF)[g] = WaterProperties().k;
+				(*mu_wF)[g] = WaterProperties().mu;
+				(*Drho_Dp_wF)[g] = WaterProperties().dRho_dP;
+				(*c_wF)[g] = WaterProperties().c;
+				//流度计算，在计算之前需要计算相对渗透率，这里假设相对渗透率已经计算完成并存储在k_rgF中
+				(*lambda_wF)[g] = (*k_rwF)[g] / std::max((*mu_wF)[g], 1e-20);
+			}
+		}
+		return true;
+	}
+	/////基于LAPWS模型，利用插值表计算水的物性参数
+	inline bool computer_water_properties_LAPWS_inFracture(MeshManager& mgr, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field)
+	{
+		const FractureNetwork& frNet = mgr.fracture_network();
+		//调用裂缝段索引
+		const auto idx = buildFracElemIndex(frNet);
+		const size_t ne = idx.total;
+		if (!ne) {
+			std::cout << "[PPM] No fracture elements. Skip InitializeFractureElementsProperties.\n";
+			return false;
+		}
+		ensure_WaterProp_Fields(reg_fr, ne);
+		// 取出计算裂缝物性参数需要的主变量场指针
+		auto pfw = reg_fr.get<volScalarField>(pf_field);
+		auto Tf = reg_fr.get<volScalarField>(Tf_field);
+		// 取出裂缝物性参数场指针
+		auto rho_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().rho_tag);				//rho，kg/m³
+		auto cp_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().cp_tag);				//Cp，J/(kg·K)
+		auto k_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().k_tag);					//k，W/(m·K)
+		auto mu_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().mu_tag);				//mu，Pa·s
+		auto k_rwF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().k_rw_tag);				// Relative permeability of Water
+		auto lambda_wF = reg_fr.get<volScalarField>(PhysicalProperties_string::Water().lambda_w_tag);		// Mobility of Water
+
+		auto& gt = WaterPropertyTable::instance();
+		// 遍历所有裂缝段
+		size_t oorCount = 0;      // out-of-range or query failure
+		for (size_t f = 0; f < frNet.fractures.size(); ++f)
+		{
+			const auto& F = frNet.fractures[f];
+			const size_t base = idx.offset[f];
+			for (size_t e = 0; e < F.elements.size(); ++e)
+			{
+				const size_t g = base + e;
+				double P = (*pfw)[g]; // 裂缝段水相压力，Pa
+				double T = (*Tf)[g];  // 裂缝段温度，K
+				double rho = BASE_rho_w;
+				double mu = BASE_mu_w;
+				double cp = BASE_cp_w;
+				double k = BASE_k_w;
+				try {
+					const auto G = gt.getProperties(P, T);
+					rho = G.rho;
+					mu = G.mu;
+					cp = G.cp;
+					k = G.k;
+				}
+				catch (...) {
+					++oorCount; // keep fallback
+				}
+				(*rho_wF)[g] = rho;
+				(*mu_wF)[g] = mu;
+				(*cp_wF)[g] = cp;
+				(*k_wF)[g] = k;
+				// mobility/lambda with protection
+				const double mu_eff = std::max(mu, 1e-20);
+				(*lambda_wF)[g] = (*k_rwF)[g] / mu_eff;
+			}
+			if (oorCount > 0) {
+				std::cerr << "[PPM][Fluid][water] property query failed/OOR in "
+					<< oorCount << " elements in Fracture ID" << F.id << "(using fallback constants)\n";
+			}
+			
+		}
+		return true;
+	}
+
+	// 基岩内在 (p_eval, T_eval) 处评估 ρ 与 ∂ρ/∂p
 	inline bool compute_water_DrhoDp
 	(
 		MeshManager& mgr, FieldRegistry& reg,
@@ -189,6 +292,61 @@ namespace Water_Prop
 			}
 			catch (...) { /* 出界兜底：rp/rm 用 rho_lin */ }
 			(*dF)[i] = (rp - rm) / std::max(2.0 * dpa, 1e-12);
+		}
+		return true;
+	}
+	//裂缝内在 (p_eval, T_eval) 处评估 ρ 与 ∂ρ/∂p
+	inline bool compute_water_DrhoDp_inFracture
+	(
+		MeshManager& mgr, FieldRegistry& reg_fr,
+		const std::string& p_eval_name,
+		const std::string& T_eval_name,
+		double dp_rel = 1e-4, double dp_abs_min = 1.0
+	)
+	{
+		const FractureNetwork& frNet = mgr.fracture_network();
+		//调用裂缝段索引
+		const auto idx = buildFracElemIndex(frNet);
+		const size_t ne = idx.total;
+		if (!ne) {
+			std::cout << "[PPM] No fracture elements. Skip compute_water_DrhoDp_inFracture.\n";
+			return true;
+		}
+		auto pE = reg_fr.get<volScalarField>(p_eval_name);
+		auto TE = reg_fr.get<volScalarField>(T_eval_name);
+		if (!pE || !TE)
+		{
+			std::cerr << "[computeRhoAndDrhoDp_inFracture] missing eval fields '"
+				<< p_eval_name << "' or '" << T_eval_name << "'\n";
+			return false;
+		}
+		auto dF = reg_fr.getOrCreate<volScalarField>(PhysicalProperties_string::Water().drho_w_dp_tag, ne, 0.0);
+		auto& wt = WaterPropertyTable::instance();
+		// 遍历所有裂缝段
+		for (size_t f = 0; f < frNet.fractures.size(); ++f)
+		{
+			const auto& F = frNet.fractures[f];
+			const size_t base = idx.offset[f];
+			for (size_t e = 0; e < F.elements.size(); ++e)
+			{
+				const size_t g = base + e; //裂缝段全局索引
+				double p = (*pE)[g];
+				double T = (*TE)[g];
+				double rho_lin = 1000.0;
+				try { rho_lin = wt.getProperties(p, T).rho; }
+				catch (...) { /* 出界兜底：保持 rho_lin 默认 */ }
+				// 对称差分：drho/dp ≈ [ρ(p+dp,T) - ρ(p-dp,T)] / (2dp)
+				const double dpa = std::max(dp_abs_min, std::abs(p) * dp_rel);
+				double rp = rho_lin, rm = rho_lin;
+				try
+				{
+					double pp = p + dpa, pm = p - dpa;
+					rp = wt.getProperties(pp, T).rho;
+					rm = wt.getProperties(pm, T).rho;
+				}
+				catch (...) { /* 出界兜底：rp/rm 用 rho_lin */ }
+				(*dF)[g] = (rp - rm) / std::max(2.0 * dpa, 1e-12);
+			}
 		}
 		return true;
 	}

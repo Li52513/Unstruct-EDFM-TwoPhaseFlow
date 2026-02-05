@@ -85,11 +85,30 @@ namespace IMPES_Iteration
         /**
          * \brief clamp S_w into effective range [Swr, 1-Sgr].
          */
-        inline double clampSw(double sw, const VGParams& vg)
+        inline bool vgBoundsValid(const VGParams& vg, double eps = 1e-12)
         {
-            const double smin = vg.Swr;
-            const double smax = 1.0 - vg.Sgr;
-            return std::max(smin, std::min(smax, sw));
+            return (vg.Swr >= 0.0) && (vg.Sgr >= 0.0) && (vg.Swr + vg.Sgr <= 1.0 - 10.0 * eps);
+        }
+
+        inline double clampSw(double sw, const VGParams& vg, double eps = 1e-12)
+        {
+            if (!vgBoundsValid(vg, eps)) {
+                // 参数不合法：退回到 [0,1]，同时建议你在日志里报错
+                return std::max(0.0, std::min(1.0, sw));
+            }
+            const double lo = vg.Swr + eps;
+            const double hi = 1.0 - vg.Sgr - eps;
+            return std::max(lo, std::min(hi, sw));
+        }
+
+        inline double clampSg(double sg, const VGParams& vg, double eps = 1e-12)
+        {
+            if (!vgBoundsValid(vg, eps)) {
+                return std::max(0.0, std::min(1.0, sg));
+            }
+            const double lo = vg.Sgr + eps;
+            const double hi = 1.0 - vg.Swr - eps;
+            return std::max(lo, std::min(hi, sg));
         }
     } // namespace detail
 
@@ -272,6 +291,7 @@ namespace IMPES_Iteration
         const double CFL_safety = cfg.CFL_safety;
         const double dS_target = cfg.dS_max;
         const double tiny = 1e-30;
+        const auto& vg = cfg.VG_Parameter.vg_params;
 
         double max_CFL = 0.0;
         double max_dS = 0.0;
@@ -312,7 +332,7 @@ namespace IMPES_Iteration
 				const double coef = dt / (phi_np1 * V * rho_np1);
 				const double dS = coef * (Q_i - F_div_i);
 				Sw_raw = Sw_n + dS;
-				Sw_new = std::max(0.0, std::min(1.0, Sw_raw));
+                Sw_new = detail::clampSw(Sw_raw, vg);
             }
             else
             {
@@ -324,7 +344,7 @@ namespace IMPES_Iteration
 
                     const double denom = std::max(phi_np1 * V * rho_np1, tiny);
                     Sw_raw = Mw_np1 / denom;
-                    Sw_new = std::max(0.0, std::min(1.0, Sw_raw));
+                    Sw_new = detail::clampSw(Sw_raw, vg);
                 }
                 else
                 {
@@ -334,7 +354,7 @@ namespace IMPES_Iteration
 
                     const double denom = std::max(phi_np1 * V * rho_np1, tiny);
                     const double Sg_raw = Mg_np1 / denom;
-                    const double Sg_new = std::max(0.0, std::min(1.0, Sg_raw));
+                    const double Sg_new = detail::clampSg(Sg_raw, vg);
 
                     Sw_raw = 1.0 - Sg_raw;
                     Sw_new = 1.0 - Sg_new;
@@ -383,6 +403,11 @@ namespace IMPES_Iteration
         stats.max_CFL = max_CFL;
         stats.max_dS = max_dS;
         stats.suggested_dt = dt_suggest;
+
+        // 最后一刀：确保全场在有效区间（防止某些分支漏 clamp）
+        for (size_t ic = 0; ic < nCells; ++ic) {
+            (*s_w)[ic] = detail::clampSw((*s_w)[ic], cfg.VG_Parameter.vg_params);
+        }
 
         return true;
     }
@@ -535,6 +560,8 @@ namespace IMPES_Iteration
         build_div_from_mf(*mf_w, F_div_stage1);
 
         std::vector<double> k1(nCells, 0.0);
+        const auto& vg = cfg.VG_Parameter.vg_params;
+
 
         double max_CFL = 0.0;
         double max_dS_stage1 = 0.0;
@@ -567,7 +594,7 @@ namespace IMPES_Iteration
 
             // 预测 S*
             double S_star = Sw_n + dt * rate1;
-            S_star = std::max(0.0, std::min(1.0, S_star));
+            S_star = detail::clampSw(S_star, vg);
 
             (*s_w)[ic] = S_star;
 
@@ -666,6 +693,11 @@ namespace IMPES_Iteration
             dt_suggest = dt; // 回退：无有效约束时保持当前 dt
         }
         stats.suggested_dt = dt_suggest;
+
+        // 最后一刀：确保全场在有效区间（防止某些分支漏 clamp）
+        for (size_t ic = 0; ic < nCells; ++ic) {
+            (*s_w)[ic] = detail::clampSw((*s_w)[ic], cfg.VG_Parameter.vg_params);
+        }
 
         return true;
     }

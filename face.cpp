@@ -1,69 +1,97 @@
 #include "Face.h"
 #include "UserDefineVarType.h"
 
+//构造函数
 Face::Face(int id, const std::vector<int>& nodeIDs, const std::vector<Vector>& nodeCoords)
     : id(id), FaceNodeIDs(nodeIDs), FaceNodeCoords(nodeCoords), length(0.0), ownerCell(-1), neighborCell(-1)
 {
     computeGeometry();
 }
 
+// =========================================================
+// 【2D/3D】构建网格面的几何信息：单位法向量、面积/长度、几何中心、包围盒
+// =========================================================
 void Face::computeGeometry()
 {
     size_t n = FaceNodeCoords.size(); //记录节点数量
+    if (n < 2) return;
+
+    //适用于2D和3D
+    if (!FaceNodeCoords.empty())
+    {
+        // 计算包围盒
+        Vector minCoord = FaceNodeCoords[0];
+        Vector maxCoord = FaceNodeCoords[0];
+        for (const auto& coord : FaceNodeCoords)
+        {
+            if (coord.m_x < minCoord.m_x) minCoord.m_x = coord.m_x;
+            if (coord.m_y < minCoord.m_y) minCoord.m_y = coord.m_y;
+            if (coord.m_z < minCoord.m_z) minCoord.m_z = coord.m_z;
+            if (coord.m_x > maxCoord.m_x) maxCoord.m_x = coord.m_x;
+            if (coord.m_y > maxCoord.m_y) maxCoord.m_y = coord.m_y;
+            if (coord.m_z > maxCoord.m_z) maxCoord.m_z = coord.m_z;
+        }
+        boundingBox = AABB(minCoord, maxCoord);
+    }
+    
+    // --- Case 1: 2D 面 (线段) ---
     if (n == 2) 
     {
         // 2D 面（线段）
-        midpoint = (FaceNodeCoords[0] + FaceNodeCoords[1]) / 2.0;
-        Vector diff = FaceNodeCoords[1] - FaceNodeCoords[0];
-        length = diff.Mag();
-		//cout << "Face " << id << " 2D 面长度: " << length << endl;
+        midpoint = (FaceNodeCoords[0] + FaceNodeCoords[1]) / 2.0;   //中点计算
+        Vector diff = FaceNodeCoords[1] - FaceNodeCoords[0];        
+        length = diff.Mag();                                        //线段长度计算
+
+        // 2D 法向：(dy, -dx)
         normal = Vector(diff.m_y, -diff.m_x, 0.0);
-		//cout << "Face " << id << " 2D 面法向量: ("
-			//<< normal.m_x << ", " << normal.m_y << ", " << normal.m_z << ")" << endl;
         double normMag = normal.Mag();
         if (normMag > 1e-12)
-			normal = normal / normMag; // 单位化法向量
+			normal = normal / normMag; // 单位化法向量   
+    }
 
-        if (!FaceNodeCoords.empty())
-        {
-			// 计算包围盒
-			Vector minCoord = FaceNodeCoords[0];
-			Vector maxCoord = FaceNodeCoords[0];
-			for (const auto& coord : FaceNodeCoords)
-			{
-				if (coord.m_x < minCoord.m_x) minCoord.m_x = coord.m_x;
-				if (coord.m_y < minCoord.m_y) minCoord.m_y = coord.m_y;
-				if (coord.m_z < minCoord.m_z) minCoord.m_z = coord.m_z;
-				if (coord.m_x > maxCoord.m_x) maxCoord.m_x = coord.m_x;
-				if (coord.m_y > maxCoord.m_y) maxCoord.m_y = coord.m_y;
-				if (coord.m_z > maxCoord.m_z) maxCoord.m_z = coord.m_z;
-			}
-			boundingBox = AABB(minCoord, maxCoord);
+    // --- Case 2: 3D 面 (三角形/四边形/多边形) ---
+    else
+    {
+        // 1. 计算几何中心 (Simple Average)
+        midpoint = Vector(0.0, 0.0, 0.0);
+        for (const auto& p : FaceNodeCoords) {
+            midpoint = midpoint + p;
+        }
+        midpoint = midpoint / static_cast<double>(n);
+
+        // 2. 计算面积矢量 (Area Vector) 和 面积 (length)
+        // 方法：将多边形三角剖分为扇形 (Fan triangulation)，求叉积之和
+        // 假设多边形是凸的或节点顺序良好的简单多边形
+        Vector areaVec(0.0, 0.0, 0.0);
+        const Vector& p0 = FaceNodeCoords[0];
+
+        for (size_t i = 1; i < n - 1; ++i) {
+            Vector v1 = FaceNodeCoords[i] - p0;
+            Vector v2 = FaceNodeCoords[i + 1] - p0;
+            // 注意：使用 & 作为叉乘运算符
+            areaVec = areaVec + (v1 & v2);
+        }
+        areaVec = areaVec * 0.5;
+
+        // 3. 设置属性
+        // 在 3D 模式下，成员变量 'length' 存储的是【面积】
+        length = areaVec.Mag();
+
+        if (length > 1e-12) {
+            normal = areaVec / length; // 单位化法向
+        }
+        else {
+            // 退化面处理
+            normal = Vector(0.0, 0.0, 0.0);
         }
 
     }
-    else if (n == 3)
-    {
-        // 3D 面（三角形面片）
-        const Vector& p0 = FaceNodeCoords[0];
-        const Vector& p1 = FaceNodeCoords[1];
-        const Vector& p2 = FaceNodeCoords[2];
 
-        // 面的几何中心（三角形重心）
-        midpoint = (p0 + p1 + p2) / 3.0;
-
-        // 计算法向量：normal = (p1 - p0) × (p2 - p0)
-        Vector v1 = p1 - p0;
-        Vector v2 = p2 - p0;
-        normal = v1 & v2;  // 使用已重载的叉乘运算符 &
-        double area = 0.5 * normal.Mag(); // 面积为叉积长度的一半
-        length = area; // 3D 中将面积赋值给 length（可改为 area 字段）
-
-        // 单位化法向量
-        if (normal.Mag() > 1e-12)
-            normal = normal / normal.Mag();
-    }
+    
 }
+// =========================================================
+// 【2D/3D】计算面法矢量、正交投影矢量、非正交修正矢量
+// =========================================================
 
 void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCorrectionMethod method)
 {
@@ -78,9 +106,6 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         return;
     }
     Vector ej = ownerToNeighbor / d_norm;  // 单位方向向量
-    //cout << "Face " << id << " 的单位方向向量 e_j: ("
-    //    << ej.m_x << ", " << ej.m_y << ", " << ej.m_z << ")  "
-    //    << endl;
 
     // 2) 构造面积矢量 A_j = normal * length
     Vector Aj = normal * length;
@@ -101,14 +126,11 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
     case NormalVectorCorrectionMethod::MinimumCorrection:
         // E_j = (A_j·e_j) e_j
         vectorE = ej * Aj_dot_ej;
-        //cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
-
         break;
 
     case NormalVectorCorrectionMethod::OrthogonalCorrection:
         // E_j = |A_j| e_j, 其中 |A_j| = length (normal 已单位化)
         vectorE = ej * length;
-       // cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
         break;
 
     case NormalVectorCorrectionMethod::OverRelaxed:
@@ -117,23 +139,19 @@ void Face::computeFaceVectors(const Vector& Cp, const Vector& Cn, NormalVectorCo
         double Aj_norm = length;
         double factor = (Aj_norm * Aj_norm) / Aj_dot_ej;
         vectorE = ej * factor;
-        //cout << "Face :" << id << "的E矢量:(" << vectorE.m_x << ", " << vectorE.m_y << ", " << vectorE.m_z << ")" << endl;
         break;
     }
     }
     // 4) 非正交分量
     vectorT = Aj - vectorE;
-   // cout << "Face :" << id << "的T矢量:(" << vectorT.m_x << ", " << vectorT.m_y << ", " << vectorT.m_z << ")" << endl;
+   
     //5） 正交插值权重gamma 投影到 e_j（0..1 之间）
-    double D = ownerToNeighbor * ej;     // 应等于 d_norm
-    //cout << "Face " << id << "D: " << D << endl;
-    //cout << "Face " << id << "d_norm: " << d_norm << endl;
-    double s = (midpoint - Cp) * ej;     // owner 到 面心 在 e_j 上的投影
-    double gamma = (std::abs(D) > 1e-14) ? (s / D) : 0.5; // 容错
+    double D = ownerToNeighbor * ej;                        // 应等于 d_norm
+    double s = (midpoint - Cp) * ej;                        // owner 到 面心 在 e_j 上的投影
+    double gamma = (std::abs(D) > 1e-14) ? (s / D) : 0.5;   // 容错
     if (gamma < 0.0) gamma = 0.0;
     if (gamma > 1.0) gamma = 1.0;
     f_linearInterpolationCoef = gamma;
-
 }
 
 

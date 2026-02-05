@@ -26,15 +26,30 @@ int SinglePhase_CO2_TH_withWell_reviese()
     // 2）生成变量场
     FieldRegistry reg;  //基岩变量场生成器
     FaceFieldRegistry freg; //基岩面变量场生成器
-    InitFields ic;
 
-    Initializer::createPrimaryFields_singlePhase_CO2_P(mgr.mesh(), reg);
-    Initializer::createPrimaryFields_singlePhase_CO2_T(mgr.mesh(), reg);
-    Initializer::fillBaseDistributions_singlePhase_CO2_P(mgr.mesh(), reg, ic);
-    Initializer::fillBaseDistributions_singlePhase_CO2_T(mgr.mesh(), reg, ic);
+    Initializer::createPrimaryFields(mgr.mesh(), reg, "T");
+    Initializer::createPrimaryFields(mgr.mesh(), reg, "p_g");
 
-    ensureTransientFields_scalar(mgr.mesh(), reg, "T", "T_old", "T_prev");
-    ensureTransientFields_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
+	///2.1 初始条件设置
+	////2.2 定义初始条件结构体
+    ////CO2相压力
+    InitFields ic_pg;
+	ic_pg.x0 = 5e6;   //Pa
+	ic_pg.x_dx = 0.0;   //x方向压力梯度
+	ic_pg.x_dy = 0.0;   //y方向压力梯度
+	ic_pg.x_dz = 0.0;   //z方向压力梯度
+	Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_pg, "p_g");
+
+    ////温度
+	InitFields ic_T;
+	ic_T.x0 = 323.15;   //K
+	ic_T.x_dx = 0.0;   //x方向温度梯度
+	ic_T.x_dy = 0.0;   //y方向温度梯度
+	ic_T.x_dz = 0.0;   //z方向温度梯度
+	Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_T, "T");
+
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "T", "T_old", "T_prev");
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
 
     //3）物性参数设置,当前给定常物性参数
     PhysicalPropertiesManager ppm;
@@ -125,7 +140,7 @@ int SinglePhase_CO2_TH_withWell_reviese()
     wellsCfg.push_back(prod1);
 
     // 6) 求解器与时间推进设置
-    Vector g = { 0.0, 0.0, 0.0 };
+    Vector g = { 0.0, -9.8, 0.0 };
 
     SinglePhase::FaceMassRateConfig mf_ctrl;
     SinglePhase::PressureSolveControls p_sol_ctrl;

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include "InitConfig.h"
+#include "CapRelPerm.h"
 
 // A lightweight capillary/rel-perm model for debugging:
 // - Capillary pressure: linear with effective saturation, Pc = pc_entry * (1 - Se)

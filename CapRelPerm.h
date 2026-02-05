@@ -1,13 +1,27 @@
 ﻿#pragma once
-// CapRelPerm.h
-#pragma once
-#include "InitConfig.h"
 #include <algorithm>
 #include <cmath>
 
 // ===== common epsilon & helpers =====//
 constexpr double kTiny = 1e-12; // 避免除零等数值问题的小量
 constexpr double kPcMax = 1e7; // 最大毛细压力，单位 Pa
+
+//////////VG模型参数与相对渗透率参数//////////
+struct VGParams  //VG模型参数 Se=(1+（alpha*P）^n)^(-m) 表征毛细压力-饱和度关系
+{
+    double alpha = 1.0 / 5e4;  // [1/Pa] 例：5e4 Pa 尺度
+    double n = 2.0;            // 无量纲
+    double m() const { return 1.0 - 1.0 / n; }
+    double Swr = 0.25;       // 残余水
+    double Sgr = 0.05;       // 残余气（CO2）
+
+};
+
+struct RelPermParams
+{
+    double L = 0.5;  //无量纲Mualem 指数
+};
+
 
 inline bool vg_params_valid(const VGParams& vg) 
 {

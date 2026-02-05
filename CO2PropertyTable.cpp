@@ -44,8 +44,6 @@ namespace {
         return bilerp_linear(v00, v10, v01, v11, a, b);
     }
 }
-
-
 namespace fs = std::experimental::filesystem;
 
 CO2PropertyTable& CO2PropertyTable::instance() 
@@ -64,9 +62,15 @@ CO2PropertyTable::CO2PropertyTable(const std::string& filename)
 // ——— load(): 支持文本解析 + .cache 二进制缓存 ———
 void CO2PropertyTable::load(const std::string& filename) {
     const std::string cacheFile = filename + ".cache";
+    bool useCache = false;
 
-    // 1) 若 .cache 存在，优先直接二进制加载
-    if (fs::exists(cacheFile)) {
+    if (fs::exists(cacheFile) && fs::exists(filename)) {
+        if (fs::last_write_time(cacheFile) > fs::last_write_time(filename)) {
+            useCache = true;
+        }
+    }
+    if (useCache)
+    {
         std::ifstream binIn(cacheFile, std::ios::binary);
         if (binIn) {
             size_t np, nt;
@@ -80,17 +84,11 @@ void CO2PropertyTable::load(const std::string& filename) {
 
             data_.assign(np, std::vector<CO2Properties>(nt));
             for (size_t i = 0; i < np; ++i) {
-                for (size_t j = 0; j < nt; ++j) {
-                    CO2Properties w;
-                    binIn.read(reinterpret_cast<char*>(&w), sizeof(w));
-                    data_[i][j] = w;
-                }
+                binIn.read(reinterpret_cast<char*>(data_[i].data()), nt * sizeof(CO2Properties));
             }
-            return;  // 成功加载缓存
+            if (binIn) return;
         }
-        // 若打开失败，则 fall through 到文本解析
     }
-
     // 2) 文本解析
     std::ifstream in(filename);
     if (!in) throw std::runtime_error("Cannot open CO2 property file: " + filename);
@@ -121,6 +119,8 @@ void CO2PropertyTable::load(const std::string& filename) {
             >> r.w.h    // 比焓
             >> r.w.k)   // 导热系数
         {
+            r.w.c = 0.0;
+            r.w.dRho_dP = 0.0;
             rows.push_back(r);
         }
     }
@@ -171,44 +171,6 @@ void CO2PropertyTable::load(const std::string& filename) {
     }
 }
 
-// Catmull–Rom 三次 Hermite 插值
-double CO2PropertyTable::cubicHermite(
-    double y0, double y1, double y2, double y3, double t)
-{
-    double m1 = 0.5 * (y2 - y0);
-    double m2 = 0.5 * (y3 - y1);
-    double t2 = t * t, t3 = t2 * t;
-    return (2 * y1 - 2 * y2 + m2 + m1) * t3
-        + (-3 * y1 + 3 * y2 - 2 * m1 - m2) * t2
-        + m1 * t
-        + y1;
-}
-
-// 双三次 Catmull–Rom 插值
-double CO2PropertyTable::bicubicInterpolate(
-    const std::vector<std::vector<CO2Properties>>& data,
-    const std::vector<double>& X,
-    const std::vector<double>& Y,
-    size_t i, size_t j,
-    double xFrac, double yFrac,
-    const std::function<double(const CO2Properties&)>& field)
-{
-    double arr[4];
-    // 沿 Y 做 4 次 Hermite
-    for (int di = -1; di <= 2; ++di) {
-        int ii = int(clamp(double(i + di), 0.0, double(X.size() - 1)));
-        double v[4];
-        for (int dj = -1; dj <= 2; ++dj) {
-            int jj = int(clamp(double(j + dj), 0.0, double(Y.size() - 1)));
-            v[dj + 1] = field(data[ii][jj]);
-        }
-        arr[di + 1] = cubicHermite(v[0], v[1], v[2], v[3], yFrac);
-    }
-    // 再沿 X 做一次 Hermite
-    return cubicHermite(arr[0], arr[1], arr[2], arr[3], xFrac);
-}
-
-
 CO2Properties CO2PropertyTable::getProperties(double P, double T) const
 {
 
@@ -235,5 +197,35 @@ CO2Properties CO2PropertyTable::getProperties(double P, double T) const
     R.cp = bilerp_linear(V00.cp, V10.cp, V01.cp, V11.cp, a, b);
     R.cv = bilerp_linear(V00.cv, V10.cv, V01.cv, V11.cv, a, b);
     R.h = bilerp_linear(V00.h, V10.h, V01.h, V11.h, a, b);
+
+    // [新增] 动态计算 dRho/dP 和 c
+    // 对于 log 插值: L = ln(rho) 是线性的
+    // rho = exp(L)
+    // dRho/dP = rho * (dL/dP)
+    // c = 1/rho * dRho/dP = dL/dP
+
+    double P0 = pressures_[iP0];
+    double P1 = pressures_[iP1];
+    double deltaP_grid = P1 - P0;
+
+    if (deltaP_grid > 1e-9) {
+        // 计算 L 对 P 的偏导数 (固定 T)
+        // dL/da = (1-b)*(ln(rho10) - ln(rho00)) + b*(ln(rho11) - ln(rho01))
+        double ln_rho00 = std::log(V00.rho);
+        double ln_rho10 = std::log(V10.rho);
+        double ln_rho01 = std::log(V01.rho);
+        double ln_rho11 = std::log(V11.rho);
+
+        double dL_da = (1.0 - b) * (ln_rho10 - ln_rho00) + b * (ln_rho11 - ln_rho01);
+        double dL_dP = dL_da / deltaP_grid;
+
+        R.c = dL_dP;
+        R.dRho_dP = R.rho * R.c;
+    }
+    else {
+        R.c = 0.0;
+        R.dRho_dP = 0.0;
+    }
+
     return R;
 }

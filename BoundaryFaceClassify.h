@@ -1,10 +1,12 @@
 #pragma once
-#pragma once
 #include <vector>
 #include <limits>
 #include <cmath>
 #include <algorithm>
-#include "Mesh.h"  
+
+
+#include "Mesh.h" 
+#include "MeshDefinitions.h"
 
 namespace BoundaryFaceClassify
 {
@@ -15,6 +17,10 @@ namespace BoundaryFaceClassify
         std::vector<int> x0, xL;  // x=0 / x=Lx
         std::vector<int> y0, yL;  // y=0 / y=Ly
         std::vector<int> z0, zL;  // z=0 / z=Lz（Lz<=0 时为空）
+
+        // 用于存储标准盒子以外的边界（如内部障碍物）
+        // Key: Tag ID, Value: Face ID List
+        std::map<int, std::vector<int>> custom;
     };
 
     // ---------------------------- 小工具 ----------------------------

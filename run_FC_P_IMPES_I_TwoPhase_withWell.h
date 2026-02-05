@@ -57,12 +57,37 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
     IMPES_Iteration::PressureEquation_String P_Eq;
     IMPES_Iteration::SaturationEquation_String S_Eq;
 
-    Initializer::createPrimaryFields_TwoPhase_HT_IMPES(mgr.mesh(), reg, P_Eq.pressure_field, S_Eq.saturation, "T");
-    Initializer::fillBaseDistributions_TwoPhase_HT_IMPES(mgr.mesh(), reg, ic);
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, P_Eq.pressure_field, P_Eq.pressure_old_field, P_Eq.pressure_prev_field);
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, S_Eq.saturation, S_Eq.saturation_old, S_Eq.saturation_prev);
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
+    GeneralTools::ensureTransientFields_scalar1(mgr.mesh(), reg, "T", "T_old", "T_prev");
 
-    ensureTransientFields_scalar(mgr.mesh(), reg, P_Eq.pressure_field, P_Eq.pressure_old_field, P_Eq.pressure_prev_field);
-    ensureTransientFields_scalar(mgr.mesh(), reg, S_Eq.saturation, S_Eq.saturation_old, S_Eq.saturation_prev);
-    ensureTransientFields_scalar(mgr.mesh(), reg, "p_g", "p_g_old", "p_g_prev");
+    // 填充初始场
+    ///水相压力场，p_w
+    InitFields ic_pw; //创建一个新的 InitFields 结构体用于水相压力场初始化
+    ic_pw.x0 = 1e7;     // 初始水相压力 10 MPa
+    ic_pw.x_dx = 0.0;   // x方向梯度为 0
+    ic_pw.x_dy = 0.0;   // y方向梯度为 0
+    ic_pw.x_dz = 0.0;   // z方向梯度为 0
+    Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_pw, P_Eq.pressure_field); //填充水相压力场
+
+    ///水相饱和度场，s_w
+    InitFields ic_sw; //创建一个新的 InitFields 结构体用于水相饱和度场初始化
+    ic_sw.x0 = 0.95;    // 初始水相饱和度 0.95
+    ic_sw.x_dx = 0.0;   // x方向梯度为 0
+    ic_sw.x_dy = 0.0;   // y方向梯度为 0
+    ic_sw.x_dz = 0.0;   // z方向梯度为 0
+    Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_sw, S_Eq.saturation); //填充水相饱和度场
+
+    ///温度场，T
+    InitFields ic_T; //创建一个新的 InitFields 结构体用于温度场初始化
+    ic_T.x0 = 300.0;    // 初始温度 300 K
+    ic_T.x_dx = 0.0;   // x方向梯度为 0
+    ic_T.x_dy = 0.0;   // y方向梯度为 0
+    ic_T.x_dz = 0.0;   // z方向梯度为 0
+    Initializer::fillBaseDistributions1(mgr.mesh(), reg, ic_T, "T"); //填充温度场
+
+
 
     // ---------------- 2. Rock properties ----------------
     PhysicalPropertiesManager ppm;
@@ -173,7 +198,7 @@ inline int run_FC_P_IMPES_I_TwoPhase_WellCase()
     double       dt_initial = 1e-5;
 
     FC_P_IMPES_I::TimeStepControl timeCtrl;
-    timeCtrl.dt_min = 1e-5;
+    timeCtrl.dt_min = 1e-7;
     timeCtrl.dt_max = 100;
     timeCtrl.grow_factor = 100;
 

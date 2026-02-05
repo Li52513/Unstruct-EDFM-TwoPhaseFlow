@@ -37,6 +37,7 @@ namespace PhysicalProperties_string
         std::string cp_tag = "cp_g";
         std::string drho_g_dp_tag = "drho_gdp";
         std::string c_g_tag = "c_g";
+		std::string h_g_tag = "h_g";
         // old timen layer
         std::string rho_old_tag = "rho_g_old";
         std::string mu_old_tag = "mu_g_old";
@@ -44,6 +45,7 @@ namespace PhysicalProperties_string
         std::string cp_old_tag = "cp_g_old";
         std::string drho_g_dp_old_tag = "drho_gdp_old";
         std::string c_g_old_tag = "c_g_old";
+		std::string h_g_old_tag = "h_g_old";
         // Two-phase properties
         std::string k_rg_tag = "k_rg";				        //relative permeability 
         std::string lambda_g_tag = "lambda_g";		        //mobility
@@ -63,6 +65,19 @@ namespace PhysicalProperties_string
         std::string k_yy_tag = "kyy";
         std::string k_zz_tag = "kzz";
         std::string c_r_tag = "c_r";				//rock compressibility
+    };
+
+    struct FractureProperties_String
+    {
+        // Bsic properties
+        std::string phi_tag = "fr_phi_r";
+		std::string rho_tag = "fr_rho_r";				//rock density
+		std::string cp_tag = "fr_cp_r";				//rock specific heat capacity
+		std::string lambda_tag = "fr_lambda_r";				//rock thermal conductivity
+		std::string k_t = "fr_k_t"; 			  //transverse permeability
+		std::string k_n = "fr_k_n";                //longitudinal permeability
+		std::string c_r_tag = "fr_c_r";				//rock compressibility
+		std::string fr_aperture = "fr_aperture";    
     };
 
     struct SinglePhase_case
@@ -90,6 +105,8 @@ namespace IMPES_Iteration
         std::string pressure_old_field = "p_w_old";
         std::string pressure_prev_field = "p_w_prev";
         std::string pressure_g = "p_g";   //current CO2 pressure
+		std::string pressure_g_old = "p_g_old";   //old time layer CO2 pressure
+		std::string pressure_g_prev = "p_g_prev";   //previous iteration
         std::string Pc_field = "Pc";
 
         //扩散项离散系数临时储存名称

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <experimental/filesystem>
 
+
 namespace 
 {
     // 在 axis（升序）里定位 x 所在的小区间 [i0,i1] 以及分数 frac
@@ -63,9 +64,18 @@ WaterPropertyTable::WaterPropertyTable(const std::string& filename)
 void WaterPropertyTable::load(const std::string& filename)
 {
     const std::string cacheFile = filename + ".cache";
+    bool useCache = false;
 
     // 1) 如果 .cache 存在，则二进制加载
-    if (fs::exists(cacheFile)) {
+    if (fs::exists(cacheFile) && fs::exists(filename)) {
+        auto txtTime = fs::last_write_time(filename);
+        auto binTime = fs::last_write_time(cacheFile);
+        if (binTime > txtTime) {
+            useCache = true;
+        }
+    }
+	if (useCache) 
+    {
         std::ifstream binIn(cacheFile, std::ios::binary);
         if (binIn) {
             size_t np, nt;
@@ -119,6 +129,8 @@ void WaterPropertyTable::load(const std::string& filename)
             >> r.w.h    // 比焓
             >> r.w.k)   // 导热系数
         {
+            r.w.c = 0.0;
+            r.w.dRho_dP = 0.0;
             rows.push_back(r);
         }
     }
@@ -166,38 +178,6 @@ void WaterPropertyTable::load(const std::string& filename)
     }
 }
 
-double WaterPropertyTable::cubicHermite(double y0, double y1, double y2, double y3, double t) {
-    double m1 = 0.5 * (y2 - y0);
-    double m2 = 0.5 * (y3 - y1);
-    double t2 = t * t, t3 = t2 * t;
-    return (2 * y1 - 2 * y2 + m2 + m1) * t3
-        + (-3 * y1 + 3 * y2 - 2 * m1 - m2) * t2
-        + m1 * t
-        + y1;
-}
-
-double WaterPropertyTable::bicubicInterpolate(
-    const std::vector<std::vector<WaterProperties>>& data,
-    const std::vector<double>& X,
-    const std::vector<double>& Y,
-    size_t i, size_t j,
-    double xFrac, double yFrac,
-    const std::function<double(const WaterProperties&)>& field)
-{
-    double arr[4];
-    // 沿 Y 对 4 行做 Hermite
-    for (int di = -1; di <= 2; ++di) {
-        int ii = int(clamp(double(i + di), 0.0, double(X.size() - 1)));
-        double v[4];
-        for (int dj = -1; dj <= 2; ++dj) {
-            int jj = int(clamp(double(j + dj), 0.0, double(Y.size() - 1)));
-            v[dj + 1] = field(data[ii][jj]);
-        }
-        arr[di + 1] = cubicHermite(v[0], v[1], v[2], v[3], yFrac);
-    }
-    // 再沿 X 对 4 个结果做一次 Hermite
-    return cubicHermite(arr[0], arr[1], arr[2], arr[3], xFrac);
-}
 
 WaterProperties WaterPropertyTable::getProperties(const double& P, const double& T) const
 {
@@ -227,6 +207,30 @@ WaterProperties WaterPropertyTable::getProperties(const double& P, const double&
     R.cv = bilerp_linear(V00.cv, V10.cv, V01.cv, V11.cv, a, b);
     R.h = bilerp_linear(V00.h, V10.h, V01.h, V11.h, a, b);
     R.k = bilerp_linear(V00.k, V10.k, V01.k, V11.k, a, b);
+
+    // [新增] 动态计算压缩系数 c 和 dRho_dP
+    // 线性插值公式: f(a,b) = (1-b)*[(1-a)v00 + a*v10] + b*[(1-a)v01 + a*v11]
+    // df/da = (1-b)*(v10 - v00) + b*(v11 - v01)
+    // dP = (P1 - P0) * da  =>  da/dP = 1 / (P1 - P0)
+    // dRho/dP = (df/da) * (da/dP)
+
+    double P0 = pressures_[iP0];
+    double P1 = pressures_[iP1];
+    double deltaP_grid = P1 - P0;
+
+    if (deltaP_grid > 1e-9) {
+        // 固定 T (即 b 不变)，对 a 求导
+        double dRho_da = (1.0 - b) * (V10.rho - V00.rho) + b * (V11.rho - V01.rho);
+        R.dRho_dP = dRho_da / deltaP_grid;
+
+        // c = (1/rho) * dRho/dP
+        R.c = (R.rho > 1e-9) ? (R.dRho_dP / R.rho) : 0.0;
+    }
+    else {
+        R.dRho_dP = 0.0;
+        R.c = 0.0;
+    }
+
     return R;
 
 

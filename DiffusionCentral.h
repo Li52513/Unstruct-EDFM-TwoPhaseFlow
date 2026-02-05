@@ -6,11 +6,10 @@
 #include <cmath>
 #include <iostream>
 #include <unordered_map>
+
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
-#include "FieldAcessForDiscre.h"
-#include "BCAdapter.h"
 #include "Diff_TPFA_PermeabilityOperation.h"
 #include "Diff_TPFA_GradientsOperation.h"
 

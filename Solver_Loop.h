@@ -18,6 +18,7 @@
 #include "PhysicalPropertiesManager.h"
 #include "BCAdapter.h"
 #include "TemperatureBCAdapter.h"
+#include "Solver_Tools.h"
 
 #include "SinglePhase_FaceMassRateCalculate.h"
 #include "SinglePhase_PressureEq_AssemblerandSolver.h"
@@ -141,12 +142,12 @@ namespace SinglePhase {
 			reg.getOrCreate<volScalarField>(Ceff_old_name2, nCells, 0.0);
 
 			// make sure current rho/Ceff are consistent with the just-frozen p_prev/T_prev
-			if (!GeneralTools::copyField1(reg, p_prev_name, p_name)) return false;
-			if (!GeneralTools::copyField1(reg, T_prev_name, T_name)) return false;
+			if (!GeneralTools::copyField(reg, p_prev_name, p_name)) return false;
+			if (!GeneralTools::copyField(reg, T_prev_name, T_name)) return false;
 			if (!updateProps_all()) return false;
 
-			if (!GeneralTools::copyField1(reg, rho_name, rho_old_name2)) return false;
-			if (!GeneralTools::copyField1(reg, Ceff_name, Ceff_old_name2)) return false;
+			if (!GeneralTools::copyField(reg, rho_name, rho_old_name2)) return false;
+			if (!GeneralTools::copyField(reg, Ceff_name, Ceff_old_name2)) return false;
 
 			// ---------- Step 3) outer iteration inside time step ----------
 			bool accept_step_P = false;

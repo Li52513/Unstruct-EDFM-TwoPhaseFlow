@@ -28,6 +28,7 @@ struct VolField : BaseField
 using volScalarField = VolField<double>;
 using volVectorField = VolField<Vector>;
 
+// 辅助函数：遍历裂缝网络中的所有裂缝微元 适用于2D-EDFM
 template<class Fn>
 inline void forEachFracElem(const FractureNetwork& frNet,
     const FracElemIndex& idx,

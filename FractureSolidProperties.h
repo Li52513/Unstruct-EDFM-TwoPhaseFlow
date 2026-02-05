@@ -1,7 +1,6 @@
 #pragma once
 #include "PropertiesSummary.h" // 里面定义 SolidProperties_Frac 等
-
-enum class FractureElementType { Blocking, Conductive };
+#include "FractureCommon.h"
 
 namespace fracture 
 {

@@ -28,7 +28,8 @@ int EDFM_SinglePhase_CO2_HT_2D()
     mgr.generateDFN(/*N=*/10,/*minPoint=*/{ 0.0,0.0,0.0 },/*maxPoint=*/{ 1.0,1.0,0.0 },/*Lmin=*/0.5,/*Lmax=*/1.4,/*alpha=*/0,/*kappa=*/0,/*avoidOverlap=*/true);
 
     mgr.setDistanceMetric(DistanceMetric::CrossAwareGauss);// 设置距离度量方式AreaWeight CellCenter NodeAverage CrossAwareGauss
-	mgr.DetectAndSubdivideFractures(false); //输入决定了是否使用AABB加速
+	mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GlobalAABB); 
+    
 
 	// 导出网格、裂缝信息在matlab中进行可视化
     mgr.exportMesh("mesh");

@@ -13,6 +13,7 @@
 #include "PhysicalPropertiesManager_TwoPhase.h"
 
 #include "Solver_TimeLoopUtils.h"
+#include "Solver_Tools.h"
 #include "PressureEqSolver.h"
 #include "FaceMassRateCalculate.h"
 #include "FluxSplitterandSolver.h"
@@ -32,7 +33,7 @@ namespace IMPES_Iteration
     struct TimeStepControl
     {
         double dt_min = 1e-5;   ///< 允许的最小时间步 [s]
-        double dt_max = 100;   ///< 允许的最大时间步 [s]
+        double dt_max = 1000;   ///< 允许的最大时间步 [s]
         double grow_factor = 100;    ///< 接受时间步后，最大放大倍数
         double shrink_factor = 0.7;    ///< 拒绝时间步时收缩倍数
         double safety_factor = 1;    ///< 步长的安全系数
@@ -190,14 +191,14 @@ namespace IMPES_Iteration
 
             auto rollback_after_failure = [&](const char* stage)->bool
             {
-                copyField(reg,
+                    GeneralTools::copyField(reg,
                     pressureCtrl.assembly.pressure_old_field,
                     pressureCtrl.assembly.pressure_field);
-                copyField(reg,
+                    GeneralTools::copyField(reg,
                     satCfg.saturation_old,
                     satCfg.saturation);
                 // Rock porosity might have been updated after the pressure step; restore it on rollback.
-                copyField(reg,
+                    GeneralTools::copyField(reg,
                     PhysicalProperties_string::Rock().phi_old_tag,
                     PhysicalProperties_string::Rock().phi_tag);
                 TwoPhase::updateTwoPhasePropertiesAtTimeStep(
@@ -234,7 +235,7 @@ namespace IMPES_Iteration
             };
 
             /// 1.1 备份当前时间层的 p_w / S_w（用 *_old 做回滚）
-            if (!startTimeStep_scalar(
+            if (!GeneralTools::startTimeStep_scalar(
                 mesh, reg,
                 pressureCtrl.assembly.pressure_field,
                 pressureCtrl.assembly.pressure_old_field,
@@ -243,7 +244,7 @@ namespace IMPES_Iteration
                 std::cerr << "[IMPES][Iteration] startTimeStep for pressure failed.\n";
                 return false;
             }
-            if (!startTimeStep_scalar(
+            if (!GeneralTools::startTimeStep_scalar(
                 mesh, reg,
                 satCfg.saturation,
                 satCfg.saturation_old,
@@ -323,6 +324,12 @@ namespace IMPES_Iteration
                     std::cout << "[IMPES][Pressure] converged at outer iter " << it
                         << " with dp_inf=" << dp_prev << "\n";
                     p_converged = true;
+                    for (const auto& c : cells)
+                    {
+                        if (c.id < 0) continue;
+                        const size_t i = id2idx.at(c.id);
+                        (*p_g)[i] = (*p_w)[i] + (*Pc)[i];
+                    }
                     break;
                 }
                 if (it == pressureCtrl.max_outer - 1) 
@@ -336,18 +343,13 @@ namespace IMPES_Iteration
             {
                 std::cerr << "[IMPES][Iteration] Pressure not converged at time step "
                     << stepId << ", rollback and shrink dt.\n";
-
-                // 使用统一的回滚逻辑：恢复 *_old，重算 p_g / 物性，缩小 dt
-                //if (!rollback_after_failure("pressure convergence failure"))
-                //{
-                //    return false;   // dt 已经小于 dt_min
-                //}
-                continue;           // 重新计算该时间段（step 不自增）
+                continue;   
             }
 
             // Update rock porosity for this time layer (needed for consistent mass balance with rock compressibility).
             if (accept_step)
             {
+
                 if (!TwoPhase::updateRockPorosityFromCompressibilityAtStep(
                     mgr, reg,
                     pressureCtrl.assembly.pressure_old_field,
@@ -420,20 +422,19 @@ namespace IMPES_Iteration
             FaceSignMask faceMask;   // 可选：记录面方向 + 上游信息
             if (accept_step)
             {
-                if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg, FaceMassRateCfg, &faceMask, &fluxRep))
+                //if (!splitTwoPhaseMassFlux(mgr, reg, freg, fluxCfg, FaceMassRateCfg, &faceMask, &fluxRep))
+                //{
+                //    std::cerr << "[IMPES_Iteration] splitTwoPhaseMassFlux failed.\n";
+                //    if (!rollback_after_failure("flux split")) return false;
+                //    accept_step = false;
+                //}
+                if (!splitTwoPhaseMassFlux_PotentialCalcute(mgr, reg, freg, fluxCfg, FaceMassRateCfg, &faceMask, &fluxRep))
                 {
                     std::cerr << "[IMPES_Iteration] splitTwoPhaseMassFlux failed.\n";
                     if (!rollback_after_failure("flux split")) return false;
                     accept_step = false;
                 }
-                //// 3.5) 调试：检查边界 inflow/outflow 通量与 fw 因为边界上忽略了毛细通量和重力通量
-                //IMPES_Iteration::diagnoseBoundaryFluxWithFw(
-                //    mgr,
-                //    freg,
-                //    FaceMassRateCfg.total_mass_flux,        // 对应 mf_total
-                //    fluxCfg.fractional_flow_face,   // 对应 fw_face，一般是 "fw_face"
-                //    fluxCfg.flux_sign_epsilon       // 与 splitTwoPhaseMassFlux 使用同一阈值
-                //);
+                
             }
 
             if (!IMPES_Iteration::buildWaterAndGasSourceFieldsFromWells(

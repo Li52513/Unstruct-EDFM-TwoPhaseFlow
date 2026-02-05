@@ -192,9 +192,9 @@ namespace IMPES_Iteration
         // ===== 6) 对 cell 压力做欠松弛（相对于 *_prev） ===== //
         double dpInf = 0.0;
         // 欠松弛
-        underRelaxInPlace(reg, ctrl.assembly.pressure_field, ctrl.assembly.pressure_prev_field, ctrl.under_relax);
-        dpInf = maxAbsDiff(reg, ctrl.assembly.pressure_field, ctrl.assembly.pressure_prev_field);
-        updatePrevIterates(reg, { { ctrl.assembly.pressure_field,ctrl.assembly.pressure_prev_field } });
+        GeneralTools::underRelaxInPlace(reg, ctrl.assembly.pressure_field, ctrl.assembly.pressure_prev_field, ctrl.under_relax);
+        dpInf = GeneralTools::maxAbsDiff(reg, ctrl.assembly.pressure_field, ctrl.assembly.pressure_prev_field);
+        GeneralTools::updatePrevIterates(reg, { { ctrl.assembly.pressure_field,ctrl.assembly.pressure_prev_field } });
         // ===== 填充报告 ===== //
         dp_inf = dpInf;
         lin_residual = linRes;

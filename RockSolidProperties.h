@@ -1,12 +1,68 @@
 ﻿#pragma once
+#include <cassert>
 #include "Cell.h"
 #include "MeshManager.h"
 #include "FieldRegistry.h"
-#include"PropertiesSummary.h"
+#include "PropertiesSummary.h"
 #include "SolverContrlStrName.h"
 
 namespace rock
 {
+
+	struct RegionGeometry
+	{
+		Cell::RegionType      type;     ///< 要贴的区域标签
+		vector<Vector>   vertices; ///< 凸多边形顶点列表（至少3个点）
+	};
+	
+	//辅助函数
+	//用来判断点是否在凸多边形内的函数
+	static bool pointInConvexPolygon(const Vector& p, const vector<Vector>& verts)
+	{
+		assert(verts.size() >= 3); // 至少需要三个顶点 NOTE: 这里假设 verts 是凸多边形的顶点；其次assert只能在debug模式下生效
+		auto cross2d = [](const Vector& u, const Vector& v)
+			{
+				return u.m_x * v.m_y - u.m_y * v.m_x;  // 计算二维向量的叉积
+			};
+
+		// 取第一个点作基准
+		const Vector& a0 = verts[0];
+		// 对每一条边 (a_i -> a_{i+1}) 检查同侧
+		double sign0 = 0;
+		for (size_t i = 0, n = verts.size(); i < n; ++i) {
+			const Vector& a = verts[i];
+			const Vector& b = verts[(i + 1) % n];
+			Vector va = a - p;
+			Vector vb = b - p;
+			double c = cross2d(va, vb);
+			if (i == 0) sign0 = c;
+			else {
+				// 如果出现异号，点就在多边形外
+				if (c * sign0 < 0) return false;
+			}
+		}
+		return true;
+	}
+
+	inline void classifyRockRegionsByGeometry(MeshManager& mgr, const vector<RegionGeometry>& regionGeoms = {}, Cell::RegionType defaultRegion = Cell::RegionType::Medium)
+	{
+		auto& mesh = mgr.mesh();
+		for (auto& cell : mesh.getCells())
+		{
+			if (cell.id < 0) continue;
+			Cell::RegionType region = defaultRegion; // 默认区域
+			for (auto const& rg : regionGeoms)
+			{
+				if (pointInConvexPolygon(cell.center, rg.vertices))
+				{
+					region = rg.type; // 如果点在凸多边形内，设置为对应的区域类型
+					break; // 找到匹配的区域后跳出循环
+				}
+			}
+			cell.region = region; // 更新单元的区域类型
+		}
+	}
+
     struct Rock_heterogeneous_Parameters
     {
 

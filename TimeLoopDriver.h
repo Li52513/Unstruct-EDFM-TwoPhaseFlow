@@ -399,14 +399,14 @@ namespace IMPES_Iteration
                 << " (t = " << simTime << " s, dt = " << dt << " s) =====\n";
 
             //1） 时间步启动，将 t^n 的 p_w / s_w 赋值到 old / prev  这里压力是常数其实都一样
-            if (!startTimeStep_scalar(mgr.mesh(), reg,
+            if (!GeneralTools::startTimeStep_scalar(mgr.mesh(), reg,
                 pressureCtrl.assembly.pressure_field,
                 pressureCtrl.assembly.pressure_old_field,
                 pressureCtrl.assembly.pressure_prev_field))
             {
                 return false;
             }
-            if (!startTimeStep_scalar(mgr.mesh(), reg, satCfg.saturation, satCfg.saturation_old, satCfg.saturation_prev))
+            if (!GeneralTools::startTimeStep_scalar(mgr.mesh(), reg, satCfg.saturation, satCfg.saturation_old, satCfg.saturation_prev))
             {
                 std::cerr << "[IMPES][AnalyticTest] startTimeStep for saturation failed.\n";
                 return false;

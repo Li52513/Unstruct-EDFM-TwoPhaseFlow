@@ -7,6 +7,7 @@
 #include  "FractureSolidProperties.h"
 #include "WaterPropertyTable.h"
 #include "CO2PropertyTable.h"
+#include "RockSolidProperties.h"
 
 #include "UserDefineVarType.h"  // for Vector
 #include "Initializer.h"
@@ -20,14 +21,9 @@ class MeshManager;  // 前向声明 用于后面调用
 class PhysicalPropertiesManager
 {
 public:
-
-
-    struct RegionGeometry
-    {
-        Cell::RegionType      type;     ///< 要贴的区域标签
-        vector<Vector>   vertices; ///< 凸多边形顶点列表（至少3个点）
-    };
-    void classifyRockRegionsByGeometry(MeshManager& mgr, const vector<RegionGeometry>& regionGeomes, Cell::RegionType defaultRegion);
+	
+	// 1） 基岩区域分类
+    void classifyRockRegionsByGeometry(MeshManager& mgr, const vector<rock::RegionGeometry>& regionGeomes, Cell::RegionType defaultRegion);
 
     void classifyFractureElementsByGeometry(MeshManager& mgr, int fracID, const Vector& regionStart, const Vector& regionEnd, FractureElementType insideType, FractureElementType outsideType);
 
@@ -59,17 +55,4 @@ public:
 	 bool ComputeDrho_dp_Water(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
 	 //二氧化碳相
 	 bool ComputeDrho_dp_CO2(MeshManager& mgr, FieldRegistry& reg, const std::string& p_field, const std::string& T_field);
-
-
-	//裂缝-固相
-	void UpdateFractureRockAt(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field);
-
-	//裂缝-流体相：phase ∈ {"water","co2","both"}
-	void UpdateFractureFluidAt(MeshManager& mgr, FieldRegistry& reg, FieldRegistry& reg_fr, const std::string& pf_field, const std::string& Tf_field, const std::string& phase);
- 
-
-
-
-
-
 };
