@@ -11,12 +11,12 @@
 // =========================================================
 
 FractureElement_2D::FractureElement_2D()
-    : id(-1), localIndex(-1), solverIndex(-1), area(0.0), centroid(0.0, 0.0, 0.0)
+    : id(-1), localIndex(-1), parentFractureID(-1), solverIndex(-1), area(0.0), centroid(0.0, 0.0, 0.0)
 {
 }
 
 FractureElement_2D::FractureElement_2D(int _id, const std::vector<int>& _nodes)
-    : id(_id), localIndex(-1),solverIndex(-1), nodeIndices(_nodes), area(0.0), centroid(0.0, 0.0, 0.0)
+    : id(_id), localIndex(-1), parentFractureID(-1), solverIndex(-1), nodeIndices(_nodes), area(0.0), centroid(0.0, 0.0, 0.0)
 {
 }
 

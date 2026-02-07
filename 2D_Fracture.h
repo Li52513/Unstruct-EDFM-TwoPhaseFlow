@@ -89,6 +89,7 @@ public:
 	 */
 
 	void exportToTxt(const std::string& filePrefix) const;
+	void exportToTxt_improved(const std::string& filePrefix) const;
 
 	/**
 	 * @brief 导出内部边及其 FVM 向量信息至 CSV
@@ -120,7 +121,7 @@ private:
 	// 私有辅助函数
 	// ========================================================
 
-	/// [新增] 单元 ID 到 局部索引 的快速查找表
+	/// 单元 ID 到 局部索引 的快速查找表
 	/// Key: FractureElement_2D::id (GID)
 	/// Value: index in fracCells (LID)
 	std::unordered_map<int, int> elemId2Index_;
@@ -131,4 +132,14 @@ private:
 	*/
 	void _buildInternalEdges(int nU, int nV, NormalVectorCorrectionMethod method);
 
+	/**
+	 * @brief 构建裂缝的物理边界边
+	 * @details 处理 U 方向和 V 方向的首尾边界
+	 * @param nU U方向网格数
+	 * @param nV V方向网格数
+	 * @param method 法向修正方法（用于 FVM 向量计算）
+	 */
+	void _buildBoundaryEdges(int nU, int nV, NormalVectorCorrectionMethod method);
+
+	void _reorderCellEdges();
 };

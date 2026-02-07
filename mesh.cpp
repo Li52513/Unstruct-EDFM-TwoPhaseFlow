@@ -204,6 +204,7 @@ void Mesh::GenerateMesh2D(double lengthX, double lengthY, int nx, int ny, bool u
     _fetchNodesFromGmsh(); // 1. 读取节点
     _fetchCells2D();       // 2. 读取单元
     _buildTopology2D();    // 3. 构建拓扑 & 映射边界 Tag
+	buildFaceGlobalId2LocalIndexMap(); // 4. 构建 Face ID 到 Index 映射表
 
     // 6. 后处理
     buildFaceBins_2D();         // 2D 需要空间索引
@@ -338,6 +339,8 @@ void Mesh::GenerateMesh3D(double lengthX, double lengthY, double lengthZ, int nx
 
     std::cout << "[Mesh] Building Face Topology..." << std::endl;
     _buildTopology3D();
+
+    buildFaceGlobalId2LocalIndexMap();
 
     std::cout << "[Mesh] Classifying Matrix Cells..." << std::endl;
     ClassifySolidMatrixCells();

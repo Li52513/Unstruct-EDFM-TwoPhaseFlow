@@ -24,11 +24,18 @@ public:
     int id;                         ///< 全局唯一编号
     int nodeIndices[2];             ///< 构成边的两个节点 (局部索引)
 
+    // --- 原始 ID 信息 (1-based, 用于 I/O 和 调试) ---
     int ownerCellID;                ///< 拥有的单元 (Local ID)
     int neighborCellID;             ///< 邻接的单元 (Local ID, -1表示边界)
 
-    int ownerCell_index = -1;       ///< Owner 在 fractureElements 数组中的直接下标 (0-based)
-    int neighborCell_index = -1;    ///< Neighbor 在 fractureElements 数组中的直接下标 (-1 表示无)
+    // --- 调试与可视化辅助信息 (Suggestion A & C) ---
+    int parentFractureID = -1;      ///<  所属宏观裂缝 ID (用于 ParaView 阈值筛选)
+    int ownerCellLocalIndex = -1;   ///<  Owner 单元在 vector 中的局部下标 (0-based, 用于快速定位)
+    int neighborCellLocalIndex = -1;///<  Neighbor 单元在 vector 中的局部下标 (0-based)
+
+    // --- 核心计算索引 (Solver Index, 0-based) ---
+    int ownerCell_solverIndex = -1;       ///< Owner 在 fractureElements 数组中的直接下标 (0-based)
+    int neighborCell_solverIndex = -1;    ///< Neighbor 在 fractureElements 数组中的直接下标 (-1 表示无)
 
     double f_linearInterpolationCoef = 0.5; ///< 线性插值权重 w (phi_f = w*O + (1-w)*N)
 
@@ -77,4 +84,13 @@ public:
     */
     void computeFVMVectors(const Vector& Cp, const Vector& Cn,
         NormalVectorCorrectionMethod method = NormalVectorCorrectionMethod::OrthogonalCorrection);
+    /**
+     * @brief 计算边界边的几何属性
+     * @details 专门处理只有 Owner 没有 Neighbor 的情况。
+     * 法向量计算逻辑：EdgeVector x Owner.Normal -> Outward Normal
+     * @param allNodes 节点列表
+     * @param owner 拥有的单元对象
+     */
+    void computeBoundaryGeometry(const std::vector<Node>& allNodes,
+        const FractureElement_2D& owner);
 };

@@ -37,7 +37,7 @@ struct InteractionPair
     // 2. 求解器索引 (Indices for Matrix Assembly)
     // =========================================================
     int matrixSolverIndex;              ///< 基岩单元在全局矩阵 A 中的行号 (0-based)
-    int fracSolverIndex;                ///< 裂缝单元在全局矩阵 A 中的行号 (0-based)
+    int fracCellSolverIndex;                ///< 裂缝单元在全局矩阵 A 中的行号 (0-based)
 
 
     std::vector<Vector> polygonPoints;  ///< 有序的多边形顶点 (CCW 逆时针排列)
@@ -50,7 +50,7 @@ struct InteractionPair
     // 构造函数
     InteractionPair(int mID, int fElemID, int fMacroID)
         : matrixCellGlobalID(mID), fracElementGlobalID(fElemID), fracMacroID(fMacroID),
-        matrixSolverIndex(-1), fracSolverIndex(-1),
+        matrixSolverIndex(-1), fracCellSolverIndex(-1),
         intersectionArea(0.0), polygonNormal(0, 0, 0), polygonCenter(0, 0, 0), distMatrixToFracPlane(0.0)
     {
     }
@@ -80,7 +80,7 @@ public:
      * @param usePrism 是否使用棱柱单元（true）或四面体（false）
      * @param useQuadBase 棱柱底面保留四边形（true）或分割为三角形（false）
      */
-    MeshManager_3D(double lx, double ly, double lz, int nx, int ny, int nz, bool usePrism, bool useQuadBase); //默认有参构造函数
+    MeshManager_3D(double lx, double ly, double lz, int nx, int ny, int nz, bool usePrism , bool useQuadBase); //默认有参构造函数
 
 
     // =========================================================
@@ -120,6 +120,34 @@ public:
      * @note 必须在 addFracture 和 meshAllFractures 之后，且在 SolveIntersection 之前调用。
      */
     void setupGlobalIndices();
+
+    // =========================================================
+    // [New] 拓扑映射构建接口
+    // =========================================================
+    /**
+     * @brief 构建基岩与裂缝的双向交互拓扑映射
+     * @details 建立 MatrixID -> Pairs 和 FracID -> Pairs 的快速索引。
+     * 建议在 SolveIntersection 完成后调用。
+     */
+    void buildTopologyMaps();
+
+    // =========================================================
+    // [New] 拓扑查询接口 (供 Solver 或 Benchmark 使用)
+    // =========================================================
+
+    /**
+     * @brief 获取指定基岩单元(SolverIndex)关联的所有交互对
+     * @return 交互对指针列表 (若无交互返回空列表)
+     */
+    const std::vector<const InteractionPair*>& getInteractionsOfMatrix(int matrixSolverIdx) const;
+
+    /**
+     * @brief 获取指定裂缝单元(SolverIndex)关联的所有交互对
+     * @return 交互对指针列表
+     */
+    const std::vector<const InteractionPair*>& getInteractionsOfFracture(int fracSolverIdx) const;
+
+    const Fracture_2D* findFractureByID(const FractureNetwork_2D& net, int fracID);
 
 
     //【基岩】
@@ -194,6 +222,7 @@ public:
 
     //【裂缝】调用 Fracture_2D 类已有的 exportToTxt 成员函数导出裂缝网络中所有宏观裂缝的几何信息另外导出交线信息至txt 用于matlab脚本进行可视化后处理
     void exportFracturesNetworkInfortoTxt(const std::string& prefix = " EDFM_test_") const;
+    void exportFracturesNetworkInfortoTxt_improved(const std::string& prefix = " EDFM_test_") const;
     
     //【裂缝】调用FractureNetwork_2D类已有的inspectFractureEdges函数导出特定宏观裂缝裂缝微观裂缝的网格面非正交信息至.csv
     void inspectFractureEdges_non_orthogonalInfor(int fracID, const std::string& prefix = " EDFM_test_") const;
@@ -207,6 +236,7 @@ public:
     //【EDFM】导出基岩-裂缝交互多边形，供 MATLAB 可视化
     // 格式: NumVertices x1 y1 z1 x2 y2 z2 ...
     void exportInteractionPolygonsToTxt(const std::string& filename) const;
+    void exportInteractionPolygonsToTxt_improved(const std::string& filename) const;
 
     //【EDFM】导出搜索空间验证数据
     void exportSearchSpaceToTxt(const std::string& filename, int targetFracID, IntersectionStrategy strategy);
@@ -242,6 +272,19 @@ private:
     // 存储所有有效的交互对
     // =========================================================
     std::vector<InteractionPair> interactionPairs_;
+
+    // =========================================================
+    // [New] 拓扑加速索引 (Topology Acceleration Indices)
+    // =========================================================
+    // Key: SolverIndex, Value: List of pointers to InteractionPair
+    // 使用 vector<vector> 存储 Matrix 映射 (因为 Matrix Index 是稠密的 0~Nm)
+    std::vector<std::vector<const InteractionPair*>> mat2InteractionMap_;
+
+    // 使用 unordered_map 存储 Fracture 映射 (因为 Frac Index 是稀疏的或带偏移的)
+    std::unordered_map<int, std::vector<const InteractionPair*>> frac2InteractionMap_;
+
+    // 空列表缓存 (用于返回空引用)
+    const std::vector<const InteractionPair*> emptyPairList_;
 
     // =========================================================
     // 内部辅助函数

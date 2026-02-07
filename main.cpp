@@ -14,6 +14,7 @@
 
 #include    "3D_TwistFracIntersectionTest.h"
 #include	"3D_EDFM_GeomTest.h"
+#include    "3D_EDFM_MeshTest_Benchmark.h"
 #include    "3D_EDFM_Transmissibility_test.h"
 #include    "3D_InitializerTest.h"
 #include    "3D_InitializerTest_multiFrac.h"
@@ -40,7 +41,8 @@ int main()
     //RunBenchmark_Transmissibility_Static();           //测试 NNC 和 FF 的静态传导率 (Flow & Heat) 是否符合解析解
     //return 0;
 
-    return EDFM_DFN_Geomtest_2D();
+    //return EDFM_DFN_Geomtest_2D();
+     return Improved_3D_EDFM_MeshTest();
 
     // =========================================================
     // 【Chapter2】EDFM-超临界CO2单相渗流换热模拟研究
@@ -51,8 +53,8 @@ int main()
 
     //RunTest_Property_Accuracy_Sweep();                //测试物性计算准确性扫描 (One-by-One Verify)                           结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\PropertyTest 通过Property_Accuracy_Sweep_HD.csv来表征
 
-    RunTest_BoundaryCondition_Export();					 //测试3D_EDFM中边界条件设置的正确性,保持均匀分布                                   结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\BoundaryConditionSetup    
-    return 0;
+    //RunTest_BoundaryCondition_Export();					 //测试3D_EDFM中边界条件设置的正确性,保持均匀分布                                   结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\BoundaryConditionSetup    
+    //return 0;
 
     
     

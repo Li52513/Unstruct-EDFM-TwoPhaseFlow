@@ -90,6 +90,70 @@ void MeshManager_3D::setupGlobalIndices()
     std::cout << "              Total DOF (Matrix + Fracs): " << totalDOF << std::endl;
 }
 
+// =========================================================
+// [New] 拓扑映射构建实现
+// =========================================================
+void MeshManager_3D::buildTopologyMaps()
+{
+    std::cout << "[MeshManager] Building Topology Maps (Matrix <-> Pairs <-> Fracture)..." << std::endl;
+    
+    // 1. 重置并预分配 Matrix Map
+    // Matrix Solver Index 范围是 [0, numCells - 1]
+    int numMatrixCells = static_cast<int>(mesh_.getCells().size());
+    mat2InteractionMap_.assign(numMatrixCells, std::vector<const InteractionPair*>());
+
+    // 2. 重置 Frac Map
+    frac2InteractionMap_.clear();
+
+    // 3. 遍历扁平化列表，分发指针
+    for (const auto& pair : interactionPairs_)
+    {
+        // 映射到 Matrix
+        int mIdx = pair.matrixSolverIndex; 
+        if (mIdx >= 0 && mIdx < numMatrixCells) {
+            mat2InteractionMap_[mIdx].push_back(&pair);
+        }
+        else {
+            // 理论上不应发生，除非 SolverIndex 越界
+            std::cerr << "[Warning] InteractionPair has invalid Matrix SolverIndex: " << mIdx << std::endl;
+        }
+
+        // 映射到 Fracture
+        int fIdx = pair.fracCellSolverIndex;
+        if (fIdx != -1) {
+            frac2InteractionMap_[fIdx].push_back(&pair);
+        }
+    }
+
+    std::cout << "              -> Indexed " << interactionPairs_.size() << " pairs." << std::endl;
+    std::cout << "              -> Matrix Cells with Interactions: " << std::count_if(mat2InteractionMap_.begin(), mat2InteractionMap_.end(), [](const auto& v) { return !v.empty(); }) << std::endl;
+    std::cout << "              -> Fracture Elements with Interactions: " << frac2InteractionMap_.size() << std::endl;
+}
+
+const std::vector<const InteractionPair*>& MeshManager_3D::getInteractionsOfMatrix(int matrixSolverIdx) const
+{
+    if (matrixSolverIdx >= 0 && matrixSolverIdx < static_cast<int>(mat2InteractionMap_.size())) {
+        return mat2InteractionMap_[matrixSolverIdx];
+    }
+    return emptyPairList_;
+}
+
+const std::vector<const InteractionPair*>& MeshManager_3D::getInteractionsOfFracture(int fracSolverIdx) const
+{
+    auto it = frac2InteractionMap_.find(fracSolverIdx);
+    if (it != frac2InteractionMap_.end()) {
+        return it->second;
+    }
+    return emptyPairList_;
+}
+
+const Fracture_2D* MeshManager_3D::findFractureByID(const FractureNetwork_2D& net, int fracID) {
+    for (const auto& f : net.getFractures()) {
+        if (f.id == fracID) return &f;
+    }
+    return nullptr;
+}
+
 //【基岩】 动态构建基岩单元的棱 (Edge)
 void MeshManager_3D::_buildLocalMatrixEdges(const Cell& cell, std::vector<MatrixEdge>& outEdges) const
 {
@@ -153,6 +217,11 @@ void MeshManager_3D::exportMeshInfortoTxt(const std::string& prefix) const
 void MeshManager_3D::exportFracturesNetworkInfortoTxt(const std::string& prefix)const
 {
     frNet_2D_.exportNetworkToTxt(prefix);
+}
+
+void MeshManager_3D::exportFracturesNetworkInfortoTxt_improved(const std::string& prefix)const
+{
+    frNet_2D_.exportNetworkToTxt_improved(prefix);
 }
 
 ///【裂缝】导出特定宏观裂缝裂缝微观裂缝的网格面非正交信息至.csv
@@ -505,10 +574,10 @@ void MeshManager_3D::SolveIntersection3D_improved(IntersectionStrategy strategy)
 
                     // Fracture Index:
                     // 直接从 fracElem 中读取 (前提是 distributeSolverIndices 已调用)
-                    pair.fracSolverIndex = fracElem.solverIndex;
+                    pair.fracCellSolverIndex = fracElem.solverIndex;
 
                     // [安全检查] 防止未初始化索引
-                    if (pair.fracSolverIndex == -1) {
+                    if (pair.fracCellSolverIndex == -1) {
                         std::cerr << "[Error] Fracture Element " << fracElem.id
                             << " has invalid SolverIndex! Did you call setupGlobalIndices()?" << std::endl;
                         // 可以选择 continue 跳过或 throw 异常
@@ -832,9 +901,9 @@ void MeshManager_3D::SolveIntersection3D_improved_twist_accleration(Intersection
                         // [新增] 填充索引 ------------------------------
                         int matrixIdx = mesh_.getCellIndex(mCell.id); // 再次确认索引
                         pair.matrixSolverIndex = matrixIdx;
-                        pair.fracSolverIndex = elem.solverIndex;
+                        pair.fracCellSolverIndex = elem.solverIndex;
 
-                        if (pair.fracSolverIndex == -1) {
+                        if (pair.fracCellSolverIndex == -1) {
                             std::cerr << "[Error] TwistAlgo: FracElem " << elem.id << " has no SolverIndex!" << std::endl;
                         }
                         // ---------------------------------------------
@@ -942,6 +1011,49 @@ void MeshManager_3D::exportInteractionPolygonsToTxt(const std::string& filename)
     std::cout << "[Export] " << count << " Interaction Polygons exported to " << filename << std::endl;
 }
 
+void MeshManager_3D::exportInteractionPolygonsToTxt_improved(const std::string& filename) const
+{
+    std::ofstream ofs(filename+"_InteractionPolygons.txt");
+    if (!ofs.is_open())
+    {
+        std::cerr << "[Error] Failed to open file for export: " << filename << std::endl;
+        return;
+    }
+
+    // 设置高精度
+    ofs << std::fixed << std::setprecision(8);
+
+    // [可选] 输出表头注释 (MATLAB 读取时需跳过或使用 comment style)
+    // ofs << "% MatrixGID MatrixSID FracMacroID FracElemGID FracElemSID Area Dist NumPoints x1 y1 z1 ...\n";
+
+    int count = 0;
+    for (const auto& pair : interactionPairs_)
+    {
+        const auto& pts = pair.polygonPoints;
+        if (pts.empty()) continue;
+
+        // 1. 输出拓扑与物理属性
+        ofs << pair.matrixCellGlobalID << " "
+            << pair.matrixSolverIndex << " "
+            << pair.fracMacroID << " "
+            << pair.fracElementGlobalID << " "
+            << pair.fracCellSolverIndex << " "
+            << pair.intersectionArea << " "
+            << pair.distMatrixToFracPlane << " ";
+
+        // 2. 输出几何顶点
+        ofs << pts.size();
+        for (const auto& p : pts)
+        {
+            ofs << " " << p.m_x << " " << p.m_y << " " << p.m_z;
+        }
+        ofs << "\n";
+        count++;
+    }
+
+    ofs.close();
+    std::cout << "[Export] " << count << " Interaction Polygons exported to " << filename << std::endl;
+}
 
 // =========================================================
 // [Debug Visualization] 导出搜索空间验证数据

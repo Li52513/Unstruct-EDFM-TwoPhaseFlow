@@ -114,6 +114,7 @@ void Fracture_2D::MeshFractureSurface(int nU, int nV, NormalVectorCorrectionMeth
 
             // 2. 赋予单元自知身份
             face.localIndex = currentLocalIndex;
+            face.parentFractureID = this->id;
 
             // 3. 注册到映射表 (GID -> LID)
             elemId2Index_[face.id] = currentLocalIndex;
@@ -129,6 +130,13 @@ void Fracture_2D::MeshFractureSurface(int nU, int nV, NormalVectorCorrectionMeth
 
     // 5. 构建内部边 (Edges)
     _buildInternalEdges(nU, nV,method);
+
+    // 6. 构建边界边
+    _buildBoundaryEdges(nU, nV, method); // 追加边界边
+
+    // 7. 对边界进行重新排序
+    _reorderCellEdges();
+
 
     std::cout << "[Fracture_2D ID: " << id << "] Meshing Complete: "
         << nU << "x" << nV << " grid, "
@@ -162,6 +170,18 @@ void Fracture_2D::_buildInternalEdges(int nU, int nV, NormalVectorCorrectionMeth
             // Owner/Neighbor ID = Index + 1 (FVM 惯例)
             edge.ownerCellID = static_cast<int>(c1_idx + 1);
             edge.neighborCellID = static_cast<int>(c2_idx + 1);
+
+            edge.parentFractureID = this->id;
+            edge.ownerCellLocalIndex = static_cast<int>(c1_idx); // 0-based Local Index
+            edge.neighborCellLocalIndex = static_cast<int>(c2_idx); // 0-based Local Index
+
+            // 将此边注册给 Owner
+            fracCells[c1_idx].connectedEdgeIndices.push_back(edge.id);
+
+            // 将此边注册给 Neighbor (如果存在)
+            if (c2_idx < fracCells.size()) { // 确保 neighbor 也是有效单元（虽然addEgde逻辑保证了这点）
+                fracCells[c2_idx].connectedEdgeIndices.push_back(edge.id);
+            }
 
             // 1. 计算几何
             edge.computeGeometry(fracNodes, fracCells[c1_idx], fracCells[c2_idx]);
@@ -208,6 +228,133 @@ void Fracture_2D::_buildInternalEdges(int nU, int nV, NormalVectorCorrectionMeth
 
             addEdge(cBottomIdx, cTopIdx, nLeft, nRight);
         }
+    }
+}
+
+void Fracture_2D::_buildBoundaryEdges(int nU, int nV, NormalVectorCorrectionMethod method)
+{
+    // 注意：不要 clear fracEdges，我们是在追加
+    // 获取当前的 Edge ID 计数器起始值
+    int edgeIDCounter = static_cast<int>(fracEdges.size());
+
+    size_t nNodeU = static_cast<size_t>(nU + 1);
+
+    // Lambda: 添加边界边通用逻辑
+    auto addBoundaryEdge = [&](size_t c_idx, size_t n1_idx, size_t n2_idx)
+        {
+            // 越界检查
+            if (c_idx >= fracCells.size() || n1_idx >= fracNodes.size() || n2_idx >= fracNodes.size()) {
+                std::cerr << "[Error] Fracture_2D::_buildBoundaryEdges - Index Out of Range!" << std::endl;
+                return;
+            }
+
+            FractureEdge_2D edge(edgeIDCounter++, static_cast<int>(n1_idx), static_cast<int>(n2_idx));
+
+            // 拓扑连接
+            edge.ownerCellID = static_cast<int>(c_idx + 1); // 1-based Global ID placeholder
+            edge.neighborCellID = -1;                       // -1 明确标识为边界
+
+            edge.parentFractureID = this->id;
+            edge.ownerCellLocalIndex = static_cast<int>(c_idx);
+            edge.neighborCellLocalIndex = -1;
+
+            // 注册到 Owner 单元
+            fracCells[c_idx].connectedEdgeIndices.push_back(edge.id);
+
+            // 1. 计算几何 (使用专用边界几何函数)
+            edge.computeBoundaryGeometry(fracNodes, fracCells[c_idx]);
+
+            // 2. FVM 向量 (边界处理)
+            // 边界边的 d 向量通常定义为从 Owner 中心到 Edge 中点
+            const Vector& Cp = fracCells[c_idx].centroid;
+            const Vector& Cf = edge.midpoint; // 边界“邻居”中心即为面心
+
+            // 调用 computeFVMVectors，但在边界情况下，Neighbor Center 传入 Edge Midpoint
+            // 这将计算出 Owner 到 边界 的几何参数
+            edge.computeFVMVectors(Cp, Cf, method);
+
+            // 特殊处理：边界边的 ownerToNeighbor 向量
+            // 对于边界，它等于 midpoint - owner.centroid
+            edge.ownerToNeighbor = edge.midpoint - Cp;
+
+            fracEdges.push_back(edge);
+        };
+
+    // -------------------------------------------------
+    // 按顺序生成四条边界 (Left, Right, Bottom, Top)
+    // -------------------------------------------------
+
+   // 1. 左边界 (Left, i=0)
+    for (int j = 0; j < nV; ++j) {
+        size_t cIdx = j * nU;
+        size_t n1 = j * nNodeU;
+        size_t n2 = (j + 1) * nNodeU;
+        addBoundaryEdge(cIdx, n2, n1);
+    }
+
+    // 2. 右边界 (Right, i=nU-1)
+    for (int j = 0; j < nV; ++j) {
+        size_t cIdx = j * nU + (nU - 1);
+        size_t n1 = j * nNodeU + nU;
+        size_t n2 = (j + 1) * nNodeU + nU;
+        addBoundaryEdge(cIdx, n1, n2);
+    }
+
+    // 3. 下边界 (Bottom, j=0)
+    for (int i = 0; i < nU; ++i) {
+        size_t cIdx = i;
+        size_t n1 = i;
+        size_t n2 = i + 1;
+        addBoundaryEdge(cIdx, n1, n2);
+    }
+
+    // 4. 上边界 (Top, j=nV-1)
+    for (int i = 0; i < nU; ++i) {
+        size_t cIdx = (nV - 1) * nU + i;
+        size_t n1 = nV * nNodeU + i;
+        size_t n2 = nV * nNodeU + (i + 1);
+        addBoundaryEdge(cIdx, n2, n1);
+    }
+
+    // 5. 再次对边界单元进行几何重排序 (确保 connectedEdgeIndices 有序)
+    // 复用之前写好的逻辑，或者直接调用一次全局重排序
+    // 这里简单起见，建议在 MeshFractureSurface 统一调用一次重排序
+}
+
+void Fracture_2D::_reorderCellEdges()
+{
+    std::cout << "  [Fracture] Reordering ALL edges (Internal + Boundary) to match node winding order..." << std::endl;
+
+    for (auto& cell : fracCells)
+    {
+        if (cell.nodeIndices.empty()) continue;
+        if (cell.connectedEdgeIndices.empty()) continue;
+
+        std::vector<int> sortedEdges;
+        sortedEdges.reserve(cell.nodeIndices.size());
+
+        for (size_t i = 0; i < cell.nodeIndices.size(); ++i)
+        {
+            int n1 = cell.nodeIndices[i];
+            int n2 = cell.nodeIndices[(i + 1) % cell.nodeIndices.size()];
+
+            int foundEdgeID = -1;
+            for (int edgeID : cell.connectedEdgeIndices)
+            {
+                if (edgeID >= 0 && edgeID < static_cast<int>(fracEdges.size()))
+                {
+                    const auto& edge = fracEdges[edgeID];
+                    bool match = (edge.nodeIndices[0] == n1 && edge.nodeIndices[1] == n2) ||
+                        (edge.nodeIndices[0] == n2 && edge.nodeIndices[1] == n1);
+                    if (match) {
+                        foundEdgeID = edgeID;
+                        break;
+                    }
+                }
+            }
+            sortedEdges.push_back(foundEdgeID);
+        }
+        cell.connectedEdgeIndices = sortedEdges;
     }
 }
 
@@ -291,6 +438,71 @@ void Fracture_2D::exportToTxt(const std::string& filePrefix) const
             << " " << face.centroid.m_x
             << " " << face.centroid.m_y
             << " " << face.centroid.m_z << "\n";
+    }
+    fe.close();
+
+    std::cout << "[Export] Fracture " << id << " mesh exported to:\n"
+        << "         " << nodeFileName << "\n"
+        << "         " << elemFileName << std::endl;
+}
+
+void Fracture_2D::exportToTxt_improved(const std::string& filePrefix) const
+{
+    if (fracNodes.empty() || fracCells.empty()) {
+        std::cerr << "[Warning] Fracture " << id << " has no mesh data to export." << std::endl;
+        return;
+    }
+
+    // 1. 导出节点 (Nodes)
+    // 文件名格式: Prefix_FracID_Nodes.txt
+    std::string nodeFileName = filePrefix + "_Frac" + std::to_string(id) + "_Nodes.txt";
+    std::ofstream fn(nodeFileName);
+
+    if (!fn.is_open())
+    {
+        std::cerr << "[Error] Failed to open file: " << nodeFileName << std::endl;
+        return;
+    }
+    // 设置精度
+    fn << std::fixed << std::setprecision(8);
+
+    // 格式: LocalIndex x y z (LocalIndex 用于后续 Element 的索引)
+    for (size_t i = 0; i < fracNodes.size(); i++)
+    {
+        const Vector& p = fracNodes[i].coord;
+        fn << i << " " << p.m_x << " " << p.m_y << " " << p.m_z << "\n";
+    }
+    fn.close();
+
+    // 2. 导出单元 (Elements)
+    std::string elemFileName = filePrefix + "_Frac" + std::to_string(id) + "_Elements.txt";
+    std::ofstream fe(elemFileName);
+    // ... (打开文件检查) ...
+
+    fe << std::fixed << std::setprecision(8);
+
+    for (const auto& face : fracCells) {
+        // 基础信息
+        fe << face.localIndex << " "
+            << face.id << " "
+            << face.solverIndex << " "
+            << face.nodeIndices.size();
+
+        for (int nid : face.nodeIndices) fe << " " << nid;
+
+        fe << " " << face.area
+            << " " << face.centroid.m_x
+            << " " << face.centroid.m_y
+            << " " << face.centroid.m_z;
+
+        // [New] 直接输出预存的边信息 (Zero Logic)
+        const auto& edges = face.connectedEdgeIndices;
+
+        fe << " " << edges.size(); // 输出边数
+        for (int edgeIdx : edges) {
+            fe << " " << edgeIdx;
+        }
+        fe << "\n";
     }
     fe.close();
 

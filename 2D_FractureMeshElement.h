@@ -24,9 +24,16 @@ public:
     int id;                         // 单元全局唯一编号
     std::vector<int> nodeIndices;   // 构成该单元的节点索引  对应Fracture_2D类中的fracNodes 的局部下标
 
+    // [New] 调试与溯源信息
+    int parentFractureID;           ///< [新增] 所属宏观裂缝 ID
+
     // 索引管理体系 (Index Management)
-    int localIndex;                 /// 在所属 Fracture::fracCells 中的局部下标 (0-based Local Index)
-	int solverIndex;				/// 在全局线性方程组 AX=B 中的行号 (0-based Solver Index), 初始值为 -1      
+    int localIndex;                 /// 在所属 Fracture::fracCells 中的局部下标 (0-based Local Index)与MeshFractureSurface中构造
+	int solverIndex;				/// 在全局线性方程组 AX=B 中的行号 (0-based Solver Index), 初始值为 -1  
+
+    // [New] 预存储的拓扑连接信息 (为了 IO 纯粹性)
+    // 存储相连的 Edge Local Indices (0-based)
+    std::vector<int> connectedEdgeIndices;
     // =========================================================
     // 2. 几何属性 (Geometry)
     // =========================================================

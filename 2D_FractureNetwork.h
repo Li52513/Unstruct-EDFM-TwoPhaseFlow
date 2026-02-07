@@ -30,9 +30,13 @@ struct IntersectionSegment
     int cellID_1; // 属于 Frac1 的局部单元 ID
     int cellID_2; // 属于 Frac2 的局部单元 ID
 
+    int solverIndex_1;  ///< 裂缝 1 单元的 Solver Index (-1 表示未分配)
+    int solverIndex_2;  ///< 裂缝 2 单元的 Solver Index (-1 表示未分配)
+
     // 构造
-    IntersectionSegment(const Vector& s, const Vector& e, int c1, int c2)
-        : start(s), end(e), cellID_1(c1), cellID_2(c2)
+    IntersectionSegment(const Vector& s, const Vector& e, int c1, int c2, int sid1 = -1, int sid2 = -1)
+        : start(s), end(e), cellID_1(c1), cellID_2(c2),
+        solverIndex_1(sid1), solverIndex_2(sid2)
     {
         length = (e - s).Mag();
     }
@@ -119,7 +123,7 @@ public:
      * 结果存储在 globalEdges_ 中。
      * @param nodesMap 全局节点映射 (用于计算 d_ON 的几何距离)
      */
-    void rebuildEdgeProperties(const std::unordered_map<int, Node>& nodesMap);
+    void rebuildEdgeProperties();
 
     // =========================================================
     // 3. F-F 求交核心
@@ -166,6 +170,7 @@ public:
      */
     void exportNetworkToTxt(const std::string& prefix) const;
 
+    void exportNetworkToTxt_improved(const std::string& prefix) const;
     /**
      * @brief 导出特定宏观裂缝裂缝微观裂缝的网格面非正交信息至.csv
      * @param fracID 特定裂缝的ID

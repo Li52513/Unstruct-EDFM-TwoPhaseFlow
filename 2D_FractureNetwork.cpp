@@ -175,7 +175,7 @@ int FractureNetwork_2D::distributeSolverIndices(int startOffset)
 // =========================================================
 // [实现] rebuildEdgeProperties
 // =========================================================
-void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Node>& nodesMap)
+void FractureNetwork_2D::rebuildEdgeProperties()
 {
     std::cout << "[FractureNetwork] Rebuilding Global Edges for FVM (Safe Lookup & SolverIndex)..." << std::endl;
 
@@ -184,6 +184,9 @@ void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Nod
     size_t totalEdges = 0;
     for (const auto& f : fractures) totalEdges += f.fracEdges.size();
     globalEdges_.reserve(totalEdges);
+
+    // [New] 全局边计数器 (0-based)
+    int globalEdgeCounter = 0;
 
     // 2. 遍历每个裂缝
     for (const auto& frac : fractures)
@@ -196,7 +199,17 @@ void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Nod
             FractureEdge_2D edge = srcEdge;
 
             // =========================================================
-            // A. 索引转换 (Local ID -> Global Solver Index)
+            // A. 更新 ID 和 调试信息 (IDs & Debug Info)
+            // =========================================================
+
+            // [建议 B] 使用 0-based 全局边 ID
+            edge.id = globalEdgeCounter++;
+
+            // [建议 A] 填充父级裂缝 ID
+            edge.parentFractureID = frac.id;
+
+            // =========================================================
+            // B. 索引转换与验证 (Local ID -> Local Index -> Solver Index)
             // 使用 frac.getElemIndex() 替代 "ID-1"
             // =========================================================
 
@@ -204,7 +217,9 @@ void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Nod
             if (edge.ownerCellID > 0)
             {
                 // [修改点] 使用新接口获取局部索引
-                int ownerLocalIdx = frac.getElemIndex(edge.ownerCellID);
+                //int ownerLocalIdx = frac.getElemIndex(edge.ownerCellID);
+                //edge.ownerCellLocalIndex = ownerLocalIdx; // 存储用于调试
+                int ownerLocalIdx = edge.ownerCellLocalIndex;
 
                 // 检查索引有效性
                 if (ownerLocalIdx != -1 && ownerLocalIdx < static_cast<int>(localCells.size()))
@@ -217,28 +232,29 @@ void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Nod
                         std::cerr << "[Error] FracElem (FracID=" << frac.id
                             << ", CellID=" << edge.ownerCellID
                             << ") has invalid solverIndex (-1). Call distributeSolverIndices() first!" << std::endl;
-                        edge.ownerCell_index = -1;
+                        edge.ownerCell_solverIndex = -1;
                     }
                     else {
-                        edge.ownerCell_index = sIdx;
+                        edge.ownerCell_solverIndex = sIdx;
                     }
                 }
                 else {
                     // 严重错误：边引用了不存在的单元 ID
                     std::cerr << "[Error] Edge Owner ID " << edge.ownerCellID
                         << " not found in Fracture " << frac.id << " element map!" << std::endl;
-                    edge.ownerCell_index = -1;
+                    edge.ownerCell_solverIndex = -1;
                 }
             }
             else {
-                edge.ownerCell_index = -1; // 边界或异常
+                edge.ownerCell_solverIndex = -1; // 边界或异常
+                edge.ownerCellLocalIndex = -1;
             }
 
             // --- 处理 Neighbor ---
             if (edge.neighborCellID > 0)
             {
-                // [修改点] 使用新接口获取局部索引
-                int neighLocalIdx = frac.getElemIndex(edge.neighborCellID);
+                //  使用新接口获取局部索引
+                int neighLocalIdx = edge.neighborCellLocalIndex;
 
                 if (neighLocalIdx != -1 && neighLocalIdx < static_cast<int>(localCells.size()))
                 {
@@ -246,37 +262,37 @@ void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Nod
 
                     if (sIdx == -1) {
                         // 同样的报错处理...
-                        edge.neighborCell_index = -1;
+                        edge.neighborCell_solverIndex = -1;
                     }
                     else {
-                        edge.neighborCell_index = sIdx;
+                        edge.neighborCell_solverIndex = sIdx;
                     }
                 }
                 else {
                     std::cerr << "[Error] Edge Neighbor ID " << edge.neighborCellID
                         << " not found in Fracture " << frac.id << " element map!" << std::endl;
-                    edge.neighborCell_index = -1;
+                    edge.neighborCell_solverIndex = -1;
                 }
             }
             else {
-                edge.neighborCell_index = -1; // 物理边界
+                edge.neighborCell_solverIndex = -1; // 物理边界
             }
 
             // =========================================================
-            // B. 同步 FVM 几何参数 (Geometry Sync)
+            // C. 同步 FVM 几何参数 (Geometry Sync)
             // 使用 getElemIndex 获取的 localIdx 访问几何数据
             // =========================================================
 
             edge.f_linearInterpolationCoef = edge.interpolationCoef;
 
             // 计算 d_ON (需再次获取局部索引，或复用上面的 ownerLocalIdx)
-            int ownerLocalIdx = frac.getElemIndex(edge.ownerCellID);
+            int ownerLocalIdx = edge.ownerCellLocalIndex;
+            int neighLocalIdx = edge.neighborCellLocalIndex;
 
             if (ownerLocalIdx != -1)
             {
                 const Vector& C_O = localCells[ownerLocalIdx].centroid;
 
-                int neighLocalIdx = frac.getElemIndex(edge.neighborCellID);
                 if (neighLocalIdx != -1)
                 {
                     // 内部边：C_Neighbor - C_Owner
@@ -285,7 +301,7 @@ void FractureNetwork_2D::rebuildEdgeProperties(const std::unordered_map<int, Nod
                 }
                 else
                 {
-                    // 边界边：Ghost Cell 处理 (2倍中点距离)
+                    // 边界边：Ghost Cell 处理
                     edge.ownerToNeighbor = (edge.midpoint - C_O);
                 }
             }
@@ -436,7 +452,7 @@ void FractureNetwork_2D::_intersectElementElement(const FractureElement_2D& e1, 
         for (const auto& t2 : tris2) {
             if (_intersectTriangleTriangle(t1.a, t1.b, t1.c, t2.a, t2.b, t2.c, s, e)) {
                 if ((e - s).Mag() > 1e-9) {
-                    outSegs.emplace_back(s, e, e1.id, e2.id);
+                    outSegs.emplace_back(s, e, e1.id, e2.id, e1.solverIndex, e2.solverIndex);
                 }
             }
         }
@@ -618,6 +634,64 @@ void FractureNetwork_2D::exportNetworkToTxt(const std::string& prefix) const
             }
         }
     }
+}
+
+void FractureNetwork_2D::exportNetworkToTxt_improved(const std::string& prefix) const
+{
+    if (fractures.empty()) {
+        std::cout << "[Warning] FractureNetwork_2D::exportNetworkToTxt - No fractures to export." << std::endl;
+    }
+
+    // 1. 导出每条裂缝的网格 (Nodes & Elements)
+    for (const auto& frac : fractures) {
+        frac.exportToTxt_improved(prefix);
+    }
+
+    // 2. 导出 F-F 详细信息 (适应新结构 + SolverIndex)
+    std::string ffFileName = prefix + "_FF_Intersections.txt";
+    std::ofstream ff(ffFileName);
+
+    if (ff.is_open()) {
+        ff << std::fixed << std::setprecision(8);
+
+        // 为了高效查找，构建临时 ID -> 指针映射
+        std::unordered_map<int, const Fracture_2D*> fracMap;
+        for (const auto& f : fractures) fracMap[f.id] = &f;
+
+        // Format: ObjID StartX Y Z EndX Y Z Frac1 Frac2 Cell1 Cell1_SID Cell2 Cell2_SID SegLength
+        for (const auto& obj : ffIntersections) {
+
+            // 获取裂缝指针以便查询 SolverIndex
+            const Fracture_2D* f1 = (fracMap.count(obj.fracID_1)) ? fracMap.at(obj.fracID_1) : nullptr;
+            const Fracture_2D* f2 = (fracMap.count(obj.fracID_2)) ? fracMap.at(obj.fracID_2) : nullptr;
+
+            for (const auto& seg : obj.segments) {
+                // 获取 SolverIndex
+                int sid1 = -1, sid2 = -1;
+
+                // 如果 IntersectionSegment 结构体里已经有了 solverIndex (根据之前的修改建议)，直接用 seg.solverIndex_1
+                // 如果没有，则手动查询:
+                if (f1) {
+                    int lid = f1->getElemIndex(seg.cellID_1);
+                    if (lid != -1) sid1 = f1->fracCells[lid].solverIndex;
+                }
+                if (f2) {
+                    int lid = f2->getElemIndex(seg.cellID_2);
+                    if (lid != -1) sid2 = f2->fracCells[lid].solverIndex;
+                }
+                // (注：如果采纳了之前对 IntersectionSegment 的修改，此处可直接使用 seg.solverIndex_1)
+
+                ff << obj.id << " "
+                    << seg.start.m_x << " " << seg.start.m_y << " " << seg.start.m_z << " "
+                    << seg.end.m_x << " " << seg.end.m_y << " " << seg.end.m_z << " "
+                    << obj.fracID_1 << " " << obj.fracID_2 << " "
+                    << seg.cellID_1 << " " << sid1 << " "  // Added SID
+                    << seg.cellID_2 << " " << sid2 << " "  // Added SID
+                    << seg.length << "\n";
+            }
+        }
+    }
+    std::cout << "[Export] F-F Intersections exported to " << ffFileName << std::endl;
 }
 
 void FractureNetwork_2D::inspectIntersections(const std::string& prefix) const

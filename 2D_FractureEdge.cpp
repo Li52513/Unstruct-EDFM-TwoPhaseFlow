@@ -2,14 +2,14 @@
 #include <iostream>
 
 FractureEdge_2D::FractureEdge_2D()
-    : id(-1), ownerCellID(-1), neighborCellID(-1), length(0.0), interpolationCoef(0.5)
+    : id(-1), ownerCellID(-1), neighborCellID(-1), parentFractureID(-1), ownerCellLocalIndex(-1), neighborCellLocalIndex(-1), length(0.0), interpolationCoef(0.5)
 {
     nodeIndices[0] = -1;
     nodeIndices[1] = -1;
 }
 
 FractureEdge_2D::FractureEdge_2D(int _id, int n1, int n2)
-    : id(_id), ownerCellID(-1), neighborCellID(-1), length(0.0), interpolationCoef(0.5)
+    : id(_id), ownerCellID(-1), neighborCellID(-1), parentFractureID(-1), ownerCellLocalIndex(-1), neighborCellLocalIndex(-1), length(0.0), interpolationCoef(0.5)
 {
     nodeIndices[0] = n1;
     nodeIndices[1] = n2;
@@ -153,6 +153,54 @@ void FractureEdge_2D::computeFVMVectors(const Vector& Cp, const Vector& Cn, Norm
     if (interpolationCoef < 0.0) interpolationCoef = 0.0;
     if (interpolationCoef > 1.0) interpolationCoef = 1.0;
 }
+
+void FractureEdge_2D::computeBoundaryGeometry(const std::vector<Node>& allNodes,
+    const FractureElement_2D& owner)
+{
+    const Vector& p1 = allNodes[nodeIndices[0]].coord;
+    const Vector& p2 = allNodes[nodeIndices[1]].coord;
+
+    // 1. 长度与中点
+    Vector edgeVec = p2 - p1;
+    length = edgeVec.Mag();
+    midpoint = (p1 + p2) * 0.5;
+
+    // 2. 计算平面内向外法向量 (In-plane Outward Normal)
+    if (length > 1e-14) {
+        // 归一化边向量
+        Vector tangent = edgeVec / length;
+        // 初始猜测：假设是逆时针，法向 = 切向 x 单元面法向
+        normal = tangent & owner.normal;
+        // 归一化
+        double nMag = normal.Mag();
+        if (nMag > 1e-14) {
+            normal = normal / nMag;
+        }
+        else {
+            normal = Vector(0, 0, 0);
+        }
+
+        // B. [核心修复] 方向自洽性校验 (Eliminate Winding Order Assumption)
+        // 计算从单元质心指向边中点的向量
+        Vector centroidToMid = midpoint - owner.centroid;
+
+        // 判断：如果法向与(质心->中点)向量背道而驰 (点积 < 0)，说明指回了内部
+        // 必须翻转为指向外部
+        if ((normal * centroidToMid) < 0.0) {
+            normal = normal * -1.0;
+        }
+    }
+    else {
+        normal = Vector(0, 0, 0);
+    }
+    // 3. FVM 插值系数处理
+    // 对于边界，通常设为 1.0 (完全由 Owner 决定) 或 0.5 (视具体边界格式定)
+    // 这里保持默认或设为特定值
+    interpolationCoef = 0.0; // 边界边通常不需要插值系数，或者设为0表示完全偏向Owner
+
+}
+
+
 
 
    
