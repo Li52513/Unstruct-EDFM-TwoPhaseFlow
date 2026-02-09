@@ -91,6 +91,241 @@ void MeshManager_3D::setupGlobalIndices()
 }
 
 // =========================================================
+// [New] 交互数据清洗与去重 (Production-Ready)
+// =========================================================
+void MeshManager_3D::removeDuplicateInteractions()
+{
+    std::cout << "[MeshManager] Cleaning up Interaction Pairs (Ghost Removal & Smart Deduplication)..." << std::endl;
+
+    if (interactionPairs_.empty()) return;
+
+    // ---------------------------------------------------------
+    // 1. 计算物理容差 (Physical Tolerance)
+    // ---------------------------------------------------------
+    // 计算单个基岩网格的尺寸
+    double dx = (nx_ > 0) ? lx_ / nx_ : 0.0;
+    double dy = (ny_ > 0) ? ly_ / ny_ : 0.0;
+    double dz = (nz_ > 0) ? lz_ / nz_ : 0.0;
+
+    // 计算网格体对角线的一半作为最大理论相交距离
+    // 理论上，点到面的距离如果超过 (对角线/2)，则该点所在的网格不可能与面相交
+    double gridHalfDiag = 0.5 * std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    // 引入安全系数 (Safety Factor 1.01) 避免浮点误差误删边界情况
+    double distTolerance = gridHalfDiag * 1.01;
+
+    std::cout << "              -> Grid Size: " << dx << " x " << dy << " x " << dz << std::endl;
+    std::cout << "              -> Ghost Distance Tolerance: " << distTolerance << std::endl;
+
+    // ---------------------------------------------------------
+    // 2. 执行清洗循环
+    // ---------------------------------------------------------
+    std::vector<InteractionPair> cleanPairs;
+    cleanPairs.reserve(interactionPairs_.size());
+
+    // 用于去重的 Map: KeyString -> Index in cleanPairs
+    std::unordered_map<std::string, size_t> uniqueMap;
+
+    int ghostsCount = 0;
+    int duplicatesCount = 0;
+
+    for (const auto& pair : interactionPairs_)
+    {
+        // --- A. 健壮性检查 ---
+        if (pair.matrixSolverIndex < 0 || pair.fracCellSolverIndex < 0) continue;
+
+        // --- B. 几何过滤 (Ghost Removal) ---
+        // 检查基岩中心到裂缝平面的距离
+        if (pair.distMatrixToFracPlane > distTolerance) {
+            ghostsCount++;
+            continue; // 距离过远，判定为幽灵交互，直接丢弃
+        }
+
+        // --- C. 智能去重 (Smart Deduplication) ---
+        // 构建唯一指纹: "MatID_FracID_Area"
+        // 使用定点精度 (保留6位小数) 确保数值稳定性
+        std::stringstream ss;
+        ss << pair.matrixSolverIndex << "_"
+            << pair.fracCellSolverIndex << "_"
+            << std::fixed << std::setprecision(6) << pair.intersectionArea;
+
+        std::string key = ss.str();
+
+        if (uniqueMap.find(key) == uniqueMap.end())
+        {
+            // 新的唯一有效交互 -> 保留
+            uniqueMap[key] = cleanPairs.size();
+            cleanPairs.push_back(pair);
+        }
+        else
+        {
+            // ID相同 且 面积完全相同 -> 判定为算法重复计算 -> 丢弃
+            duplicatesCount++;
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 3. 覆盖原始数据
+    // ---------------------------------------------------------
+    interactionPairs_ = std::move(cleanPairs);
+
+    std::cout << "              -> Removed " << ghostsCount << " ghost interactions (distance > tolerance)." << std::endl;
+    std::cout << "              -> Removed " << duplicatesCount << " exact duplicates." << std::endl;
+    std::cout << "              -> Final Pair Count: " << interactionPairs_.size() << std::endl;
+}
+
+// =========================================================
+// [Fix] 解决共面/边界双重计算问题 (修复 .norm() 报错)
+// =========================================================
+void MeshManager_3D::resolveCoplanarInteractions()
+{
+    std::cout << "[MeshManager] Resolving Coplanar/Boundary Overlaps..." << std::endl;
+
+    if (interactionPairs_.empty()) return;
+
+    // 1. 构建临时索引：FracElemSolverIndex -> List of Pair Indices
+    std::unordered_map<int, std::vector<size_t>> fracElemToPairsMap;
+    for (size_t i = 0; i < interactionPairs_.size(); ++i) {
+        if (interactionPairs_[i].fracCellSolverIndex >= 0) {
+            fracElemToPairsMap[interactionPairs_[i].fracCellSolverIndex].push_back(i);
+        }
+    }
+
+    std::vector<bool> toRemove(interactionPairs_.size(), false);
+    int removedCount = 0;
+    int scaledCount = 0;
+
+    // 2. 遍历每一个裂缝单元
+    for (auto& it : fracElemToPairsMap)
+    {
+        std::vector<size_t>& pIndices = it.second;
+        if (pIndices.empty()) continue;
+
+        // --- 核心逻辑：检测空间重叠 (Spatial Overlap Check) ---
+        for (size_t i = 0; i < pIndices.size(); ++i) {
+            if (toRemove[pIndices[i]]) continue;
+
+            for (size_t j = i + 1; j < pIndices.size(); ++j) {
+                if (toRemove[pIndices[j]]) continue;
+
+                const InteractionPair& pA = interactionPairs_[pIndices[i]];
+                const InteractionPair& pB = interactionPairs_[pIndices[j]];
+
+                // 检查1: 面积是否极其相似 (差异 < 1%)
+                if (std::abs(pA.intersectionArea - pB.intersectionArea) > 1e-5) continue;
+
+                // 检查2: 几何中心距离是否极近 (重合)
+                // [Fix] 手动计算距离，替代 .norm()
+                double dx = pA.polygonCenter.m_x - pB.polygonCenter.m_x;
+                double dy = pA.polygonCenter.m_y - pB.polygonCenter.m_y;
+                double dz = pA.polygonCenter.m_z - pB.polygonCenter.m_z;
+                double distCenters = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+                if (distCenters > 1e-4) continue;
+
+                // [判定] 发现了双胞胎！执行仲裁
+                // 计算 Matrix Center 到 Poly Center 的距离
+                // 获取 Cell 对象 (确保 mesh_ 成员变量可访问)
+                // 注意：这里需要从 GlobalID 转换到 Index，假设 GlobalID 1-based
+                // 如果您有 getCellIndex 函数更好，这里直接遍历或用 map
+
+                int idxA = -1, idxB = -1;
+                // 尝试使用 mesh_ 的接口查找
+                try {
+                    // 假设 mesh_.getCellId2Index() 可用
+                    // 如果不可用，请替换为 mesh_.getCellIndex(pA.matrixCellGlobalID)
+                    // 这里使用更通用的方式：
+                    const auto& cellMap = mesh_.getCellId2Index();
+                    if (cellMap.find(pA.matrixCellGlobalID) != cellMap.end())
+                        idxA = cellMap.at(pA.matrixCellGlobalID);
+
+                    if (cellMap.find(pB.matrixCellGlobalID) != cellMap.end())
+                        idxB = cellMap.at(pB.matrixCellGlobalID);
+                }
+                catch (...) { continue; }
+
+                if (idxA == -1 || idxB == -1) continue;
+
+                const auto& cellA = mesh_.getCells()[idxA];
+                const auto& cellB = mesh_.getCells()[idxB];
+
+                // [Fix] 手动计算 distA
+                double dAx = cellA.center.m_x - pA.polygonCenter.m_x;
+                double dAy = cellA.center.m_y - pA.polygonCenter.m_y;
+                double dAz = cellA.center.m_z - pA.polygonCenter.m_z;
+                double distA = std::sqrt(dAx * dAx + dAy * dAy + dAz * dAz);
+
+                // [Fix] 手动计算 distB
+                double dBx = cellB.center.m_x - pB.polygonCenter.m_x;
+                double dBy = cellB.center.m_y - pB.polygonCenter.m_y;
+                double dBz = cellB.center.m_z - pB.polygonCenter.m_z;
+                double distB = std::sqrt(dBx * dBx + dBy * dBy + dBz * dBz);
+
+                if (distA < distB) {
+                    toRemove[pIndices[j]] = true; // B 较远，删 B
+                }
+                else {
+                    toRemove[pIndices[i]] = true; // A 较远，删 A
+                    break;
+                }
+                removedCount++;
+            }
+        }
+    }
+
+    // 3. 执行删除
+    if (removedCount > 0) {
+        std::vector<InteractionPair> cleanPairs;
+        cleanPairs.reserve(interactionPairs_.size() - removedCount);
+        for (size_t i = 0; i < interactionPairs_.size(); ++i) {
+            if (!toRemove[i]) {
+                cleanPairs.push_back(interactionPairs_[i]);
+            }
+        }
+        interactionPairs_ = std::move(cleanPairs);
+    }
+
+    // 4. [Final Step] 面积归一化
+    // 重建映射
+    fracElemToPairsMap.clear();
+    for (size_t i = 0; i < interactionPairs_.size(); ++i) {
+        fracElemToPairsMap[interactionPairs_[i].fracCellSolverIndex].push_back(i);
+    }
+
+    for (auto& it : fracElemToPairsMap) {
+        std::vector<size_t>& pIndices = it.second;
+        if (pIndices.empty()) continue;
+
+        int macroID = interactionPairs_[pIndices[0]].fracMacroID;
+        int fracGID = interactionPairs_[pIndices[0]].fracElementGlobalID;
+
+        // 查找真实面积
+        const Fracture_2D* f = findFractureByID(fracture_network(), macroID);
+        if (!f) continue;
+
+        int fLocalIdx = f->getElemIndex(fracGID);
+        if (fLocalIdx == -1) continue;
+
+        double realElemArea = f->fracCells[fLocalIdx].area;
+        double totalInterArea = 0.0;
+        for (size_t idx : pIndices) totalInterArea += interactionPairs_[idx].intersectionArea;
+
+        // 容差判定
+        if (totalInterArea > realElemArea + 1e-4) {
+            double scaleFactor = realElemArea / totalInterArea;
+            for (size_t idx : pIndices) {
+                interactionPairs_[idx].intersectionArea *= scaleFactor;
+            }
+            scaledCount++;
+        }
+    }
+
+    std::cout << "              -> Resolved " << removedCount << " coplanar conflicts." << std::endl;
+    std::cout << "              -> Normalized " << scaledCount << " elements." << std::endl;
+}
+
+
+// =========================================================
 // [New] 拓扑映射构建实现
 // =========================================================
 void MeshManager_3D::buildTopologyMaps()

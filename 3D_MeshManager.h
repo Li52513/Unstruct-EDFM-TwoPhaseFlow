@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <sstream>
 
 #include "Mesh.h"
 #include "BoundaryFaceClassify_ByTag.h"
@@ -120,6 +121,22 @@ public:
      * @note 必须在 addFracture 和 meshAllFractures 之后，且在 SolveIntersection 之前调用。
      */
     void setupGlobalIndices();
+
+    /**
+     * @brief 交互数据清洗与去重 (Data Cleanup)
+     * @details 执行两步清洗：
+     * 1. 几何过滤：剔除“幽灵交互”，即距离超过基岩网格半对角线的错误关联。
+     * 2. 智能去重：剔除 (MatrixID, FracID, Area) 完全一致的冗余计算。
+     * * @note 必须在 SolveIntersection 之后，buildTopologyMaps 之前调用。
+     */
+    void removeDuplicateInteractions();
+
+    /**
+     * @brief 解决共面/边界导致的双重计算问题 (Step 3 of Cleanup)
+     * @details 针对共面裂缝，如果总交互面积超过裂缝单元面积，
+     * 通过几何中心竞争机制剔除冗余项，并进行最终归一化。
+     */
+    void resolveCoplanarInteractions();
 
     // =========================================================
     // [New] 拓扑映射构建接口

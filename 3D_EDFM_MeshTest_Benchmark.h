@@ -182,6 +182,8 @@ void export3DTopologyDiagnosticCSV(MeshManager_3D& mgr, const std::string& caseN
                 for (const auto* pair : myPairs)
                 {
                     std::stringstream ss;
+
+                    ss << "[" << pair << "] ";
                     // 格式: Area:Mat(GID:LID:SID)
                     ss << std::fixed << std::setprecision(6) << pair->intersectionArea << ":Mat(";
 
@@ -200,7 +202,7 @@ void export3DTopologyDiagnosticCSV(MeshManager_3D& mgr, const std::string& caseN
                 << elem.parentFractureID << sep
                 << elem.area << sep
                 << elem.normal.m_x << sep << elem.normal.m_y << sep << elem.normal.m_z << sep
-                << vec_to_csv_string(interactionInfos)
+                << vec_to_csv_string1(interactionInfos)
                 << "\n";
         }
     }
@@ -258,7 +260,7 @@ void export3DTopologyDiagnosticCSV(MeshManager_3D& mgr, const std::string& caseN
         out_mf_nnc << pair.matrixCellGlobalID << sep << pair.matrixSolverIndex << sep
             << pair.fracMacroID << sep
             << pair.fracElementGlobalID << sep << pair.fracCellSolverIndex << sep
-            << pair.intersectionArea
+            << pair.intersectionArea << sep
             << pair.distMatrixToFracPlane << sep
             << pair.polygonCenter.m_x << sep << pair.polygonCenter.m_y << sep << pair.polygonCenter.m_z << sep
             << pair.polygonNormal.m_x << sep << pair.polygonNormal.m_y << sep << pair.polygonNormal.m_z << sep
@@ -386,7 +388,7 @@ void run_Benchmark_3D_EDFM(
 
     // 0. 参数设置 (模拟一个标准基岩块)
     double lengthX = 100.0, lengthY = 100.0, lengthZ = 100.0;
-    int nx = 1, ny = 1, nz = 1;
+    int nx = 3, ny = 3, nz = 3;
 
     // 1. 生成基岩 (Matrix Mesh)
     std::cout << " 1. Generating 3D Matrix Mesh (" << nx << "x" << ny << "x" << nz << ")..." << std::endl;
@@ -421,6 +423,15 @@ void run_Benchmark_3D_EDFM(
     std::cout << " 6. Rebuilding Edge Properties for FVM..." << std::endl;  
     mgr.fracture_network().rebuildEdgeProperties();
 
+    // =========================================================
+    // [Clean Step 1] 几何过滤 (去除距离过远的幽灵)
+    // =========================================================
+    mgr.removeDuplicateInteractions();
+
+    // =========================================================
+    // [Clean Step 2] 解决共面/边界双重计算 (去除重叠并归一化)
+    // =========================================================
+    mgr.resolveCoplanarInteractions(); // <--- 新增调用
     // =========================================================
     //  7. 构建拓扑映射 (关键步骤!)
     // =========================================================
