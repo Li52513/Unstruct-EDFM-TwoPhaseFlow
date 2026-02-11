@@ -155,6 +155,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     std::cout << "\n[Solver] Calculating FF Transmissibility (Series Model)..." << std::endl;
 
     Fracture_string fracStr;
+    Water waterStr;
     const double eps = 1e-15;
     const double lam_fluid_ref = 0.6;
 
@@ -163,10 +164,13 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     const auto& fracturesVec = frNet.getFractures();
 
     // --- 获取场数据 ---
-    auto& Kf = fieldMgr.getOrCreateFractureScalar(fracStr.k_t_tag, 1e-12)->data;
-    auto& LamF = fieldMgr.getOrCreateFractureScalar(fracStr.lambda_tag, 2.0)->data;
-    auto& PhiF = fieldMgr.getOrCreateFractureScalar(fracStr.phi_tag, 1.0)->data;
-    auto& Wf = fieldMgr.getOrCreateFractureScalar(fracStr.aperture_tag, 1e-3)->data;
+    auto& Kf = fieldMgr.getFractureScalar(fracStr.k_t_tag)->data;
+    auto& LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag)->data;
+    auto& PhiF = fieldMgr.getFractureScalar(fracStr.phi_tag)->data;
+    auto& Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag)->data;
+
+    // 2. [New] 获取流体属性 (从 Water 结构体中获取 "lambda_w")
+    auto& LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag)->data;
 
     const std::string tag_T_NNC_Flow = "T_FF_Flow";                                // 渗流传导率标签
     const std::string tag_T_NNC_Heat = "T_FF_Heat";                                // 传热传导率标签
@@ -206,12 +210,12 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
             int s1 = seg.solverIndex_1;
             int s2 = seg.solverIndex_2;
 
-            if (s1 < 0 || s2 < 0 || s1 >= (int)Kf.size() || s2 >= (int)Kf.size()) continue;
+            if (s1 < 0 || s2 < 0 || s1 >= static_cast<int>(Kf.size()) || s2 >= static_cast<int>(Kf.size())) continue;
 
             // Geometry
             int lid1 = seg.cellID_1;
             int lid2 = seg.cellID_2;
-            if (lid1 >= f1.fracCells.size() || lid2 >= f2.fracCells.size()) continue;
+            if (lid1 >= static_cast<int>(f1.fracCells.size()) || lid2 >= static_cast<int>(f2.fracCells.size())) continue;
 
             // 使用 Geometry_3D 辅助函数计算点到线段距离
             double d1 = std::max(Geometry_3D::PointToSegmentDistance(f1.fracCells[lid1].centroid, seg.start, seg.end), 1e-6);
@@ -227,8 +231,8 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
             T_Flow[base_idx + j] = seg.length / (res_term + eps);
 
             // --- Heat Transmissibility ---
-            double lam_eff_1 = PhiF[s1] * lam_fluid_ref + (1.0 - PhiF[s1]) * LamF[s1];
-            double lam_eff_2 = PhiF[s2] * lam_fluid_ref + (1.0 - PhiF[s2]) * LamF[s2];
+            double lam_eff_1 = PhiF[s1] * LamFluid[s1] + (1.0 - PhiF[s1]) * LamF[s1];
+            double lam_eff_2 = PhiF[s2] * LamFluid[s2] + (1.0 - PhiF[s2]) * LamF[s2];
 
             double cond1_h = Wf[s1] * lam_eff_1;
             double cond2_h = Wf[s2] * lam_eff_2;

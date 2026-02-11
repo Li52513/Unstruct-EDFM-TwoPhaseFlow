@@ -179,6 +179,8 @@ public:
     Mesh& mesh() { return mesh_; }
     FractureNetwork& fracture_network() { return frNet_; }
 
+    const Mesh& mesh() const { return mesh_; }
+    const FractureNetwork& fracture_network() const { return frNet_; }
 
     // ¡¾¾É½Ó¿Ú¡¿
     /**
