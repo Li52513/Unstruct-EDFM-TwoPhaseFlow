@@ -84,7 +84,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
     auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag); // Solid thermal cond
     auto p_Phi_f = fieldMgr.getFractureScalar(frac_str.phi_tag);    // [New] Porosity
 
-    // [New] 获取流体热导率 lambda_w (Assume initialized)
+    // 获取流体热导率 lambda_w (Assume initialized)
     auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
     if (!p_Kf || !p_Wf) { std::cerr << "[Error] Frac properties missing!" << std::endl; return; }
