@@ -102,7 +102,7 @@ public:
     void rebuildGlobalIndex();
 
     // =========================================================
-    // [New] 索引分配核心接口
+    // 索引分配核心接口
     // =========================================================
     /**
      * @brief 分配全局求解器索引 (Solver Indices)
@@ -113,6 +113,30 @@ public:
      */
     int distributeSolverIndices(int startOffset);
 
+    /**
+     * @brief 构建/刷新 Solver Index 到 Element 指针的快速映射缓存
+     * @details
+     * 必须在 distributeSolverIndices() 之后调用。
+     * 构建一个扁平化的指针向量，使得 vec[i] 对应 offset + i 的单元。
+     */
+    void buildSolverIndexCache();
+
+    /**
+     * @brief [New] 获取裂缝自由度的起始偏移量
+     * @details 用于外部模块 (如 FVM_Grad) 将全局 SolverIndex 转换为局部缓存下标
+     * local_idx = global_idx - getSolverIndexOffset();
+     */
+    int getSolverIndexOffset() const;
+
+
+    /**
+     * @brief 获取按 Solver Index 排序的裂缝单元指针列表
+     * @details
+     * 这是 FVM_Grad 进行并行计算的核心数据源。
+     * index 0 对应求解器矩阵中裂缝部分的第 1 行。
+     * @return 裂缝单元指针向量 (Size = Total Fracture DOFs)
+     */
+    const std::vector<const FractureElement_2D*>& getOrderedFractureElements() const;
 
     /**
      * @brief [FVM核心] 重建所有裂缝边的 FVM 离散化属性 (Index & Geometry)
@@ -226,5 +250,12 @@ private:
     
     // FVM 求解器使用的全局边列表 (Flat List)
     std::vector<FractureEdge_2D> globalEdges_;
+
+    // [新增] 缓存：按 Solver Index 顺序排列的单元指针
+    // 用于 FVM 组装时的 O(1) 访问
+    std::vector<const FractureElement_2D*> solverIndexToElement_;
+
+    // 记录分配的起始偏移量，用于校验
+    int solverIndexOffset_ = 0;
 
 };

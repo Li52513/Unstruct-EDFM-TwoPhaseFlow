@@ -206,6 +206,8 @@ void MeshManager::BuildGlobalSystemIndexing()
     // 4. 在索引分配完毕后，构建裂缝单元-基岩拓扑映射
     mesh_.rebuildFractureMap(frNet_.fractures);
 
+    frNet_.buildSolverIndexCache(n_matrix_dofs_);
+
     std::cout << "=========================================================" << std::endl;
 }
 

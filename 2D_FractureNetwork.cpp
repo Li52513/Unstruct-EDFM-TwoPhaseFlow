@@ -145,12 +145,13 @@ void FractureNetwork_2D::inspectFractureEdges(int fracID, const std::string & pr
 }
 
 // =========================================================
-// [New] 索引分配核心实现
+// 索引分配核心实现
 // =========================================================
 
 int FractureNetwork_2D::distributeSolverIndices(int startOffset)
 {
     int currentDoF = startOffset;
+    solverIndexOffset_ = startOffset;
     int count = 0;
     std::cout << "[FracNet] Distributing Solver Indices starting from " << startOffset << "..." << std::endl;
 
@@ -166,10 +167,74 @@ int FractureNetwork_2D::distributeSolverIndices(int startOffset)
         }
     }
 
+    // 索引分配完毕，立即构建缓存
+    buildSolverIndexCache();
+
     std::cout << "          -> Assigned indices for " << count << " fracture elements." << std::endl;
     std::cout << "          -> Max Solver Index = " << (currentDoF - 1) << std::endl;
 
     return currentDoF; // 返回总自由度数
+}
+
+// =========================================================
+// 缓存构建实现
+// =========================================================
+void FractureNetwork_2D::buildSolverIndexCache()
+{
+    // 1. 统计总单元数
+    size_t totalElements = 0;
+    for (const auto& frac : fractures)
+    {
+        // [Fix] 将 elements 改为 fracCells
+        totalElements += frac.fracCells.size();
+    }
+
+    // 2. 预分配并初始化
+    solverIndexToElement_.assign(totalElements, nullptr);
+
+    // 3. 填充指针
+    for (const auto& frac : fractures)
+    {
+        // [Fix] 将 elements 改为 fracCells
+        for (const auto& elem : frac.fracCells)
+        {
+            if (elem.solverIndex == -1)
+            {
+                std::cerr << "[FractureNetwork_2D] Error: Element found with unassigned solver index during cache build.\n";
+                continue;
+            }
+
+            // 计算在 fracture vector 中的局部下标
+            int localVecIdx = elem.solverIndex - solverIndexOffset_;
+
+            if (localVecIdx >= 0 && localVecIdx < (int)totalElements)
+            {
+                solverIndexToElement_[localVecIdx] = &elem;
+            }
+            else
+            {
+                std::cerr << "[FractureNetwork_2D] Error: Solver index out of bounds during cache build.\n";
+            }
+        }
+    }
+
+    std::cout << "[FractureNetwork_2D] Solver index cache built. Total elements: " << totalElements << std::endl;
+}
+
+// [New] 工程级增强：显式暴露 Offset
+int FractureNetwork_2D::getSolverIndexOffset() const
+{
+    return solverIndexOffset_;
+}
+
+const std::vector<const FractureElement_2D*>& FractureNetwork_2D::getOrderedFractureElements() const
+{
+    if (solverIndexToElement_.empty() && !fractures.empty())
+    {
+        // 尝试懒加载，但最好是显式调用
+        std::cerr << "[FractureNetwork_2D] Warning: Accessing ordered elements but cache is empty.\n";
+    }
+    return solverIndexToElement_;
 }
 
 // =========================================================
@@ -179,7 +244,17 @@ void FractureNetwork_2D::rebuildEdgeProperties()
 {
     std::cout << "[FractureNetwork] Rebuilding Global Edges for FVM (Safe Lookup & SolverIndex)..." << std::endl;
 
+
     // 1. 清空并预分配全局边列表
+
+    // [Topology Sink Step A] 强制清空所有单元的旧连接信息
+    // 这一步至关重要，消除了对旧数据的任何假设
+    for (auto& frac : fractures) {
+        for (auto& elem : frac.fracCells) {
+            elem.connectedEdgeIndices.clear();
+        }
+    }
+
     globalEdges_.clear();
     size_t totalEdges = 0;
     for (const auto& f : fractures) totalEdges += f.fracEdges.size();
@@ -216,9 +291,7 @@ void FractureNetwork_2D::rebuildEdgeProperties()
             // --- 处理 Owner ---
             if (edge.ownerCellID > 0)
             {
-                // [修改点] 使用新接口获取局部索引
-                //int ownerLocalIdx = frac.getElemIndex(edge.ownerCellID);
-                //edge.ownerCellLocalIndex = ownerLocalIdx; // 存储用于调试
+                // 使用新接口获取局部索引
                 int ownerLocalIdx = edge.ownerCellLocalIndex;
 
                 // 检查索引有效性
@@ -306,8 +379,30 @@ void FractureNetwork_2D::rebuildEdgeProperties()
                 }
             }
 
+            // =========================================================
+            // D. [Topology Sink Step B] 拓扑回填
+            // 将生成的 Global Edge Index 注册回 Element
+            // =========================================================
+
             // 加入全局列表
             globalEdges_.push_back(edge);
+
+            int currentGlobalIdx = (int)globalEdges_.size() - 1;
+
+            // 如果 Owner 是有效单元，注册这条边
+            // 注意：需要 const_cast 因为 fractures 遍历通常是 const引用，或者 fracCells 里的元素需要修改
+            // 假设 frac 是 const引用，我们需要去除 const 来修改 elem 的 connectedEdgeIndices
+            if (ownerLocalIdx != -1 && ownerLocalIdx < static_cast<int>(localCells.size())) {
+                // 安全获取引用
+                auto& mutableElem = const_cast<FractureElement_2D&>(localCells[ownerLocalIdx]);
+                mutableElem.connectedEdgeIndices.push_back(currentGlobalIdx);
+            }
+
+            // 如果 Neighbor 是有效单元，注册这条边
+            if (neighLocalIdx != -1 && neighLocalIdx < static_cast<int>(localCells.size())) {
+                auto& mutableElem = const_cast<FractureElement_2D&>(localCells[neighLocalIdx]);
+                mutableElem.connectedEdgeIndices.push_back(currentGlobalIdx);
+            }
         }
     }
 

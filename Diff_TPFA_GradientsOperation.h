@@ -6,7 +6,7 @@
 #include "FieldRegistry.h"
 #include "FieldAcessForDiscre.h"
 
-// ======工具：网格单元上梯度计算：LSQ + GG 兜底（声明即可；用你已有定义） ======
+// ======工具：网格单元上梯度计算：LSQ + GG 兜底 ======
 //================= 工具 1：Green–Gauss（GG）梯度 =================//
 // Green–Gauss：∇p ≈ (1/V) Σ pf * A_out
 // - 仅依赖 Face.vectorE / vectorT（方法无关），退化时用 normal*length

@@ -117,7 +117,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         int mGlobalID = cell.id;
         int mIdx = meshMgr.mesh().getCellIndex(mGlobalID);
 
-        // [Fix] 调用 meshMgr.mesh() 来访问 getFracElemSolverIndexfromCellGlobalId
+        
         std::vector<int> fracIndices = meshMgr.mesh().getFracElemSolverIndexfromCellGlobalId(mGlobalID);
 
         for (int fSolverIdx : fracIndices) {

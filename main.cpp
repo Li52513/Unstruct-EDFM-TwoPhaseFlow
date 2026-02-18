@@ -22,6 +22,8 @@
 
 #include    "3D_BoundarySetup_Test.h"
 
+#include "test_FVM_Grad_Benchmark.h"
+
 int main()
 {
     // =========================================================
@@ -42,7 +44,7 @@ int main()
     //return 0;
 
     //return EDFM_DFN_Geomtest_2D();
-     return Improved_3D_EDFM_MeshTest();
+    //return Improved_3D_EDFM_MeshTest();
 
     // =========================================================
     // 【Chapter2】EDFM-超临界CO2单相渗流换热模拟研究
@@ -56,7 +58,10 @@ int main()
     //RunTest_BoundaryCondition_Export();					 //测试3D_EDFM中边界条件设置的正确性,保持均匀分布                                   结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\BoundaryConditionSetup    
     //return 0;
 
-    
+    //测试梯度算子
+         run_Benchmark_2D_EDFM_Grad();
+         run_Benchmark_3D_EDFM_Grad();
+     return 0;
     
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();

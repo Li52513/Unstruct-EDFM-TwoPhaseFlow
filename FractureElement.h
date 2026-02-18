@@ -59,6 +59,11 @@ struct FractureElement  ///// 描述裂缝单元（裂缝段）的结构体
         }
     };
 
+    // 切向几何邻居 (Intra-Fracture Siblings)
+    // 存储同一条裂缝上相邻微元的 Global Solver Index
+    // 0: Prev Sibling (Towards Start), 1: Next Sibling (Towards End)
+    std::vector<int> tangentNeighbors;
+
     /// 该列表存储所有与本单元产生物理连接（相交）的其他裂缝单元
     /// 注意：即使是多条裂缝交于一点，所有相关连接都会被平铺记录在这里
     std::vector<FractureNeighbor> neighbors;

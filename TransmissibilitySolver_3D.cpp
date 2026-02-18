@@ -11,11 +11,6 @@ using namespace PhysicalProperties_string_op;
 // =========================================================
 // 内部辅助函数
 // =========================================================
-
-// =========================================================================
-// [Fix] 本地定义几何辅助工具 (Geometry Helper)
-// 解决 "Geometry_3D" 未定义和 "MagSqr" 缺失的问题
-// =========================================================================
 namespace Geometry_3D {
 
     // 手动实现点积 (避免依赖 Vector 类是否重载了 *)
@@ -68,10 +63,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
 {
     Rock rock_str;
     Fracture_string frac_str;
-
-
-    const double eps = 1e-30;
-    const double lam_fluid_ref = 0.6; // [Static Ref]参考流体导热系数 (W/mK)
+    Water waterStr;
 
     // --- 获取场数据 (Direct Pointers) ---
     auto p_Kxx = fieldMgr.getMatrixScalar(rock_str.k_xx_tag);
@@ -89,17 +81,23 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
     auto p_Kf = fieldMgr.getFractureScalar(frac_str.k_n_tag);
     if (!p_Kf) p_Kf = fieldMgr.getFractureScalar(frac_str.k_t_tag);
     auto p_Wf = fieldMgr.getFractureScalar(frac_str.aperture_tag);
-    auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag);
+    auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag); // Solid thermal cond
+    auto p_Phi_f = fieldMgr.getFractureScalar(frac_str.phi_tag);    // [New] Porosity
+
+    // [New] 获取流体热导率 lambda_w (Assume initialized)
+    auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
     if (!p_Kf || !p_Wf) { std::cerr << "[Error] Frac properties missing!" << std::endl; return; }
 
     const std::vector<double>& Kf = p_Kf->data;
     const std::vector<double>& Wf = p_Wf->data;
     const std::vector<double>* Lam_f = (p_Lam_f) ? &(p_Lam_f->data) : nullptr;
+    const std::vector<double>* Phi_f = (p_Phi_f) ? &(p_Phi_f->data) : nullptr;    // [New]
+    const std::vector<double>* LamFluid = (p_LamFluid) ? &(p_LamFluid->data) : nullptr; // [New]
 
     // --- 输出场 ---
-    const std::string tag_T_NNC_Flow = "T_NNC_Flow";                                // 渗流传导率标签
-    const std::string tag_T_NNC_Heat = "T_NNC_Heat";                                // 传热传导率标签
+    const std::string tag_T_NNC_Flow = "T_NNC_Flow";
+    const std::string tag_T_NNC_Heat = "T_NNC_Heat";
 
     auto& T_Flow = fieldMgr.createNNCScalar(tag_T_NNC_Flow, 0.0)->data;
     auto& T_Heat = fieldMgr.createNNCScalar(tag_T_NNC_Heat, 0.0)->data;
@@ -124,26 +122,42 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
         double k_m_dir = (nx * nx * Kxx[mIdx]) + (ny * ny * Kyy[mIdx]) + (nz * nz * Kzz[mIdx]);
 
         // 2. Flow Transmissibility
-        // T = Area / ( d_m / K_m + w_f / (2 * K_f) )
-        // Factor 2 represents the geometric distance from surface to center (w/2)
         double dist = std::max(pair.distMatrixToFracPlane, 1e-6);
         double term_m = dist / (k_m_dir + MIN_VAL);
         double term_f = Wf[fIdx] / (2.0 * Kf[fIdx] + MIN_VAL);
 
         T_Flow[i] = pair.intersectionArea / (term_m + term_f + MIN_VAL);
 
-        // 3. Heat Transmissibility
-        if (Lam_m && Lam_f) {
+        // 3. Heat Transmissibility [Modified]
+        // 使用有效热导率：lam_eff = phi * lam_fluid + (1-phi) * lam_solid
+        if (Lam_m && Lam_f && Phi_f && LamFluid) {
+            double lam_m_val = (*Lam_m)[mIdx];
+
+            double phi_val = (*Phi_f)[fIdx];
+            double lam_fluid_val = (*LamFluid)[fIdx];
+            double lam_solid_val = (*Lam_f)[fIdx];
+
+            // 计算裂缝侧有效热导率
+            double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
+
+            double term_m_h = dist / (lam_m_val + MIN_VAL);
+            double term_f_h = Wf[fIdx] / (2.0 * lam_f_eff + MIN_VAL);
+
+            T_Heat[i] = pair.intersectionArea / (term_m_h + term_f_h + MIN_VAL);
+        }
+        else if (Lam_m && Lam_f) // Fallback for pure solid conduction (Compatibility)
+        {
             double lam_m_val = (*Lam_m)[mIdx];
             double lam_f_val = (*Lam_f)[fIdx];
+
             double term_m_h = dist / (lam_m_val + MIN_VAL);
             double term_f_h = Wf[fIdx] / (2.0 * lam_f_val + MIN_VAL);
+
             T_Heat[i] = pair.intersectionArea / (term_m_h + term_f_h + MIN_VAL);
         }
 
     }
     std::cout << "[Solver] NNC Done (" << numPairs << " pairs)." << std::endl;
-
 }
 
 

@@ -1,8 +1,7 @@
 /**
- * @file 3D_BoundaryConditionManager.h
- * @brief 3D 边界条件统一管理器
+ * @file BoundaryConditionManager.h
+ * @brief 边界条件统一管理器
  * @details
- * 该类替代了原有的 PressureBC.h/TemperatureBC.h 及对应的 Adapter。
  * 它基于 Gmsh 的 Physical Tag (Int) 来管理边界条件，并提供统一的 a-b-c 系数供 FVM 离散化模块调用。
  * * 统一方程形式 (The a-b-c Framework):
  * a * Phi_b + b * Flux_b = c
@@ -60,22 +59,22 @@ namespace BoundarySetting {
     using BoundaryValueFunc = std::function<double(const Vector&)>;
 
     /**
-     * @class BoundaryConditionManager_3D
+     * @class BoundaryConditionManager
      * @brief 边界条件管理器 (Generic Manager)
      */
 
-    class BoundaryConditionManager_3D {
+    class BoundaryConditionManager {
     public:
 
         /**
          * @brief 构造函数
          */
-        BoundaryConditionManager_3D();
+        BoundaryConditionManager();
 
         /**
          * @brief 析构函数
          */
-        ~BoundaryConditionManager_3D();
+        ~BoundaryConditionManager();
 
         // =========================================================
         // 设置接口 (供初始化模块调用)

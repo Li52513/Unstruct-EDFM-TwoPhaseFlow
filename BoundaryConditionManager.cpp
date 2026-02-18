@@ -3,18 +3,18 @@
  * @brief 3D 边界条件统一管理器实现
  */
 #include <iomanip>
-#include "3D_BoundaryConditionManager.h"
+#include "BoundaryConditionManager.h"
 
 namespace BoundarySetting {
 
     // =========================================================
     // 构造与析构
     // =========================================================
-    BoundaryConditionManager_3D::BoundaryConditionManager_3D() {
+    BoundaryConditionManager::BoundaryConditionManager() {
         // 初始化为空
     }
 
-    BoundaryConditionManager_3D::~BoundaryConditionManager_3D() {
+    BoundaryConditionManager::~BoundaryConditionManager() {
         bcRegistry_.clear();
     }
 
@@ -22,7 +22,7 @@ namespace BoundarySetting {
     // 设置接口实现
     // =========================================================
 
-    void BoundaryConditionManager_3D::SetDirichletBC(int tagID, double constantValue) {
+    void BoundaryConditionManager::SetDirichletBC(int tagID, double constantValue) {
         // 使用 Lambda 封装常数返回
         BCDefinition def;
         def.a = 1.0;
@@ -34,7 +34,7 @@ namespace BoundarySetting {
         bcRegistry_[tagID] = def;
     }
 
-    void BoundaryConditionManager_3D::SetLinearDirichletBC(int tagID, double refValue, double refCoord, double gradient, int axis) {
+    void BoundaryConditionManager::SetLinearDirichletBC(int tagID, double refValue, double refCoord, double gradient, int axis) {
         // 使用 Lambda 封装线性方程
         // Val = Ref + Grad * (Pos[axis] - Ref)
         BCDefinition def;
@@ -60,7 +60,7 @@ namespace BoundarySetting {
 
 
 
-    void BoundaryConditionManager_3D::SetNeumannBC(int tagID, double constantFlux) {
+    void BoundaryConditionManager::SetNeumannBC(int tagID, double constantFlux) {
         BCDefinition def;
         def.a = 0.0;
         def.b = 1.0;
@@ -73,7 +73,7 @@ namespace BoundarySetting {
     // =========================================================
     // 查询接口实现
     // =========================================================
-    BCCoefficients BoundaryConditionManager_3D::GetBCCoefficients(int tagID, const Vector& faceCenter) const {
+    BCCoefficients BoundaryConditionManager::GetBCCoefficients(int tagID, const Vector& faceCenter) const {
         auto it = bcRegistry_.find(tagID);
         if (it != bcRegistry_.end()) {
             const auto& def = it->second;
@@ -86,13 +86,13 @@ namespace BoundarySetting {
         }
     }
 
-    bool BoundaryConditionManager_3D::HasBC(int tagID) const {
+    bool BoundaryConditionManager::HasBC(int tagID) const {
         return bcRegistry_.find(tagID) != bcRegistry_.end();
     }
 
-    void BoundaryConditionManager_3D::Clear() { bcRegistry_.clear(); }
+    void BoundaryConditionManager::Clear() { bcRegistry_.clear(); }
 
-    void BoundaryConditionManager_3D::PrintSummary(const std::string& name) const {
+    void BoundaryConditionManager::PrintSummary(const std::string& name) const {
         std::cout << "--- Boundary Conditions Summary for [" << name << "] ---" << std::endl;
         if (bcRegistry_.empty()) {
             std::cout << "  (No BCs set)" << std::endl;

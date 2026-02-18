@@ -12,6 +12,9 @@
 #include "FracIndex.h" 
 #include "Fracture.h"
 
+// 前向声明
+struct FractureElement;
+
 class FractureNetwork 
 {
    
@@ -91,6 +94,33 @@ public:
      */
     const FractureElement* getElementByGlobalID(int globalID) const;
 
+    /**
+     * @brief 构建/刷新 Solver Index 到 Element 指针的快速映射缓存
+     * @param startOffset 裂缝自由度的起始编号 (即 Matrix DOFs 数量)
+     * @details 遍历网络中所有 FractureElement，根据其 solverIndex 建立映射。
+     */
+    void buildSolverIndexCache(int startOffset);
+
+    /**
+     * @brief 构建裂缝内部切向拓扑关系
+     * @details
+     * 基于 param 参数对每条裂缝的微元进行逻辑排序，
+     * 并填充 FractureElement::tangentNeighbors。
+     * 必须在 solverIndex 分配后调用。
+     */
+    void buildTangentTopology();
+
+    /**
+     * @brief 获取裂缝自由度的起始偏移量
+     */
+    int getSolverIndexOffset() const;
+
+    /**
+     * @brief 获取按 Solver Index 顺序排列的裂缝单元指针列表
+     * @return 裂缝单元指针向量
+     */
+    const std::vector<const FractureElement*>& getOrderedFractureElements() const;
+
     
     //@brief 导出裂缝网络信息到文本文件
     void exportToTxt(const string& prefix) const;  
@@ -102,4 +132,8 @@ private:
     int nextFracID_{ 0 };          ///< 递增的裂缝 ID
     FracElemIndex fracElemIndex_;
     bool fracElemIndexValid_ = false;
+
+    // 缓存：按 Solver Index 顺序排列的单元指针
+    std::vector<const FractureElement*> solverIndexToElement_;
+    int solverIndexOffset_ = 0;
 };

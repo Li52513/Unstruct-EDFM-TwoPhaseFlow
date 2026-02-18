@@ -23,7 +23,7 @@
  // 引入核心模块头文件
  // =========================================================
 #include "3D_MeshManager.h"
-#include "3D_BoundaryConditionManager.h"
+#include "BoundaryConditionManager.h"
 #include "MeshDefinitions.h"
 #include "SolverContrlStrName_op.h"
 // 引入基础数学类型 (Vector定义)
@@ -79,9 +79,9 @@ void RunTest_BoundaryCondition_Export()
 
     // 2. 实例化物理场 BC 管理器
     // ---------------------------------------------------------
-    BoundaryConditionManager_3D pBCMgr; // 压力场
-    BoundaryConditionManager_3D tBCMgr; // 温度场
-    BoundaryConditionManager_3D sBCMgr; // 饱和度场
+    BoundaryConditionManager pBCMgr; // 压力场
+    BoundaryConditionManager tBCMgr; // 温度场
+    BoundaryConditionManager sBCMgr; // 饱和度场
 
     // 3. 配置测试场景 (Physical Setup)
     // ---------------------------------------------------------

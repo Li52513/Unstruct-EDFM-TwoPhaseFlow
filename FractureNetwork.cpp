@@ -1,4 +1,5 @@
 #include "FractureNetwork.h"
+#include "FractureElement.h"
 #include "8_DOP.h"
 #include <algorithm>
 #include <cmath>
@@ -295,6 +296,125 @@ const FractureElement* FractureNetwork::getElementByGlobalID(int globalID) const
     }
     return nullptr;
 
+}
+
+// =========================================================
+// 缓存构建实现
+// =========================================================
+void FractureNetwork::buildSolverIndexCache(int startOffset)
+{
+    solverIndexOffset_ = startOffset;
+
+    // 1. 统计总单元数
+    size_t totalElements = 0;
+    for (const auto& frac : fractures)
+    {
+        totalElements += frac.elements.size();
+    }
+
+    // 2. 初始化
+    solverIndexToElement_.assign(totalElements, nullptr);
+
+    // 3. 填充
+    for (const auto& frac : fractures)
+    {
+        for (const auto& elem : frac.elements)
+        {
+            // 注意：2D-EDFM 的 solverIndex 分配逻辑通常在 MeshManager::BuildGlobalSystemIndexing 中
+            // 确保在此之前已经调用了 BuildGlobalSystemIndexing
+            if (elem.solverIndex == -1)
+            {
+                // 若尚未分配，无法构建缓存
+                continue;
+            }
+
+            int localVecIdx = elem.solverIndex - solverIndexOffset_;
+            if (localVecIdx >= 0 && localVecIdx < (int)totalElements)
+            {
+                solverIndexToElement_[localVecIdx] = &elem;
+            }
+        }
+    }
+
+    // 简单验证完整性
+    size_t nullCount = 0;
+    for (auto ptr : solverIndexToElement_) if (!ptr) nullCount++;
+
+    if (nullCount > 0)
+    {
+        std::cerr << "[FractureNetwork] Warning: " << nullCount
+            << " elements have unassigned solver indices during cache build.\n";
+    }
+    else
+    {
+        std::cout << "[FractureNetwork] Solver index cache built. Total elements: " << totalElements << std::endl;
+    }
+
+    // 立即构建切向拓扑，确保后续算子可用
+    buildTangentTopology();
+}
+
+// =========================================================
+// 切向拓扑构建实现 (Topology Sink)
+// =========================================================
+void FractureNetwork::buildTangentTopology()
+{
+    std::cout << "[FractureNetwork] Building Intra-Fracture Tangent Topology..." << std::endl;
+
+    // 遍历每一条宏观裂缝
+    // 注意：这里需要修改 element 的内容，因此 fractures 不能是 const
+    for (auto& frac : fractures)
+    {
+        // 1. 收集该裂缝下所有已激活(分配索引)的微元指针
+        std::vector<FractureElement*> microElems;
+        for (auto& elem : frac.elements) {
+            if (elem.solverIndex != -1) {
+
+                elem.parentFractureID = frac.id;
+                microElems.push_back(&elem);
+            }
+        }
+
+        if (microElems.empty()) continue;
+
+        // 2. 按几何参数 param0 排序 (从 Start 到 End)
+        // 这确保了 microElems[i] 的物理邻居就是 [i-1] 和 [i+1]
+        std::sort(microElems.begin(), microElems.end(),
+            [](const FractureElement* a, const FractureElement* b) {
+                return a->param0 < b->param0;
+            });
+
+        // 3. 填充 tangentNeighbors
+        for (size_t i = 0; i < microElems.size(); ++i) {
+            auto* elem = microElems[i];
+            elem->tangentNeighbors.clear(); // 清空旧数据
+
+            // Prev Sibling (Towards Start)
+            if (i > 0) {
+                elem->tangentNeighbors.push_back(microElems[i - 1]->solverIndex);
+            }
+            // Next Sibling (Towards End)
+            if (i < microElems.size() - 1) {
+                elem->tangentNeighbors.push_back(microElems[i + 1]->solverIndex);
+            }
+        }
+        std::cout << "Frac " << frac.id << " Elements: ";
+        for (auto* e : microElems) std::cout << e->param0 << " ";
+        std::cout << std::endl;
+    }
+    std::cout << "[FractureNetwork] Tangent topology built successfully." << std::endl;
+
+}
+
+// 实现 Getter
+int FractureNetwork::getSolverIndexOffset() const
+{
+    return solverIndexOffset_;
+}
+
+const std::vector<const FractureElement*>& FractureNetwork::getOrderedFractureElements() const
+{
+    return solverIndexToElement_;
 }
 
 
