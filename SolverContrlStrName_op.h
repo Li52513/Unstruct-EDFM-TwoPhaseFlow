@@ -4,7 +4,7 @@
 #include <vector>
 
 // 引入 VG 模型及相渗参数定义
-#include "CapRelPerm.h" 
+#include "CapRelPerm_HD.h" 
 
 /**
  * @namespace PhysicalProperties_string
