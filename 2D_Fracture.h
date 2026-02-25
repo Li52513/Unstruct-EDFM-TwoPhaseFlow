@@ -50,6 +50,12 @@ public:
 	// =========================================================
 	
 	/**
+	 * @brief 默认构造函数
+	 * @details 为标准库容器 (如 std::vector) 的隐式扩容或初始化占位提供支持
+	 */
+	Fracture_2D() : id(-1), conductivity(1.0), aperture(0.001) {}
+
+	/**
 	 * @brief 构造函数
 	 * @param id 裂缝编号
 	 * @param corners 裂缝边界顶点 (建议 4 个点: P0, P1, P2, P3)

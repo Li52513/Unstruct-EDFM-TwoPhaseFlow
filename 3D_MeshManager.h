@@ -123,6 +123,41 @@ public:
     void setupGlobalIndices();
 
     /**
+     * @brief 获取全局总自由度数 (Total Block DOFs)
+     * @return int Matrix Cells + Fracture Elements 总块数
+     */
+    int getTotalDOFCount() const;
+
+    // =========================================================
+    // 核心功能：DOF 编排器 (DOF Mapper) - 交织存储 (Interleaved Storage)
+    // =========================================================
+
+    /**
+     * @brief 设置每个网格单元/裂缝微元的物理自由度数量
+     * @param nDof 物理自由度数量 (必须 >= 1)
+     */
+    void setNumDOFs(int nDof);
+
+    /**
+     * @brief 获取当前设置的每个单元的物理自由度数量
+     */
+    int getNumDOFs() const;
+
+    /**
+     * @brief 获取指定求解器块索引和局部自由度偏移下的全局方程行/列号（交织存储策略）
+     * @param solverIndex 全局网格块/裂缝块求解器索引 (Block Index)
+     * @param dofOffset 该块内的局部物理自由度偏移 (范围：0 <= dofOffset < num_dofs_)
+     * @return int 全局线性方程组（Jacobian矩阵）中的绝对行/列号。若越界则返回 -1。
+     */
+    int getEquationIndex(int solverIndex, int dofOffset) const;
+
+    /**
+     * @brief 获取全局线性方程组的总维数 (Total Equation Rows/Cols)
+     * @return int 矩阵的总阶数
+     */
+    int getTotalEquationDOFs() const;
+
+    /**
      * @brief 交互数据清洗与去重 (Data Cleanup)
      * @details 执行两步清洗：
      * 1. 几何过滤：剔除“幽灵交互”，即距离超过基岩网格半对角线的错误关联。
@@ -283,6 +318,10 @@ private:
     bool usePrism_, useQuadBase_;               // 网格单元类型成员对象
     BoundaryFaceClassify_byTag::FaceGroups bcGroups_byTag_; //边界面组
     size_t boundaryCount_ = 0;                  //边界面数量
+
+    /** * @brief 3D模型下每个网格/裂缝单元包含的自由度数量
+     */
+    int num_dofs_ = 1;
     
     //【3D-EDFM专用】
     // =========================================================

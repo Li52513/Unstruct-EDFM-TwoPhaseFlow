@@ -14,6 +14,7 @@
 #include    "3D_BoundarySetup_Test.h"
 
 #include "test_FVM_Grad_Benchmark.h"
+#include "Test_DOFMapper.h"
 
 int main()
 {
@@ -27,7 +28,7 @@ int main()
     
     //return TwistFracIntersectionTest_3D();            //3D_EDFM中扭曲裂缝相交测试
 
-    return Improved_EDFM_test_3D();                   //全流程测试3D_Improved_EDFM四种加速算法的性能以及交互多边形生成的准确性  结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\3D_EDFM
+    //return Improved_EDFM_test_3D();                   //全流程测试3D_Improved_EDFM四种加速算法的性能以及交互多边形生成的准确性  结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\3D_EDFM
 
     //return RunBenchmark_Step1_Distance_Accuracy();    //测试3D_EDFM中基岩网格单元到裂缝交互单元的距离d的准确性
     
@@ -84,6 +85,10 @@ int main()
     //     );
 
     // return 0;
+
+    //测试DOFmap
+    RunDOFMapperVerification();
+    return 0;
     
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();

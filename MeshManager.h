@@ -167,6 +167,43 @@ public:
     int getTotalDOFCount() const;
 
     // =========================================================
+    // 核心功能：DOF 编排器 (DOF Mapper) - 交织存储 (Interleaved Storage)
+    // =========================================================
+
+    /**
+     * @brief 设置每个网格单元/裂缝微元的物理自由度数量
+     * @details 在多相热流耦合场景中，如果主变量为 (P, S, T)，则 nDof 应设置为 3。
+     * @param nDof 物理自由度数量 (必须 >= 1)
+     */
+    void setNumDOFs(int nDof);
+
+    /**
+     * @brief 获取当前设置的每个单元的物理自由度数量
+     * @return int 物理自由度数量
+     */
+    int getNumDOFs() const;
+
+    /**
+     * @brief 获取指定求解器块索引和局部自由度偏移下的全局方程行/列号（交织存储策略）
+     * @details
+     * 交织存储映射公式：GlobalEquationIndex = solverIndex * num_dofs_ + dofOffset
+     * 示例：若 num_dofs_ = 3，对于 solverIndex = 1 的网格，
+     * P (offset=0) -> Row 3
+     * S (offset=1) -> Row 4
+     * T (offset=2) -> Row 5
+     * @param solverIndex 全局网格块/裂缝块求解器索引 (Block Index)
+     * @param dofOffset 该块内的局部物理自由度偏移 (范围：0 <= dofOffset < num_dofs_)
+     * @return int 全局线性方程组（Jacobian矩阵）中的绝对行/列号。若越界则返回 -1。
+     */
+    int getEquationIndex(int solverIndex, int dofOffset) const;
+
+    /**
+     * @brief 获取全局线性方程组的总维数 (Total Equation Rows/Cols)
+     * @return int 矩阵的总阶数 = getTotalDOFCount() * getNumDOFs()
+     */
+    int getTotalEquationDOFs() const;
+
+    // =========================================================
     // 输出 & 调试 (Export & Debug)
     // =========================================================
     void exportMesh(const std::string& prefix) const;
@@ -201,6 +238,12 @@ private:
      * @note 同时也作为裂缝单元全局编号的起始偏移量 (Offset)
      */
     int n_matrix_dofs_ = 0;
+
+
+    /** * @brief 每个网格/裂缝单元包含的自由度数量
+     * @note 默认值为 1（适配单相单组分），多相多组分需通过 setNumDOFs 修改。
+     */
+    int num_dofs_ = 1;
 
     // =========================================================
     // 全局查找表

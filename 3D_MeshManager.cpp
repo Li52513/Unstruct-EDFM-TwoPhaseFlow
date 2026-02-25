@@ -90,6 +90,65 @@ void MeshManager_3D::setupGlobalIndices()
     std::cout << "              Total DOF (Matrix + Fracs): " << totalDOF << std::endl;
 }
 
+int MeshManager_3D::getTotalDOFCount() const
+{
+    int total = static_cast<int>(mesh_.getCells().size());
+    for (const auto& frac : frNet_2D_.getFractures())
+    {
+        total += static_cast<int>(frac.fracCells.size());
+    }
+    return total;
+}
+
+// =========================================================
+// DOF 编排器 (DOF Mapper) 实现
+// =========================================================
+
+void MeshManager_3D::setNumDOFs(int nDof)
+{
+    if (nDof < 1)
+    {
+        std::cerr << "[Error] MeshManager_3D::setNumDOFs - Number of DOFs must be >= 1. Force setting to 1." << std::endl;
+        num_dofs_ = 1;
+    }
+    else
+    {
+        num_dofs_ = nDof;
+        std::cout << "[System] 3D DOF Mapper configured: " << num_dofs_ << " DOFs per cell/element." << std::endl;
+    }
+}
+
+int MeshManager_3D::getNumDOFs() const
+{
+    return num_dofs_;
+}
+
+int MeshManager_3D::getEquationIndex(int solverIndex, int dofOffset) const
+{
+    if (solverIndex < 0 || solverIndex >= getTotalDOFCount())
+    {
+        std::cerr << "[Error] MeshManager_3D::getEquationIndex - solverIndex ("
+            << solverIndex << ") is out of valid bounds [0, "
+            << getTotalDOFCount() - 1 << "]." << std::endl;
+        return -1;
+    }
+
+    if (dofOffset < 0 || dofOffset >= num_dofs_)
+    {
+        std::cerr << "[Error] MeshManager_3D::getEquationIndex - dofOffset ("
+            << dofOffset << ") is out of valid bounds [0, "
+            << num_dofs_ - 1 << "]." << std::endl;
+        return -1;
+    }
+
+    return solverIndex * num_dofs_ + dofOffset;
+}
+
+int MeshManager_3D::getTotalEquationDOFs() const
+{
+    return getTotalDOFCount() * num_dofs_;
+}
+
 // =========================================================
 // [New] 交互数据清洗与去重 (Production-Ready)
 // =========================================================

@@ -333,3 +333,53 @@ int MeshManager::getTotalDOFCount() const
     }
     return total;
 }
+
+// =========================================================
+// DOF 编排器 (DOF Mapper) 实现
+// =========================================================
+void MeshManager::setNumDOFs(int nDof)
+{
+    if (nDof < 1)
+    {
+        std::cerr << "[Error] MeshManager::setNumDOFs - Number of DOFs must be >= 1. Force setting to 1." << std::endl;
+        num_dofs_ = 1;
+    }
+    else
+    {
+        num_dofs_ = nDof;
+        std::cout << "[System] DOF Mapper configured: " << num_dofs_ << " DOFs per cell/element." << std::endl;
+    }
+}
+
+int MeshManager::getNumDOFs() const
+{
+    return num_dofs_;
+}
+
+int MeshManager::getEquationIndex(int solverIndex, int dofOffset) const
+{
+    // 安全性检查：方程组装时高频调用，边界判定能有效拦截越界段错误
+    if (solverIndex < 0 || solverIndex >= getTotalDOFCount())
+    {
+        std::cerr << "[Error] MeshManager::getEquationIndex - solverIndex ("
+            << solverIndex << ") is out of valid bounds [0, "
+            << getTotalDOFCount() - 1 << "]." << std::endl;
+        return -1;
+    }
+
+    if (dofOffset < 0 || dofOffset >= num_dofs_)
+    {
+        std::cerr << "[Error] MeshManager::getEquationIndex - dofOffset ("
+            << dofOffset << ") is out of valid bounds [0, "
+            << num_dofs_ - 1 << "]." << std::endl;
+        return -1;
+    }
+
+    // 核心映射机制：交织存储 (Interleaved Storage)
+    return solverIndex * num_dofs_ + dofOffset;
+}
+
+int MeshManager::getTotalEquationDOFs() const
+{
+    return getTotalDOFCount() * num_dofs_;
+}
