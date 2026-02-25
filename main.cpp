@@ -27,7 +27,7 @@ int main()
     
     //return TwistFracIntersectionTest_3D();            //3D_EDFM中扭曲裂缝相交测试
 
-    //return Improved_EDFM_test_3D();                   //全流程测试3D_Improved_EDFM四种加速算法的性能以及交互多边形生成的准确性  结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\3D_EDFM
+    return Improved_EDFM_test_3D();                   //全流程测试3D_Improved_EDFM四种加速算法的性能以及交互多边形生成的准确性  结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\3D_EDFM
 
     //return RunBenchmark_Step1_Distance_Accuracy();    //测试3D_EDFM中基岩网格单元到裂缝交互单元的距离d的准确性
     
@@ -49,41 +49,41 @@ int main()
     //RunTest_BoundaryCondition_Export();					 //测试3D_EDFM中边界条件设置的正确性,保持均匀分布                                   结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\BoundaryConditionSetup    
     //return 0;
 
-    //测试梯度算子
-         run_Benchmark_2D_EDFM_Grad();
-         run_Benchmark_3D_EDFM_Grad();
-         // 2. 进阶工况 A: 二次非线性场 (Quadratic)
-        // P = x^2 + y^2 + z^2
-        // Grad = (2x, 2y, 2z)
-         run_Advanced_Accuracy_Test(
-             "Case A: Quadratic Field (P = x^2 + y^2 + z^2)",
-             [](const Vector& p) { return p.m_x * p.m_x + p.m_y * p.m_y + p.m_z * p.m_z; },
-             [](const Vector& p) { return Vector(2.0 * p.m_x, 2.0 * p.m_y, 2.0 * p.m_z); },
-             true // expect non-zero error
-         );
+    ////测试梯度算子
+    //     run_Benchmark_2D_EDFM_Grad();
+    //     run_Benchmark_3D_EDFM_Grad();
+    //     // 2. 进阶工况 A: 二次非线性场 (Quadratic)
+    //    // P = x^2 + y^2 + z^2
+    //    // Grad = (2x, 2y, 2z)
+    //     run_Advanced_Accuracy_Test(
+    //         "Case A: Quadratic Field (P = x^2 + y^2 + z^2)",
+    //         [](const Vector& p) { return p.m_x * p.m_x + p.m_y * p.m_y + p.m_z * p.m_z; },
+    //         [](const Vector& p) { return Vector(2.0 * p.m_x, 2.0 * p.m_y, 2.0 * p.m_z); },
+    //         true // expect non-zero error
+    //     );
 
-         // 3. 进阶工况 B: 交叉项场 (Cross-term)
-         // P = xy + yz
-         // Grad = (y, x+z, y)
-         // 这也是二次的，但包含耦合项
-         run_Advanced_Accuracy_Test(
-             "Case B: Mixed Quadratic (P = xy + yz)",
-             [](const Vector& p) { return p.m_x * p.m_y + p.m_y * p.m_z; },
-             [](const Vector& p) { return Vector(p.m_y, p.m_x + p.m_z, p.m_y); },
-             true
-         );
+    //     // 3. 进阶工况 B: 交叉项场 (Cross-term)
+    //     // P = xy + yz
+    //     // Grad = (y, x+z, y)
+    //     // 这也是二次的，但包含耦合项
+    //     run_Advanced_Accuracy_Test(
+    //         "Case B: Mixed Quadratic (P = xy + yz)",
+    //         [](const Vector& p) { return p.m_x * p.m_y + p.m_y * p.m_z; },
+    //         [](const Vector& p) { return Vector(p.m_y, p.m_x + p.m_z, p.m_y); },
+    //         true
+    //     );
 
-         // 4. 进阶工况 C: 三角函数场 (Trigonometric)
-         // P = sin(x) + cos(y)
-         // Grad = (cos(x), -sin(y), 0)
-         run_Advanced_Accuracy_Test(
-             "Case C: Trigonometric (P = sin(x) + cos(y))",
-             [](const Vector& p) { return std::sin(p.m_x) + std::cos(p.m_y); },
-             [](const Vector& p) { return Vector(std::cos(p.m_x), -std::sin(p.m_y), 0.0); },
-             true
-         );
+    //     // 4. 进阶工况 C: 三角函数场 (Trigonometric)
+    //     // P = sin(x) + cos(y)
+    //     // Grad = (cos(x), -sin(y), 0)
+    //     run_Advanced_Accuracy_Test(
+    //         "Case C: Trigonometric (P = sin(x) + cos(y))",
+    //         [](const Vector& p) { return std::sin(p.m_x) + std::cos(p.m_y); },
+    //         [](const Vector& p) { return Vector(std::cos(p.m_x), -std::sin(p.m_y), 0.0); },
+    //         true
+    //     );
 
-     return 0;
+    // return 0;
     
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();
