@@ -61,6 +61,37 @@ int main()
     //测试梯度算子
          run_Benchmark_2D_EDFM_Grad();
          run_Benchmark_3D_EDFM_Grad();
+         // 2. 进阶工况 A: 二次非线性场 (Quadratic)
+        // P = x^2 + y^2 + z^2
+        // Grad = (2x, 2y, 2z)
+         run_Advanced_Accuracy_Test(
+             "Case A: Quadratic Field (P = x^2 + y^2 + z^2)",
+             [](const Vector& p) { return p.m_x * p.m_x + p.m_y * p.m_y + p.m_z * p.m_z; },
+             [](const Vector& p) { return Vector(2.0 * p.m_x, 2.0 * p.m_y, 2.0 * p.m_z); },
+             true // expect non-zero error
+         );
+
+         // 3. 进阶工况 B: 交叉项场 (Cross-term)
+         // P = xy + yz
+         // Grad = (y, x+z, y)
+         // 这也是二次的，但包含耦合项
+         run_Advanced_Accuracy_Test(
+             "Case B: Mixed Quadratic (P = xy + yz)",
+             [](const Vector& p) { return p.m_x * p.m_y + p.m_y * p.m_z; },
+             [](const Vector& p) { return Vector(p.m_y, p.m_x + p.m_z, p.m_y); },
+             true
+         );
+
+         // 4. 进阶工况 C: 三角函数场 (Trigonometric)
+         // P = sin(x) + cos(y)
+         // Grad = (cos(x), -sin(y), 0)
+         run_Advanced_Accuracy_Test(
+             "Case C: Trigonometric (P = sin(x) + cos(y))",
+             [](const Vector& p) { return std::sin(p.m_x) + std::cos(p.m_y); },
+             [](const Vector& p) { return Vector(std::cos(p.m_x), -std::sin(p.m_y), 0.0); },
+             true
+         );
+
      return 0;
     
     //return  EDFM_withFracture_Geomtry(); 

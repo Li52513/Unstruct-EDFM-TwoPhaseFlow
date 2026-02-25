@@ -23,6 +23,10 @@
 #include "3D_FieldManager.h"        // 3D-EDFM Field Manager
 #include "FVM_Grad.h"               // 待测算子
 
+#include <functional>
+using FieldFunc = std::function<double(const Vector&)>;
+using GradFunc = std::function<Vector(const Vector&)>;
+
 // =========================================================
 // 辅助：边界单元判定
 // =========================================================
@@ -254,4 +258,120 @@ void run_Benchmark_3D_EDFM_Grad()
     }
     std::cout << "    Checked Elements: " << checkedF << "/" << fracGrad->size << std::endl;
     std::cout << "    Max Internal Error: " << maxErrF << (maxErrF < 1e-10 ? " [PASS]" : " [FAIL]") << std::endl;
+}
+
+void run_Advanced_Accuracy_Test(const std::string& testName,
+    FieldFunc func,
+    GradFunc anaGradFunc,
+    bool isQuadratic = false)
+{
+    std::cout << "\n=========================================================" << std::endl;
+    std::cout << "[Advanced Benchmark] " << testName << std::endl;
+    std::cout << "=========================================================" << std::endl;
+
+    // 1. 构建网格 (使用稍密的网格以观察非线性收敛)
+    double L = 1.0;
+    int N = 50; // 加密网格
+    MeshManager_3D mgr(L, L, L, N, N, N, true, false); // 3D Mesh
+    mgr.BuildSolidMatrixGrid_3D();
+
+    // 2. 添加典型裂缝 (一横一斜)
+    // Horizontal
+    Vector q1(0.1, 0.1, 0.5), q2(0.9, 0.1, 0.5), q3(0.9, 0.9, 0.5), q4(0.1, 0.9, 0.5);
+    mgr.addFracturetoFractureNetwork(CreateRectFracture(0, q1, q2, q3, q4));
+    // Oblique
+    Vector p1(0.8, 0.2, 0.1), p2(0.2, 0.8, 0.1), p3(0.2, 0.8, 0.9), p4(0.8, 0.2, 0.9);
+    mgr.addFracturetoFractureNetwork(CreateRectFracture(1, p1, p2, p3, p4));
+
+    // 3. 拓扑与几何构建
+    mgr.meshAllFracturesinNetwork(15, 15, NormalVectorCorrectionMethod::OrthogonalCorrection);
+    mgr.setupGlobalIndices();
+    mgr.SolveIntersection3D_improved_twist_accleration(MeshManager_3D::IntersectionStrategy::Rasterization_14DOP);
+    mgr.DetectFractureFractureIntersectionsInNetwork(FFIntersectionStrategy::Octree_Optimized);
+    mgr.fracture_network().rebuildEdgeProperties(); // Global Index & Topology Sink
+    mgr.buildTopologyMaps();
+
+    // 4. 初始化场数据
+    auto fm = std::make_shared<FieldManager_3D>();
+    size_t nMatrix = mgr.mesh().getGridCount();
+    size_t nFrac = mgr.fracture_network().getOrderedFractureElements().size();
+    fm->InitSizes(nMatrix, nFrac, 0, 0, 0, 0);
+
+    auto matP = fm->matrixFields.create<volScalarField>("Pressure", nMatrix);
+    auto fracP = fm->fractureFields.create<volScalarField>("Pressure", nFrac);
+
+    // 填充 Matrix 场
+    for (int i = 0; i < matP->size; ++i) {
+        (*matP)[i] = func(mgr.mesh().getCells()[i].center);
+    }
+
+    // 填充 Fracture 场
+    const auto& fracElems = mgr.fracture_network().getOrderedFractureElements();
+    for (int i = 0; i < (int)nFrac; ++i) {
+        (*fracP)[i] = func(fracElems[i]->centroid);
+    }
+
+    // 5. 计算梯度
+    FVM_Grad gradOp(mgr.mesh(), &mgr.fracture_network(), nullptr, nullptr);
+    auto matGrad = gradOp.compute(*matP, FVM_Grad::Method::LeastSquares);
+    auto fracGrad = gradOp.compute(*fracP, mgr.fracture_network(), FVM_Grad::Method::LeastSquares);
+
+    // 6. 误差统计
+    // ---------------------------------------------------
+    // Matrix Error
+    double rmsErrM = 0.0;
+    double maxErrM = 0.0;
+    int countM = 0;
+    for (int i = 0; i < matGrad->size; ++i) {
+        if (IsMatrixBoundary(mgr.mesh(), i)) continue; // 仅检查内部
+
+        Vector numGrad = (*matGrad)[i];
+        Vector anaGrad = anaGradFunc(mgr.mesh().getCells()[i].center);
+
+        double err = (numGrad - anaGrad).Mag();
+        rmsErrM += err * err;
+        if (err > maxErrM) maxErrM = err;
+        countM++;
+    }
+    rmsErrM = std::sqrt(rmsErrM / countM);
+
+    // Fracture Error (注意：解析解需要投影到裂缝切平面)
+    double rmsErrF = 0.0;
+    double maxErrF = 0.0;
+    int countF = 0;
+    for (int i = 0; i < fracGrad->size; ++i) {
+        const auto* elem = fracElems[i];
+        if (IsFractureBoundary_3D(mgr.fracture_network(), elem)) continue; // 仅检查内部
+
+        Vector numGrad = (*fracGrad)[i];
+        Vector globalAnaGrad = anaGradFunc(elem->centroid);
+
+        // [Key] 投影解析梯度到裂缝平面： Grad_tau = Grad - (Grad . n) * n
+        Vector n = elem->normal; n.Normalize();
+        Vector anaGradProj = globalAnaGrad - (globalAnaGrad * n) * n;
+
+        double err = (numGrad - anaGradProj).Mag();
+        rmsErrF += err * err;
+        if (err > maxErrF) maxErrF = err;
+        countF++;
+    }
+    rmsErrF = std::sqrt(rmsErrF / countF);
+
+    // 7. 输出报告
+    std::cout << std::scientific << std::setprecision(4);
+    std::cout << ">>> Report: " << testName << std::endl;
+    std::cout << "    [Matrix]   RMS Error: " << rmsErrM << " | Max Error: " << maxErrM << std::endl;
+    std::cout << "    [Fracture] RMS Error: " << rmsErrF << " | Max Error: " << maxErrF << std::endl;
+
+    // 判定标准
+    // 对于二次场，一阶 LS 格式通常有 O(h) 或 O(h^2) 的误差，不应为 0
+    // 对于 30x30x30 网格，dx ≈ 0.033。误差应在 1e-2 ~ 1e-3 量级
+    double tolerance = isQuadratic ? 0.1 : 1e-9;
+
+    if (maxErrM < tolerance && maxErrF < tolerance) {
+        std::cout << "    [RESULT] PASS (Within expected accuracy)" << std::endl;
+    }
+    else {
+        std::cout << "    [RESULT] WARNING/FAIL (Check grid quality or boundary effects)" << std::endl;
+    }
 }
