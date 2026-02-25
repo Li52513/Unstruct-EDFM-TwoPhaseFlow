@@ -51,8 +51,8 @@ void VariableInitializer_3D::InitIMPESState(const PressureEquation_String& pConf
     const LinearInitParams& pInit,
     const LinearInitParams& tInit,
     const LinearInitParams& sInit,
-    const VGParams& vgParams,
-    const RelPermParams& rpParams)
+    const CapRelPerm::VGParams& vgParams,
+    const CapRelPerm::RelPermParams& rpParams)
 {
     std::cout << "[VarInit] Initializing IMPES Two-Phase State..." << std::endl;
 
@@ -162,8 +162,8 @@ void VariableInitializer_3D::CreateAndInitFractureScalar(const std::string& tagN
 
 void VariableInitializer_3D::CalculateDerivedTwoPhaseFields(const PressureEquation_String& pConfig,
     const SaturationEquation_String& sConfig,
-    const VGParams& vg,
-    const RelPermParams& rp)
+    const CapRelPerm::VGParams& vg,
+    const CapRelPerm::RelPermParams& rp)
 {
     // 准备 Tag 名称 (从 PhysicalProperties_string_op 中获取)
     TwoPhaseAux auxTags;

@@ -7,7 +7,7 @@
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
 #include "SolverContrlStrName_op.h"
-#include "CapRelPerm.h" // [新增] 引入相渗/毛管力模型
+#include "CapRelPerm_HD.h" // [新增] 引入相渗/毛管力模型
 
 /**
  * @struct LinearInitParams
@@ -81,8 +81,8 @@ public:
         const LinearInitParams& pInit,
         const LinearInitParams& tInit,
         const LinearInitParams& sInit,
-        const VGParams& vgParams,        // [新增]
-        const RelPermParams& rpParams);  // [新增]
+        const CapRelPerm::VGParams& vgParams,        // [新增]
+        const CapRelPerm::RelPermParams& rpParams);  // [新增]
 
 private:
     // =========================================================
@@ -111,8 +111,8 @@ private:
      */
     void CalculateDerivedTwoPhaseFields(const PhysicalProperties_string_op::PressureEquation_String& pConfig,
         const PhysicalProperties_string_op::SaturationEquation_String& sConfig,
-        const VGParams& vg,
-        const RelPermParams& rp);
+        const CapRelPerm::VGParams& vg,
+        const CapRelPerm::RelPermParams& rp);
 
     const MeshManager_3D& meshMgr_;
     FieldManager_3D& fieldMgr_;

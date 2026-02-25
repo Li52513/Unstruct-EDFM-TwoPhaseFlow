@@ -119,8 +119,8 @@ void RunTest_DFN_Initialization_And_Viz()
 
     // VG & RelPerm 参数 (用于计算 Pc 和 Kr)
     // 这些参数将基于 Sw 场自动生成 Pc 和 Kr 场，验证派生变量计算的稳定性
-    VGParams vg; vg.alpha = 1e-4; vg.n = 2.0;
-    RelPermParams rp; rp.L = 0.5;
+    CapRelPerm::VGParams vg; vg.alpha = 1e-4; vg.n = 2.0;
+    CapRelPerm::RelPermParams rp; rp.L = 0.5;
 
     // 3. 执行完整初始化 (IMPES Pipeline)
     // 这将自动计算 Matrix 和 Fracture 的 P, T, Sw, Pc, Krw, Krg

@@ -4,7 +4,7 @@
 #include <vector>
 
 // 引入 VG 模型及相渗参数定义
-#include "CapRelPerm_HD.h" 
+#include "CapRelPerm_HD.h"
 
 /**
  * @namespace PhysicalProperties_string
@@ -243,8 +243,8 @@ namespace PhysicalProperties_string_op
 
     struct TwoPhase_VG_Parameters
     {
-        VGParams      vg_params;
-        RelPermParams relperm_params;
+        CapRelPerm::VGParams      vg_params;
+        CapRelPerm::RelPermParams relperm_params;
     };
 
     enum class SatTimeControlScheme

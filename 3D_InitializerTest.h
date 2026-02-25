@@ -84,8 +84,8 @@ void RunTest_Initialization_And_Viz()
     LinearInitParams sInit(1.0, 0.0, -0.008);
 
     // VG & RelPerm 参数 (用于生成 Pc 和 Kr)
-    VGParams vg; vg.alpha = 1e-5; vg.n = 2.0;
-    RelPermParams rp; rp.L = 0.5;
+    CapRelPerm::VGParams vg; vg.alpha = 1e-5; vg.n = 2.0;
+    CapRelPerm::RelPermParams rp; rp.L = 0.5;
 
     // 4. 执行初始化 (IMPES)
     initMgr.InitIMPESState(pConfig, tConfig, sConfig, pInit, tInit, sInit, vg, rp);
