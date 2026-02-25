@@ -1,4 +1,3 @@
-#include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
 #include "FieldAcessForDiscre.h"  // cellScalar(...)
