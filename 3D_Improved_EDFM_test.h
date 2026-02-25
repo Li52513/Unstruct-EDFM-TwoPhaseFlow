@@ -82,6 +82,10 @@ void RunTestCase(const std::string& caseName, const std::vector<Fracture_2D>& fr
     std::cout << "-> Meshing fractures (" << nU << "x" << nV << " elements per fracture)..." << std::endl;
     manager.meshAllFracturesinNetwork(nU, nV, NormalVectorCorrectionMethod::OrthogonalCorrection);
 
+    // === 初始化全局索引 ===
+    std::cout << "-> Setting up global solver indices..." << std::endl;
+    manager.setupGlobalIndices();
+
     // 5. 裂缝-裂缝求交 (F-F Intersection)
     // -----------------------------------------------------
     // 使用八叉树加速
@@ -94,6 +98,11 @@ void RunTestCase(const std::string& caseName, const std::vector<Fracture_2D>& fr
     // 使用我们刚落地的 SolveIntersection3D
     std::cout << "-> Solving Fracture-Matrix Intersections (Improved 3D-EDFM)..." << std::endl;
     manager.SolveIntersection3D_improved_twist_accleration(MeshManager_3D::IntersectionStrategy::Rasterization_14DOP);
+
+    std::cout << "-> Post-processing intersection pairs..." << std::endl;
+    manager.removeDuplicateInteractions();     // 清除幽灵交互和重复项
+    manager.resolveCoplanarInteractions();     // 解决共面重叠
+    manager.buildTopologyMaps();               // 构建双向映射
 
     // 7. 导出结果 (Export Results)
     // -----------------------------------------------------
