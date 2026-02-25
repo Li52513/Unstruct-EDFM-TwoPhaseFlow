@@ -182,20 +182,6 @@ public:
     const Mesh& mesh() const { return mesh_; }
     const FractureNetwork& fracture_network() const { return frNet_; }
 
-    // 【旧接口】
-    /**
-     * @brief 网格生成-利用gmsh构建2D基岩非结构化网格，并利用几何信息进行边界识别及分类,仍然依赖BoundaryFaceClassify.h 已被 BuildSolidMatrixGrid_2D替代
-     * @param NormalVectorCorrectionMethod：网格面非正交修正计算方法 最小修正法 MinimumCorrection；OrthogonalCorrection 正交修正法；OverRelaxed 超松弛修正法
-     */
-    void BuildSolidMatrixGrid(NormalVectorCorrectionMethod corr = NormalVectorCorrectionMethod::OrthogonalCorrection);
-
-    //  【旧接口】
-    /**
-	  * @brief 接收BuildSolidMatrixGrid_*函数中返回的边界面分组bcGroups_提供读取接口，后期将被bcGroups_byTag_替代
-      */
-    const BoundaryFaceClassify::FaceGroups& boundaryFaces() const { return bcGroups_; }
-
-
 private:
     // =========================================================
     // 私有成员变量
@@ -208,7 +194,6 @@ private:
     bool usePrism_, useQuadBase_; // 网格单元类型成员对象
 
     DistanceMetric distanceMetric_ = DistanceMetric::AreaWeight;
-	BoundaryFaceClassify::FaceGroups bcGroups_; //旧接口，后期将被bcGroups_byTag_替代
     BoundaryFaceClassify_byTag::FaceGroups bcGroups_byTag_;
     size_t boundaryCount_ = 0;
 

@@ -333,33 +333,3 @@ int MeshManager::getTotalDOFCount() const
     }
     return total;
 }
-
-
-//构造基岩网格 （当前其他函数均调用此函数）后期需要剥离，用BuildSolidMatrixGrid_2D替代
-void MeshManager::BuildSolidMatrixGrid(NormalVectorCorrectionMethod corr)
-{
-    // 1) 构建基础网格拓扑
-    mesh_.BuildMesh(lx_, ly_, lz_, nx_, ny_, nz_, usePrism_, useQuadBase_);
-
-    // 2) 单元分类（内部/边界）
-    mesh_.ClassifySolidMatrixCells();
-
-    // 3) 识别边界组
-    bcGroups_ = BoundaryFaceClassify::ClassifyBoundaryFaces(mesh_, lx_, ly_, lz_, 1e-9);
-
-    // 4) 可选：统计所有边界面（用于自检）
-    boundaryCount_ = 0;
-    for (const auto& f : mesh_.getFaces()) if (f.isBoundary()) ++boundaryCount_;
-
-    // 5) （可选）自检打印
-    std::cout << "[BC] faces: x0=" << bcGroups_.x0.size()
-        << " xL=" << bcGroups_.xL.size()
-        << " y0=" << bcGroups_.y0.size()
-        << " yL=" << bcGroups_.yL.size()
-        << " z0=" << bcGroups_.z0.size()
-        << " zL=" << bcGroups_.zL.size()
-        << " | total boundary=" << boundaryCount_ << "\n";
-
-    // 6) 计算几何信息
-    mesh_.ComputeMatrixMeshFaceGeometricInfor(corr);
-}

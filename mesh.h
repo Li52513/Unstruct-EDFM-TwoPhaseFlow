@@ -139,20 +139,11 @@ public:
     void GenerateMesh2D(double lengthX, double lengthY, int nx, int ny, bool useQuadBase, std::string jobName = "EDFM_2D");
 
     /**
-     * @brief 【2D旧接口】手动指定构建参数 (保留兼容性)
-     */
-    void BuildMesh2D(double lengthX, double lengthY, int nx, int ny, bool useQuadBase, std::string Name);
-
-    /**
      * @brief: 【适用3D EDFM】生成 3D 非结构化基岩网格
      * 流程: Gmsh生成 -> 映射物理边界-> 读取节点 -> 构建3D单元 -> 构建边(Face)拓扑 ->  区分内部/边界单元-> 构建网格face的Bin索引 -> 填充face的owner neighbor 单元索引 ->提取基岩棱 (Matrix Edges)-> 构建空间索引 (Octree)
      */
     void  GenerateMesh3D(double lengthX, double lengthY, double lengthZ, int nx, int ny, int nz, bool usePrism, bool useQuadBase, std::string jobName = "EDFM_3D");
 
-    /**
-     * @brief 【3D旧接口】通用构建入口 (保留兼容性)
-     */
-    void BuildMesh(double lengthX, double lengthY, double lengthZ, int nx, int ny, int nz, bool usePrism, bool useQuadBase);
 
 
     // =========================================================
