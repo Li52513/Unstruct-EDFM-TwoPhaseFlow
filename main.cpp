@@ -15,6 +15,7 @@
 
 #include "test_FVM_Grad_Benchmark.h"
 #include "Test_DOFMapper.h"
+#include "Test_ADVar.h"
 
 int main()
 {
@@ -87,9 +88,12 @@ int main()
     // return 0;
 
     //≤‚ ‘DOFmap
-    RunDOFMapperVerification();
+    //RunDOFMapperVerification();
+    //return 0;
+
+	//≤‚ ‘ADVar
+    Verify_AutomaticDifferentiation();
     return 0;
-    
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();
     //return SinglePhase_CO2_TH_withWell_reviese();
