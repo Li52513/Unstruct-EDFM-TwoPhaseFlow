@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <omp.h>
+#include <iostream>
 
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
@@ -33,15 +35,20 @@ struct LinearInitParams
     }
 };
 
+// =========================================================
+// 辅助函数: 线性分布计算
+// =========================================================
+inline double ComputeLinearValue(const Vector& pos, const LinearInitParams& p)
+{
+    return p.refVal +
+        p.grad_x * (pos.m_x - p.x_ref) +
+        p.grad_y * (pos.m_y - p.y_ref) +
+        p.grad_z * (pos.m_z - p.z_ref);
+}
+
 /**
  * @class VariableInitializer_3D
  * @brief 3D 主变量场构建与初始化器
- * @details 负责创建基岩和裂缝中的代求变量场 (Pressure, Temperature, Saturation)，
- * 并提供基于几何位置的线性初始化功能。
- * * 核心职责:
- * 1. Create: 使用 createMatrixScalar/createFractureScalar 强制分配内存。
- * 2. Initialize: 计算 P, T, S 初始分布。
- * 3. Derived: 针对两相流，基于初始饱和度计算并填充 Pc 和 Kr 场。
  */
 class VariableInitializer_3D
 {
@@ -81,8 +88,46 @@ public:
         const LinearInitParams& pInit,
         const LinearInitParams& tInit,
         const LinearInitParams& sInit,
-        const CapRelPerm::VGParams& vgParams,        // [新增]
-        const CapRelPerm::RelPermParams& rpParams);  // [新增]
+        const CapRelPerm::VGParams& vgParams,        
+        const CapRelPerm::RelPermParams& rpParams);
+
+    // =========================================================
+    // FIM 全隐式两相流/单相流初始化 (自动梯度播种)
+    // =========================================================
+    /**
+     * @brief 初始化 FIM 框架下的主变量并完成雅可比矩阵的梯度播种
+     * @tparam N 独立自变量的数量 (单相N=2, 两相N=3)
+     * @param pIdx 压力 P 在系统中的局部自由度索引 (如 0)
+     * @param sIdx 饱和度 Sw 的自由度索引 (如 1, 单相流传入 -1 忽略播种)
+     * @param tIdx 温度 T 的自由度索引 (如 2)
+     */
+    template<int N>
+    void InitFIMState(const PhysicalProperties_string_op::PressureEquation_String& pConfig,
+        const PhysicalProperties_string_op::TemperatureEquation_String& tConfig,
+        const PhysicalProperties_string_op::SaturationEquation_String& sConfig,
+        const LinearInitParams& pInit,
+        const LinearInitParams& tInit,
+        const LinearInitParams& sInit,
+        int pIdx = 0, int sIdx = 1, int tIdx = 2)
+    {
+        std::cout << "[VarInit_3D] Initializing FIM State (N=" << N << ") with AD Seeding..." << std::endl;
+
+        // 1. 初始化压力场 (带导数播种)
+        CreateAndInitMatrixADScalar<N>(pConfig.pressure_field, pConfig.pressure_old_field, pConfig.pressure_prev_field, pInit, pIdx);
+        CreateAndInitFractureADScalar<N>(pConfig.pressure_field, pConfig.pressure_old_field, pConfig.pressure_prev_field, pInit, pIdx);
+
+        // 2. 初始化温度场 (带导数播种)
+        CreateAndInitMatrixADScalar<N>(tConfig.temperatue_field, tConfig.temperatue_old_field, tConfig.temperatue_prev_field, tInit, tIdx);
+        CreateAndInitFractureADScalar<N>(tConfig.temperatue_field, tConfig.temperatue_old_field, tConfig.temperatue_prev_field, tInit, tIdx);
+
+        // 3. 初始化饱和度场 (仅在 sIdx >= 0 时播种，用于两相流)
+        if (sIdx >= 0) {
+            CreateAndInitMatrixADScalar<N>(sConfig.saturation, sConfig.saturation_old, sConfig.saturation_prev, sInit, sIdx);
+            CreateAndInitFractureADScalar<N>(sConfig.saturation, sConfig.saturation_old, sConfig.saturation_prev, sInit, sIdx);
+        }
+
+        std::cout << "[VarInit_3D] FIM State Seeding Completed." << std::endl;
+    }
 
 private:
     // =========================================================
@@ -109,10 +154,71 @@ private:
      * @brief 计算并填充两相流衍生变量 (Pc, Kr)
      * @details 基于已初始化的 Sw 场，计算 Pc, krw, krg 并填入场管理器
      */
-    void CalculateDerivedTwoPhaseFields(const PhysicalProperties_string_op::PressureEquation_String& pConfig,
-        const PhysicalProperties_string_op::SaturationEquation_String& sConfig,
+    void CalculateDerivedTwoPhaseFields(const PhysicalProperties_string_op::SaturationEquation_String& sConfig,
         const CapRelPerm::VGParams& vg,
         const CapRelPerm::RelPermParams& rp);
+
+    // =========================================================
+    // AD 场分配与播种底层通用实现
+    // =========================================================
+    template<int N>
+    void CreateAndInitMatrixADScalar(const std::string& tagName, const std::string& oldTagName, const std::string& prevTagName, const LinearInitParams& params, int seedIdx)
+    {
+        auto& field = fieldMgr_.createMatrixADScalar<N>(tagName)->data;
+        auto& fieldOld = fieldMgr_.createMatrixADScalar<N>(oldTagName)->data;
+        auto& fieldPrev = fieldMgr_.createMatrixADScalar<N>(prevTagName)->data;
+
+        const auto& cells = meshMgr_.mesh().getCells();
+        int nCells = static_cast<int>(cells.size());
+
+#pragma omp parallel for
+        for (int i = 0; i < nCells; ++i)
+        {
+            const Vector& center = cells[i].center;
+            double val = ComputeLinearValue(center, params);
+            ADVar<N> adVal(val, seedIdx);
+            field[i] = adVal;
+            fieldOld[i] = adVal;
+            fieldPrev[i] = adVal;
+        }
+    }
+
+    template<int N>
+    void CreateAndInitFractureADScalar(const std::string& tagName, const std::string& oldTagName, const std::string& prevTagName, const LinearInitParams& params, int seedIdx)
+    {
+        auto& field = fieldMgr_.createFractureADScalar<N>(tagName)->data;
+        auto& fieldOld = fieldMgr_.createFractureADScalar<N>(oldTagName)->data;
+        auto& fieldPrev = fieldMgr_.createFractureADScalar<N>(prevTagName)->data;
+
+        const auto& frNet = meshMgr_.fracture_network();
+        const auto& fractures = frNet.getFractures();
+        const auto& indexer = frNet.fracElemIndex;
+
+        if (indexer.offset.size() < fractures.size()) return;
+        size_t totalFracCells = field.size();
+
+        for (size_t i = 0; i < fractures.size(); ++i)
+        {
+            const auto& frac = fractures[i];
+            size_t startOffset = indexer.offset[i];
+            size_t numElems = frac.fracCells.size();
+
+#pragma omp parallel for
+            for (int localIdx = 0; localIdx < static_cast<int>(numElems); ++localIdx)
+            {
+                size_t globalIdx = startOffset + localIdx;
+                const Vector& center = frac.fracCells[localIdx].centroid;
+                double val = ComputeLinearValue(center, params);
+
+                ADVar<N> adVal(val, seedIdx);
+                if (globalIdx < totalFracCells) {
+                    field[globalIdx] = adVal;
+                    fieldOld[globalIdx] = adVal;
+                    fieldPrev[globalIdx] = adVal;
+                }
+            }
+        }
+    }
 
     const MeshManager_3D& meshMgr_;
     FieldManager_3D& fieldMgr_;

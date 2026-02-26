@@ -144,6 +144,65 @@ public:
         return matrixFaceFields.has(name);
     }
 
+    // =========================================================
+    // [新增] 基岩域 (Matrix) AD 泛化接口
+    // =========================================================
+
+    /**
+     * @brief 创建基岩自动微分标量场 (ADVar)
+     * @tparam N 独立自变量的数量
+     * @param name 场名称 (如 "p_AD", "T_AD")
+     * @param initVal 初始自动微分值 (默认物理值为0，梯度为零向量)
+     * @return 指向创建的 AD 场的智能指针
+     */
+    template<int N>
+    std::shared_ptr<volADField<N>> createMatrixADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFields.create<volADField<N>>(name, numMatrixCells, initVal);
+    }
+
+    /**
+     * @brief 获取基岩自动微分标量场
+     * @tparam N 独立自变量的数量
+     * @param name 场名称
+     * @return 智能指针 (如果不存在返回 nullptr)
+     */
+    template<int N>
+    std::shared_ptr<volADField<N>> getMatrixADScalar(const std::string& name) const
+    {
+        return matrixFields.get<volADField<N>>(name);
+    }
+
+    /**
+     * @brief 获取或创建基岩自动微分标量场
+     * @tparam N 独立自变量的数量
+     */
+    template<int N>
+    std::shared_ptr<volADField<N>> getOrCreateMatrixADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFields.getOrCreate<volADField<N>>(name, numMatrixCells, initVal);
+    }
+
+    /**
+     * @brief 创建基岩面 (边) 的自动微分标量场
+     * @tparam N 独立自变量的数量
+     */
+    template<int N>
+    std::shared_ptr<faceADField<N>> createMatrixFaceADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFaceFields.create<faceADField<N>>(name, numMatrixFaces, initVal);
+    }
+
+    /**
+     * @brief 获取基岩面 (边) 的自动微分标量场
+     * @tparam N 独立自变量的数量
+     */
+    template<int N>
+    std::shared_ptr<faceADField<N>> getMatrixFaceADScalar(const std::string& name) const
+    {
+        return matrixFaceFields.get<faceADField<N>>(name);
+    }
+
     // ---------------------------------------------------------
     // 2. Fracture Domain (裂缝 - 1D Segments)
     // ---------------------------------------------------------
@@ -198,6 +257,40 @@ public:
         return fractureFaceFields.has(name);
     }
 
+    // =========================================================
+    // [新增] 裂缝域 (Fracture) AD 泛化接口
+    // =========================================================
+
+    template<int N>
+    std::shared_ptr<volADField<N>> createFractureADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureFields.create<volADField<N>>(name, numFracCells, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getFractureADScalar(const std::string& name) const
+    {
+        return fractureFields.get<volADField<N>>(name);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getOrCreateFractureADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureFields.getOrCreate<volADField<N>>(name, numFracCells, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> createFractureFaceADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureFaceFields.create<faceADField<N>>(name, numFracFaces, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> getFractureFaceADScalar(const std::string& name) const
+    {
+        return fractureFaceFields.get<faceADField<N>>(name);
+    }
+
     // ---------------------------------------------------------
     // 3. Interaction Domain (NNC & FF)
     // ---------------------------------------------------------
@@ -231,5 +324,41 @@ public:
     std::shared_ptr<volScalarField> getFFScalar(const std::string& name) const
     {
         return nncFields.get<volScalarField>(name);
+    }
+
+    // =========================================================
+    // [新增] 交互域 (NNC & FF) AD 泛化接口
+    // =========================================================
+
+    /**
+     * @brief 创建 NNC (基岩-裂缝) 交互自动微分标量场
+     * @tparam N 独立自变量的数量
+     */
+    template<int N>
+    std::shared_ptr<volADField<N>> createNNCADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return nncFields.create<volADField<N>>(name, numNNCPairs, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getNNCADScalar(const std::string& name) const
+    {
+        return nncFields.get<volADField<N>>(name);
+    }
+
+    /**
+     * @brief 创建 FF (裂缝-裂缝) 交互自动微分标量场
+     * @tparam N 独立自变量的数量
+     */
+    template<int N>
+    std::shared_ptr<volADField<N>> createFFADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return nncFields.create<volADField<N>>(name, numFFConnections, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getFFADScalar(const std::string& name) const
+    {
+        return nncFields.get<volADField<N>>(name);
     }
 };

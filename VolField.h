@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 #include "FractureNetwork.h"
+#include "ADVar.hpp"
 
 using namespace std;
 struct BaseField
@@ -27,6 +28,25 @@ struct VolField : BaseField
 };
 using volScalarField = VolField<double>;
 using volVectorField = VolField<Vector>;
+
+// =========================================================
+// FIM 自动微分场类型别名 (AD Field Type Aliases)
+// =========================================================
+/**
+ * @brief 存储自动微分变量的体心物理场
+ * @tparam N 独立自变量的数量 (如单相流 N=2, 两相流 N=3)
+ * @details 用于 FIM 框架下未知量及其衍生状态方程物性 (P, T, Sw, Rho, Mu 等) 的存储
+ */
+template<int N>
+using volADField = VolField<ADVar<N>>;
+
+/**
+ * @brief 存储自动微分变量的面心/边心物理场
+ * @tparam N 独立自变量的数量
+ * @details 用于 FIM 框架下通量 (Flux)、迎风格式流度等面心物理量的存储
+ */
+template<int N>
+using faceADField = VolField<ADVar<N>>;
 
 // 辅助函数：遍历裂缝网络中的所有裂缝微元 适用于2D-EDFM
 template<class Fn>

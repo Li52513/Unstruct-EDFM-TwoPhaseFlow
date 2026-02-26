@@ -144,6 +144,46 @@ public:
         return matrixFaceFields.has(name);
     }
 
+    // =========================================================
+    // [新增] 基岩域 (Matrix) AD 泛化接口 (3D)
+    // =========================================================
+
+    template<int N>
+    std::shared_ptr<volADField<N>> createMatrixADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFields.create<volADField<N>>(name, numMatrixCells, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getMatrixADScalar(const std::string& name) const
+    {
+        return matrixFields.get<volADField<N>>(name);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getOrCreateMatrixADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFields.getOrCreate<volADField<N>>(name, numMatrixCells, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> createMatrixFaceADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFaceFields.create<faceADField<N>>(name, numMatrixFaces, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> getMatrixFaceADScalar(const std::string& name) const
+    {
+        return matrixFaceFields.get<faceADField<N>>(name);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> getOrCreateMatrixFaceADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return matrixFaceFields.getOrCreate<faceADField<N>>(name, numMatrixFaces, initVal);
+    }
+
     // ---------------------------------------------------------
     // 2. Fracture Domain (裂缝)
     // ---------------------------------------------------------
@@ -184,6 +224,46 @@ public:
         return fractureEdgeFields.has(name);
     }
 
+    // =========================================================
+    // [新增] 裂缝域 (Fracture) AD 泛化接口 (3D)
+    // =========================================================
+
+    template<int N>
+    std::shared_ptr<volADField<N>> createFractureADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureFields.create<volADField<N>>(name, numFracCells, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getFractureADScalar(const std::string& name) const
+    {
+        return fractureFields.get<volADField<N>>(name);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getOrCreateFractureADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureFields.getOrCreate<volADField<N>>(name, numFracCells, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> createFractureEdgeADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureEdgeFields.create<faceADField<N>>(name, numFracEdges, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> getFractureEdgeADScalar(const std::string& name) const
+    {
+        return fractureEdgeFields.get<faceADField<N>>(name);
+    }
+
+    template<int N>
+    std::shared_ptr<faceADField<N>> getOrCreateFractureEdgeADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return fractureEdgeFields.getOrCreate<faceADField<N>>(name, numFracEdges, initVal);
+    }
+
     // ---------------------------------------------------------
     // 3. Interaction Domain (NNC & FF)
     // ---------------------------------------------------------
@@ -213,5 +293,33 @@ public:
     std::shared_ptr<volScalarField> getFFScalar(const std::string& name) const
     {
         return nncFields.get<volScalarField>(name);
+    }
+
+    // =========================================================
+    // [新增] 交互域 (NNC & FF) AD 泛化接口 (3D)
+    // =========================================================
+
+    template<int N>
+    std::shared_ptr<volADField<N>> createNNCADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return nncFields.create<volADField<N>>(name, numNNCPairs, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getNNCADScalar(const std::string& name) const
+    {
+        return nncFields.get<volADField<N>>(name);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> createFFADScalar(const std::string& name, const ADVar<N>& initVal = ADVar<N>(0.0))
+    {
+        return nncFields.create<volADField<N>>(name, numFFConnections, initVal);
+    }
+
+    template<int N>
+    std::shared_ptr<volADField<N>> getFFADScalar(const std::string& name) const
+    {
+        return nncFields.get<volADField<N>>(name);
     }
 };

@@ -85,7 +85,6 @@ namespace PhysicalProperties_string_op
         std::string c_r_tag = "c_r";
     };
 
-    // [Renamed & Merged] 裂缝物性
     struct Fracture_string
     {
         std::string k_n_tag = "fr_k_n";
@@ -98,7 +97,6 @@ namespace PhysicalProperties_string_op
         std::string c_r_tag = "fr_c_r";
     };
 
-    // [Merged] 有效/混合物性 (原 SinglePhase_case)
     struct EffectiveProps
     {
         std::string C_eff_tag = "C_eff";      // 有效热容
@@ -107,52 +105,73 @@ namespace PhysicalProperties_string_op
         std::string lambda_eff_old_tag = "lambda_eff_old";
     };
 
-    // [Merged] 两相辅助变量 (原 TwoPhase_case)
-    struct TwoPhaseAux
-    {
-        std::string Pc_tag = "Pc";
-        std::string dPc_dSw_tag = "dPc_dSw";
-        std::string lambda_mass_tag = "lambda_mass"; // Total mass mobility
-    };
-
-
     // =========================================================
-    // Part 2: 求解器控制变量 (Merged Structs)
+    // Part 2: 中间状态与辅助场 (State & Auxiliary Fields)
     // =========================================================
 
     /**
-     * @struct PressureEquation_String
-     * @brief [合并同类项] 通用压力方程控制字符串
-     * @details 包含 SinglePhase 和 IMPES 所需的所有压力相关字段
+     * @struct TwoPhaseState_String
+     * @brief 两相流状态与辅助变量 (IMPES与FIM共用)
+     * @details 统一管理由 Sw 和 pw 衍生出的两相状态量，彻底消除原本散落在各处的冗余。
      */
-    struct PressureEquation_String
+    struct TwoPhaseState_String
     {
-        // --- Common Fields ---
-        std::string operator_tag = "p_op";
-        std::string pressure_field = "p";      // Current Pressure (查表用主变量)
-        std::string pressure_old_field = "p_old";
-        std::string pressure_prev_field = "p_prev";
+        std::string p_g_field = "p_g";           // 气相压力 (由 pw + Pc 得到)
+        std::string p_g_old_field = "p_g_old";
+        std::string p_g_prev_field = "p_g_prev";
+        std::string Pc_field = "Pc";             // 毛管力
+        std::string dPc_dSw_field = "dPc_dSw";   // 毛管力导数
+        std::string lambda_mass_field = "lambda_mass"; // 总质量流度
+    };
 
-        // --- IMPES / TwoPhase Specific ---
-        std::string pressure_g = "p_g";    // Gas phase pressure
-        std::string pressure_g_old = "p_g_old";
-        std::string pressure_g_prev = "p_g_prev";
-        std::string Pc_field = "Pc";
-
-        // IMPES Coefficients 扩散项离散系数临时储存名称
+    /**
+     * @struct IMPES_Aux_String
+     * @brief IMPES 求解器专属临时离散系数场 (从 PressureEquation 剥离)
+     */
+    struct IMPES_Aux_String
+    {
         std::string rho_coeff_field = "rho_coeff_mass";
         std::string rho_capillary_field = "rho_capillary_mass";
         std::string rho_gravity_field = "rho_gravity_mass";
         std::string rho_mix_field = "rho_mix";
         std::string lambda_gravity_field = "lambda_gravity_mass";
         std::string gravity_dummy_field = "gravity_dummy_scalar";
+    };
+
+    /**
+     * @struct FIM_Aux_String
+     * @brief FIM 全隐式专属中间变量场 (从压力/温度方程剥离)
+     */
+    struct FIM_Aux_String
+    {
+        std::string grad_p_field = "grad_p";       // 压力梯度向量场 (用于交叉修正)
+        std::string grad_T_field = "grad_T";       // 温度梯度向量场
+        std::string mass_acc_w = "mass_acc_w";     // 水相质量累积项 (Mass^n)
+        std::string mass_acc_g = "mass_acc_g";     // 气相质量累积项
+        std::string energy_acc = "energy_acc";     // 能量累积项
+    };
+
+    // =========================================================
+    // Part 3: 主控方程变量 (Main Equation Variables)
+    // =========================================================
+
+    /**
+     * @struct PressureEquation_String
+     * @brief 纯粹的压力方程主变量标识符
+     */
+    struct PressureEquation_String
+    {
+        std::string operator_tag = "p_op";
+        std::string pressure_field = "p_w";      // 主变量默认名 (统一为水相压力)
+        std::string pressure_old_field = "p_w_old";
+        std::string pressure_prev_field = "p_w_prev";
 
         // --- Factory Methods ---
 
         static PressureEquation_String SinglePhase() {
             PressureEquation_String s;
             s.operator_tag = "p_g_singlePhase";
-            s.pressure_field = "p_g";
+            s.pressure_field = "p_g";            // 单相退化为纯气相
             s.pressure_old_field = "p_g_old";
             s.pressure_prev_field = "p_g_prev";
             return s;
@@ -161,24 +180,34 @@ namespace PhysicalProperties_string_op
         static PressureEquation_String IMPES() {
             PressureEquation_String s;
             s.operator_tag = "p_w_IMPES";
-            s.pressure_field = "p_w"; // 或者 "p_global"，视您的主变量而定
+            s.pressure_field = "p_w";
             s.pressure_old_field = "p_w_old";
             s.pressure_prev_field = "p_w_prev";
-            // ... IMPES specific fields use defaults or can be customized here
+            return s;
+        }
+
+        static PressureEquation_String FIM() {
+            PressureEquation_String s;
+            s.operator_tag = "p_w_FIM";
+            s.pressure_field = "p_w";
+            s.pressure_old_field = "p_w_old";
+            s.pressure_prev_field = "p_w_prev";
             return s;
         }
     };
 
     /**
      * @struct TemperatureEquation_String
-     * @brief [合并同类项] 通用温度方程控制字符串
+     * @brief 纯粹的温度方程主变量标识符
      */
     struct TemperatureEquation_String
     {
         std::string operator_tag = "T_op";
-        std::string temperatue_field = "T";      // 查表用温度变量
+        std::string temperatue_field = "T";
         std::string temperatue_old_field = "T_old";
         std::string temperatue_prev_field = "T_prev";
+
+        // --- Factory Methods ---
 
         static TemperatureEquation_String SinglePhase() {
             TemperatureEquation_String s;
@@ -189,15 +218,60 @@ namespace PhysicalProperties_string_op
         static TemperatureEquation_String IMPES() {
             TemperatureEquation_String s;
             s.operator_tag = "T_IMPES";
-            s.temperatue_field = "T_res"; // IMPES 下可能叫 T_res
+            s.temperatue_field = "T_res"; // 保留原有的习惯名
             s.temperatue_old_field = "T_res_old";
+            s.temperatue_prev_field = "T_res_prev";
+            return s;
+        }
+
+        static TemperatureEquation_String FIM() {
+            TemperatureEquation_String s;
+            s.operator_tag = "T_FIM";
+            s.temperatue_field = "T";
+            s.temperatue_old_field = "T_old";
+            s.temperatue_prev_field = "T_prev";
             return s;
         }
     };
 
     /**
+     * @struct SaturationEquation_String
+     * @brief 纯粹的饱和度方程主变量标识符
+     */
+    struct SaturationEquation_String
+    {
+        std::string saturation = "s_w";
+        std::string saturation_old = "s_w_old";
+        std::string saturation_prev = "s_w_prev";
+        std::string water_source_field = "src_w";
+
+        // --- Factory Methods ---
+
+        static SaturationEquation_String IMPES() {
+            SaturationEquation_String s;
+            s.saturation = "s_w";
+            s.saturation_old = "s_w_old";
+            s.saturation_prev = "s_w_prev";
+            return s;
+        }
+
+        static SaturationEquation_String FIM() {
+            SaturationEquation_String s;
+            s.saturation = "s_w";
+            s.saturation_old = "s_w_old";
+            s.saturation_prev = "s_w_prev";
+            return s;
+        }
+    };
+
+
+    // =========================================================
+    // Part 4: 通量与其他配置 (Flux & Controls)
+    // =========================================================
+
+    /**
      * @struct FaceMassRate_String
-     * @brief [合并同类项] 通用通量字符串
+     * @brief 质量/体积 面通量字符串
      */
     struct FaceMassRate_String
     {
@@ -209,25 +283,23 @@ namespace PhysicalProperties_string_op
         std::string capillary_correction_flux_name = "mf_capillary_corr";
         std::string gravity_correction_flux_name = "mf_gravity_corr";
 
-        static FaceMassRate_String SinglePhase() {
-            return FaceMassRate_String();
-        }
-
-        static FaceMassRate_String IMPES() {
-            return FaceMassRate_String(); // 默认值即涵盖
-        }
+        static FaceMassRate_String SinglePhase() { return FaceMassRate_String(); }
+        static FaceMassRate_String IMPES() { return FaceMassRate_String(); }
+        static FaceMassRate_String FIM() { return FaceMassRate_String(); }
     };
 
     /**
-     * @struct SaturationEquation_String
-     * @brief 饱和度方程 (仅 IMPES 使用)
+     * @struct FaceEnergyRate_String
+     * @brief 能量方程面通量字符串 (热流耦合专属)
      */
-    struct SaturationEquation_String
+    struct FaceEnergyRate_String
     {
-        std::string saturation = "s_w";
-        std::string saturation_old = "s_w_old";
-        std::string saturation_prev = "s_w_prev";
-        std::string water_source_field = "src_w";
+        std::string adv_flux_w_name = "ef_adv_w";   // 水相对流热通量 (h_w * mf_w)
+        std::string adv_flux_g_name = "ef_adv_g";   // 气相对流热通量 (h_g * mf_g)
+        std::string cond_flux_name = "ef_cond";     // 有效热传导通量
+        std::string total_energy_flux_name = "ef_total"; // 总能量通量
+
+        static FaceEnergyRate_String FIM() { return FaceEnergyRate_String(); }
     };
 
     /**
