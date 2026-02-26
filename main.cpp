@@ -92,7 +92,7 @@ int main()
     //return 0;
 
 	//≤‚ ‘ADVar
-    Verify_AutomaticDifferentiation();
+    Run_ADVar_Comprehensive_Tests();
     return 0;
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();
