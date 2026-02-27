@@ -17,30 +17,26 @@ CO2Properties_3D::CO2Properties_3D(FieldManager_3D& fieldMgr,
 // =========================================================
 // 1. Matrix Domain Implementation
 // =========================================================
-void CO2Properties_3D::UpdateMatrix_Constant(const CO2PropertyParams& params)
+void CO2Properties_3D::UpdateMatrix_Constant(const CO2Properties& params) 
 {
-    CO2 co2Str; // 使用通用 CO2 标签定义
+    CO2 cTags;
+    auto rho = fieldMgr_.getOrCreateMatrixScalar(cTags.rho_tag);
+    auto mu = fieldMgr_.getOrCreateMatrixScalar(cTags.mu_tag);
+    auto cp = fieldMgr_.getOrCreateMatrixScalar(cTags.cp_tag);
+    auto cv = fieldMgr_.getOrCreateMatrixScalar(cTags.cv_tag);
+    auto h = fieldMgr_.getOrCreateMatrixScalar(cTags.h_tag);
+    auto k = fieldMgr_.getOrCreateMatrixScalar(cTags.k_tag);
 
-    // 获取/创建场 (确保场存在)
-    auto& rho = fieldMgr_.getOrCreateMatrixScalar(co2Str.rho_tag)->data;
-    auto& mu = fieldMgr_.getOrCreateMatrixScalar(co2Str.mu_tag)->data;
-    auto& cp = fieldMgr_.getOrCreateMatrixScalar(co2Str.cp_tag)->data;
-    auto& lam = fieldMgr_.getOrCreateMatrixScalar(co2Str.k_tag)->data; // CO2 k_tag is thermal cond
-    auto& h = fieldMgr_.getOrCreateMatrixScalar(co2Str.h_tag)->data;
-
-    size_t n = rho.size();
-
-    // 并行赋值
+    int n = static_cast<int>(rho->data.size());
 #pragma omp parallel for
     for (int i = 0; i < n; ++i) {
-        rho[i] = params.rho;
-        mu[i] = params.mu;
-        cp[i] = params.cp;
-        lam[i] = params.lambda;
-        h[i] = params.enthalpy;
+        rho->data[i] = params.rho;  
+        mu->data[i] = params.mu;   
+        cp->data[i] = params.cp;  
+        cv->data[i] = params.cv;   
+        h->data[i] = params.h;   
+        k->data[i] = params.k;    
     }
-
-    std::cout << "[CO2Prop] Matrix properties set to CONSTANT." << std::endl;
 }
 
 void CO2Properties_3D::UpdateMatrix_SpanWagner()
@@ -159,23 +155,25 @@ void CO2Properties_3D::UpdateEffectiveThermalPropertiesMatrix()
 // 2. Fracture Domain Implementation
 // =========================================================
 
-void CO2Properties_3D::UpdateFracture_Constant(const CO2PropertyParams& params)
+void CO2Properties_3D::UpdateFracture_Constant(const CO2Properties& params) 
 {
-    CO2 co2Str;
-    auto& rho = fieldMgr_.getOrCreateFractureScalar(co2Str.rho_tag)->data;
-    auto& mu = fieldMgr_.getOrCreateFractureScalar(co2Str.mu_tag)->data;
-    auto& cp = fieldMgr_.getOrCreateFractureScalar(co2Str.cp_tag)->data;
-    auto& lam = fieldMgr_.getOrCreateFractureScalar(co2Str.k_tag)->data;
-    auto& h = fieldMgr_.getOrCreateFractureScalar(co2Str.h_tag)->data;
+    CO2 cTags;
+    auto rho = fieldMgr_.getOrCreateFractureScalar(cTags.rho_tag);
+    auto mu = fieldMgr_.getOrCreateFractureScalar(cTags.mu_tag);
+    auto cp = fieldMgr_.getOrCreateFractureScalar(cTags.cp_tag);
+    auto cv = fieldMgr_.getOrCreateFractureScalar(cTags.cv_tag);
+    auto h = fieldMgr_.getOrCreateFractureScalar(cTags.h_tag);
+    auto k = fieldMgr_.getOrCreateFractureScalar(cTags.k_tag);
 
-    size_t n = rho.size();
+    int n = static_cast<int>(rho->data.size());
 #pragma omp parallel for
     for (int i = 0; i < n; ++i) {
-        rho[i] = params.rho;
-        mu[i] = params.mu;
-        cp[i] = params.cp;
-        lam[i] = params.lambda;
-        h[i] = params.enthalpy;
+        rho->data[i] = params.rho;  
+        mu->data[i] = params.mu;   
+        cp->data[i] = params.cp;   
+        cv->data[i] = params.cv;   
+        h->data[i] = params.h;    
+        k->data[i] = params.k;    
     }
 }
 

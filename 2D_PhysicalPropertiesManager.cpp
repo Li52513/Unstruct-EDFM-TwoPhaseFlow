@@ -1,5 +1,9 @@
-#include "3D_PhysicalPropertiesManager.h"
-#include <iostream>
+/**
+ * @file 2D_PhysicalPropertiesManager.cpp
+ * @brief 2D 物性综合管理器具体实现 (统一分发流)
+ */
+
+#include "2D_PhysicalPropertiesManager.h"
 
 using namespace PhysicalProperties_string_op;
 
@@ -7,63 +11,52 @@ using namespace PhysicalProperties_string_op;
 // 构造与析构
 // =========================================================
 
-PhysicalPropertiesManager_3D::PhysicalPropertiesManager_3D(
-    const MeshManager_3D& meshMgr,
-    FieldManager_3D& fieldMgr,
+PhysicalPropertiesManager_2D::PhysicalPropertiesManager_2D(
+    const MeshManager& meshMgr,
+    FieldManager_2D& fieldMgr,
     const PressureEquation_String& pConfig,
     const TemperatureEquation_String& tConfig)
     : meshMgr_(meshMgr)
     , fieldMgr_(fieldMgr)
-    , rockMgr_(std::make_unique<RockSolidProperties_3D>(meshMgr, fieldMgr))
-    , fracMgr_(std::make_unique<FractureProperties_3D>(meshMgr, fieldMgr))
-    , co2Mgr_(std::make_unique<CO2Properties_3D>(fieldMgr, pConfig, tConfig))
-    , waterMgr_(std::make_unique<WaterProperties_3D>(fieldMgr, pConfig, tConfig))
+    , rockMgr_(std::make_unique<RockSolidProperties_2D>(meshMgr, fieldMgr))
+    , fracMgr_(std::make_unique<FractureProperties_2D>(meshMgr, fieldMgr))
+    , co2Mgr_(std::make_unique<CO2Properties_2D>(fieldMgr, pConfig, tConfig))
+    , waterMgr_(std::make_unique<WaterProperties_2D>(fieldMgr, pConfig, tConfig))
 {
-    std::cout << "[PropMgr_3D] Manager initialized with dependency injection and AD capability." << std::endl;
+    std::cout << "[PropMgr_2D] Submodule architecture successfully initialized." << std::endl;
 }
 
-PhysicalPropertiesManager_3D::~PhysicalPropertiesManager_3D() = default;
+PhysicalPropertiesManager_2D::~PhysicalPropertiesManager_2D() = default;
 
 // =========================================================
-// 静态初始化实现
+// 1. 基岩与裂缝静态属性初始化 (调度)
 // =========================================================
 
-void PhysicalPropertiesManager_3D::InitRockProperties(const RockPropertyParams& bg,
-    const std::vector<std::pair<std::string, std::pair<BoundingBox3D, RockPropertyParams>>>& regions)
+void PhysicalPropertiesManager_2D::InitRockProperties(
+    const SolidProperties_RockMatrix& bg,
+    const std::vector<std::pair<std::string, std::pair<AABB, SolidProperties_RockMatrix>>>& regions)
 {
-    std::cout << "[PropMgr] Initializing Rock Properties..." << std::endl;
-
-    // 1. 设置背景
     rockMgr_->setBackgroundProperties(bg);
-
-    // 2. 添加所有区域
     for (const auto& region : regions) {
         rockMgr_->addRegion(region.first, region.second.first, region.second.second);
     }
-
-    // 3. 执行初始化 (写入场数据)
     rockMgr_->InitializeRockProperties();
 }
 
-void PhysicalPropertiesManager_3D::InitFractureProperties(const FractureGlobalParams& params)
+void PhysicalPropertiesManager_2D::InitFractureProperties(const SolidProperties_Frac& params)
 {
-    std::cout << "[PropMgr] Initializing Fracture Properties..." << std::endl;
-
-    // 1. 设置全局参数
     fracMgr_->setGlobalProperties(params);
-
-    // 2. 执行初始化 (写入场数据)
     fracMgr_->InitializeFractureProperties();
 }
 
 // =========================================================
-// 动态更新实现
+// 2. 纯 Double (IMPES) 动态属性更新 (调度)
 // =========================================================
 
-void PhysicalPropertiesManager_3D::UpdateFluidEOS_CO2(bool isConstant)
+void PhysicalPropertiesManager_2D::UpdateFluidEOS_CO2(bool isConstant)
 {
     if (isConstant) {
-        //  使用聚合初始化赋予 CO2 物理安全兜底值
+        // 使用结构体实例聚合初始化，赋予安全的物理兜底参数
         CO2Properties constProps;
         constProps.rho = 800.0;
         constProps.mu = 1.48e-5;
@@ -79,14 +72,16 @@ void PhysicalPropertiesManager_3D::UpdateFluidEOS_CO2(bool isConstant)
         co2Mgr_->UpdateMatrix_SpanWagner();
         co2Mgr_->UpdateFracture_SpanWagner();
     }
+
+    // 联动触发压缩系数计算
     co2Mgr_->CalculateCompressibilityMatrix();
     co2Mgr_->CalculateCompressibilityFracture();
 }
 
-void PhysicalPropertiesManager_3D::UpdateFluidEOS_Water(bool isConstant)
+void PhysicalPropertiesManager_2D::UpdateFluidEOS_Water(bool isConstant)
 {
     if (isConstant) {
-        // [修正此处]: 使用聚合初始化赋予水相物理安全兜底值
+        // 使用结构体实例聚合初始化，赋予安全的物理兜底参数
         WaterProperties constProps;
         constProps.rho = 1000.0;
         constProps.mu = 1e-3;
@@ -102,28 +97,30 @@ void PhysicalPropertiesManager_3D::UpdateFluidEOS_Water(bool isConstant)
         waterMgr_->UpdateMatrix_IAPWS();
         waterMgr_->UpdateFracture_IAPWS();
     }
+
+    // 联动触发压缩系数计算
     waterMgr_->CalculateCompressibilityMatrix();
     waterMgr_->CalculateCompressibilityFracture();
 }
 
-void PhysicalPropertiesManager_3D::UpdateAllFluidEOS(bool isConstant)
+void PhysicalPropertiesManager_2D::UpdateAllFluidEOS(bool isConstant)
 {
-    UpdateFluidEOS_CO2(isConstant);
     UpdateFluidEOS_Water(isConstant);
+    UpdateFluidEOS_CO2(isConstant);
 }
 
-void PhysicalPropertiesManager_3D::UpdateEffectiveThermal_CO2()
-{
-    // 计算基于 CO2 饱和 (Sg=1) 的有效热物性
-    // 注意：这将覆写 C_eff 和 lambda_eff 场
-    co2Mgr_->UpdateEffectiveThermalPropertiesMatrix();
-    co2Mgr_->UpdateEffectiveThermalPropertiesFracture();
-}
+// =========================================================
+// 3. 有效热物理参数更新 (C_eff, Lambda_eff)
+// =========================================================
 
-void PhysicalPropertiesManager_3D::UpdateEffectiveThermal_Water()
+void PhysicalPropertiesManager_2D::UpdateEffectiveThermal_Water()
 {
-    // 计算基于水饱和 (Sw=1) 的有效热物性
-    // 注意：这将覆写 C_eff 和 lambda_eff 场
     waterMgr_->UpdateEffectiveThermalPropertiesMatrix();
     waterMgr_->UpdateEffectiveThermalPropertiesFracture();
+}
+
+void PhysicalPropertiesManager_2D::UpdateEffectiveThermal_CO2()
+{
+    co2Mgr_->UpdateEffectiveThermalPropertiesMatrix();
+    co2Mgr_->UpdateEffectiveThermalPropertiesFracture();
 }

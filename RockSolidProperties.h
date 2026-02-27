@@ -4,7 +4,7 @@
 #include "MeshManager.h"
 #include "FieldRegistry.h"
 #include "PropertiesSummary.h"
-#include "SolverContrlStrName.h"
+#include "SolverContrlStrName_op.h"
 
 namespace rock
 {

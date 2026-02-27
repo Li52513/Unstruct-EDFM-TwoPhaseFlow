@@ -37,7 +37,7 @@ int main()
     //return 0;
 
     //return EDFM_DFN_Geomtest_2D();
-    //return Improved_3D_EDFM_MeshTest();
+    return Improved_3D_EDFM_MeshTest();
 
     // =========================================================
     // 【Chapter2】EDFM-超临界CO2单相渗流换热模拟研究
@@ -92,8 +92,8 @@ int main()
     //return 0;
 
 	//测试ADVar
-    Run_ADVar_Comprehensive_Tests();
-    return 0;
+   /* Run_ADVar_Comprehensive_Tests();
+    return 0;*/
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();
     //return SinglePhase_CO2_TH_withWell_reviese();

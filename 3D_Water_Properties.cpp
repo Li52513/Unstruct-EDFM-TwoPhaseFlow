@@ -18,31 +18,26 @@ WaterProperties_3D::WaterProperties_3D(FieldManager_3D& fieldMgr,
 // 1. Matrix Domain Implementation
 // =========================================================
 
-void WaterProperties_3D::UpdateMatrix_Constant(const WaterPropertyParams& params)
+void WaterProperties_3D::UpdateMatrix_Constant(const WaterProperties& params) // [修正此处]
 {
-    Water waterStr;
+    Water wTags;
+    auto rho = fieldMgr_.getOrCreateMatrixScalar(wTags.rho_tag);
+    auto mu = fieldMgr_.getOrCreateMatrixScalar(wTags.mu_tag);
+    auto cp = fieldMgr_.getOrCreateMatrixScalar(wTags.cp_tag);
+    auto cv = fieldMgr_.getOrCreateMatrixScalar(wTags.cv_tag);
+    auto h = fieldMgr_.getOrCreateMatrixScalar(wTags.h_tag);
+    auto k = fieldMgr_.getOrCreateMatrixScalar(wTags.k_tag);
 
-    // 获取/创建场
-    auto& rho = fieldMgr_.getOrCreateMatrixScalar(waterStr.rho_tag)->data;
-    auto& mu = fieldMgr_.getOrCreateMatrixScalar(waterStr.mu_tag)->data;
-    auto& cp = fieldMgr_.getOrCreateMatrixScalar(waterStr.cp_tag)->data;
-    // 注意: WaterPropertyTable 中的 k 是导热系数，对应 lambda_w
-    auto& lam = fieldMgr_.getOrCreateMatrixScalar(waterStr.k_tag)->data;
-    auto& h = fieldMgr_.getOrCreateMatrixScalar(waterStr.h_tag)->data;
-
-    int n = static_cast<int>(rho.size());
-
-    // [Fix] OpenMP 索引使用 int
+    int n = static_cast<int>(rho->data.size());
 #pragma omp parallel for
     for (int i = 0; i < n; ++i) {
-        rho[i] = params.rho;
-        mu[i] = params.mu;
-        cp[i] = params.cp;
-        lam[i] = params.lambda;
-        h[i] = params.enthalpy;
+        rho->data[i] = params.rho;   
+        mu->data[i] = params.mu;    
+        cp->data[i] = params.cp;   
+        cv->data[i] = params.cv;    
+        h->data[i] = params.h;     
+        k->data[i] = params.k;     
     }
-
-    std::cout << "[WaterProp] Matrix properties set to CONSTANT." << std::endl;
 }
 
 void WaterProperties_3D::UpdateMatrix_IAPWS()
@@ -156,23 +151,25 @@ void WaterProperties_3D::UpdateEffectiveThermalPropertiesMatrix()
 // 2. Fracture Domain Implementation
 // =========================================================
 
-void WaterProperties_3D::UpdateFracture_Constant(const WaterPropertyParams& params)
+void WaterProperties_3D::UpdateFracture_Constant(const WaterProperties& params) // [修正此处]
 {
-    Water waterStr;
-    auto& rho = fieldMgr_.getOrCreateFractureScalar(waterStr.rho_tag)->data;
-    auto& mu = fieldMgr_.getOrCreateFractureScalar(waterStr.mu_tag)->data;
-    auto& cp = fieldMgr_.getOrCreateFractureScalar(waterStr.cp_tag)->data;
-    auto& lam = fieldMgr_.getOrCreateFractureScalar(waterStr.k_tag)->data;
-    auto& h = fieldMgr_.getOrCreateFractureScalar(waterStr.h_tag)->data;
+    Water wTags;
+    auto rho = fieldMgr_.getOrCreateFractureScalar(wTags.rho_tag);
+    auto mu = fieldMgr_.getOrCreateFractureScalar(wTags.mu_tag);
+    auto cp = fieldMgr_.getOrCreateFractureScalar(wTags.cp_tag);
+    auto cv = fieldMgr_.getOrCreateFractureScalar(wTags.cv_tag);
+    auto h = fieldMgr_.getOrCreateFractureScalar(wTags.h_tag);
+    auto k = fieldMgr_.getOrCreateFractureScalar(wTags.k_tag);
 
-    int n = static_cast<int>(rho.size());
+    int n = static_cast<int>(rho->data.size());
 #pragma omp parallel for
     for (int i = 0; i < n; ++i) {
-        rho[i] = params.rho;
-        mu[i] = params.mu;
-        cp[i] = params.cp;
-        lam[i] = params.lambda;
-        h[i] = params.enthalpy;
+        rho->data[i] = params.rho;  
+        mu->data[i] = params.mu;    
+        cp->data[i] = params.cp;    
+        cv->data[i] = params.cv;  
+        h->data[i] = params.h;     
+        k->data[i] = params.k;     
     }
 }
 

@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "MeshManager.h"
 #include "FieldRegistry.h"
-#include "SolverContrlStrName.h"
+#include "SolverContrlStrName_op.h"
 #include "CO2PropertyTable.h"
 
 namespace CO2_Prop
@@ -22,7 +22,7 @@ namespace CO2_Prop
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().mu_tag, n, BASE_mu_g);				//mu，Pa·s
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().cp_tag, n, BASE_cp_g);				//Cp，J/(kg·K)
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().k_tag, n, BASE_k_g);					//k，W/(m·K)
-		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag, n, BASE_Drho_Dp_g);	//drho_dp，kg/(m³·Pa)
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_dp_tag, n, BASE_Drho_Dp_g);	//drho_dp，kg/(m³·Pa)
 		reg.getOrCreate <volScalarField>(PhysicalProperties_string::CO2().c_g_tag, n, BASE_c_g);				//二氧化碳的可压缩系数，1/Pa
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag, n, 0);					// Mobility of Water
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().k_rg_tag, n, 0);						// Relative permeability of Water
@@ -32,7 +32,7 @@ namespace CO2_Prop
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().mu_old_tag, n, BASE_mu_g);
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().cp_old_tag, n, BASE_cp_g);
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().k_old_tag, n, BASE_k_g);
-		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_old_tag, n, BASE_Drho_Dp_g);
+		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_dp_old_tag, n, BASE_Drho_Dp_g);
 		reg.getOrCreate <volScalarField>(PhysicalProperties_string::CO2().c_g_old_tag, n, BASE_c_g);
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().lambda_g_old_tag, n, 0);
 		reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().k_rg_old_tag, n, 0);
@@ -55,7 +55,7 @@ namespace CO2_Prop
 		auto cp_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().cp_tag);
 		auto k_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_tag);
 		auto mu_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().mu_tag);
-		auto Drho_Dp_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag);
+		auto Drho_Dp_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().drho_dp_tag);
 		auto c_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().c_g_tag);
 		auto k_rgF = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_rg_tag);
 		auto lambda_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);
@@ -100,7 +100,7 @@ namespace CO2_Prop
 		auto cp_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().cp_tag);				//Cp，J/(kg·K)
 		auto k_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().k_tag);					//k，W/(m·K)
 		auto mu_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().mu_tag);				//mu，Pa·s
-		auto Drho_Dp_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag); 	//drho_dp，kg/(m³·Pa)
+		auto Drho_Dp_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().drho_dp_tag); 	//drho_dp，kg/(m³·Pa)
 		auto c_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().c_g_tag);				//二氧化碳的可压缩系数，1/Pa
 		auto k_rgF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().k_rg_tag);				// Relative permeability of Water
 		auto lambda_gF = reg_fr.get<volScalarField>(PhysicalProperties_string::CO2().lambda_g_tag);		// Mobility of Water
@@ -278,7 +278,7 @@ namespace CO2_Prop
 				<< p_eval_name << "' or '" << T_eval_name << "'\n";
 			return false;
 		}
-		auto dF = reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_old_tag, cells.size(), 0.0);
+		auto dF = reg.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_dp_old_tag, cells.size(), 0.0);
 		auto gt = CO2PropertyTable::instance();
 		for (const auto& c : cells)
 		{
@@ -327,7 +327,7 @@ namespace CO2_Prop
 				<< p_eval_name << "' or '" << T_eval_name << "'\n";
 			return false;
 		}
-		auto dF = reg_fr.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_g_dp_tag, ne, 0.0);
+		auto dF = reg_fr.getOrCreate<volScalarField>(PhysicalProperties_string::CO2().drho_dp_tag, ne, 0.0);
 		auto& gt = CO2PropertyTable::instance();
 		// 遍历所有裂缝段
 		for (size_t f = 0; f < frNet.fractures.size(); ++f)
@@ -379,8 +379,8 @@ namespace CO2_Prop
 		auto k_gF = reg.get<volScalarField>(PhysicalProperties_string::CO2().k_tag);
 
 		// 有效热参数场
-		auto Ceff = reg.getOrCreate<volScalarField>(PhysicalProperties_string::SinglePhase_case().C_eff_tag, n, 0.0);
-		auto lame = reg.getOrCreate<volScalarField>(PhysicalProperties_string::SinglePhase_case().lambda_eff_tag, n, 0.0);
+		auto Ceff = reg.getOrCreate<volScalarField>(PhysicalProperties_string::EffectiveProps().C_eff_tag, n, 0.0);
+		auto lame = reg.getOrCreate<volScalarField>(PhysicalProperties_string::EffectiveProps().lambda_eff_tag, n, 0.0);
 		for (size_t ic = 0; ic < cells.size(); ++ic)
 		{
 			const auto& c = cells[ic];

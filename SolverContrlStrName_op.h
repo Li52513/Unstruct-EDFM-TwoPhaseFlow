@@ -27,6 +27,7 @@ namespace PhysicalProperties_string_op
         std::string mu_tag = "mu_g";
         std::string k_tag = "lambda_g";   // 导热系数
         std::string cp_tag = "cp_g";
+        std::string cv_tag = "cv_g";
         std::string h_tag = "h_g";
         std::string drho_dp_tag = "drho_g_dp";
         std::string c_g_tag = "c_g";
@@ -53,6 +54,7 @@ namespace PhysicalProperties_string_op
         std::string mu_tag = "mu_w";
         std::string k_tag = "lambda_w";   // 导热系数
         std::string cp_tag = "cp_w";
+        std::string cv_tag = "cv_w";
         std::string h_tag = "h_w";
         std::string drho_dp_tag = "drho_w_dp";
         std::string c_w_tag = "c_w";

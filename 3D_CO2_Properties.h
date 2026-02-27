@@ -9,24 +9,7 @@
 #include "3D_FieldManager.h"
 #include "SolverContrlStrName_op.h" // 使用优化后的配置头文件
 #include "CO2PropertyTable.h"
-
-/**
- * @struct CO2PropertyParams
- * @brief CO2 常物性参数包 (用于 Constant 模式或 Fallback)
- */
-struct CO2PropertyParams
-{
-    double rho = 0.0;       ///< 密度 [kg/m^3]
-    double mu = 0.0;        ///< 粘度 [Pa.s]
-    double cp = 0.0;        ///< 比热容 [J/(kg.K)]
-    double lambda = 0.0;    ///< 导热系数 [W/(m.K)]
-    double enthalpy = 0.0;  ///< 比焓 [J/kg]
-
-    CO2PropertyParams() = default;
-    CO2PropertyParams(double r, double m, double c, double l, double h)
-        : rho(r), mu(m), cp(c), lambda(l), enthalpy(h) {
-    }
-};
+#include "PropertiesSummary.h"
 
 /**
  * @class CO2Properties_3D
@@ -60,7 +43,7 @@ public:
      * @brief [基岩] 常量赋值模式
      * @param params CO2 常数参数
      */
-    void UpdateMatrix_Constant(const CO2PropertyParams& params);
+    void UpdateMatrix_Constant(const CO2Properties& params);
 
     /**
      * @brief [基岩] Span-Wagner 插值模式
@@ -89,7 +72,7 @@ public:
     /**
      * @brief [裂缝] 常量赋值模式
      */
-    void UpdateFracture_Constant(const CO2PropertyParams& params);
+    void UpdateFracture_Constant(const CO2Properties& params);
 
     /**
      * @brief [裂缝] Span-Wagner 插值模式

@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include "MeshManager.h"
 #include "FieldRegistry.h"
-#include "SolverContrlStrName.h"
+#include "SolverContrlStrName_op.h"
 #include "WaterPropertyTable.h"
 
 namespace Water_Prop
