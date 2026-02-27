@@ -74,7 +74,7 @@ void RunTest_DFN_Initialization_And_Viz()
     std::cout << "========================================================================" << std::endl;
 
     // 1. 环境准备 (20x20x20 网格)
-    MeshManager_3D meshMgr(100.0, 100.0, 100.0, 20, 20, 20, true, false);
+    MeshManager_3D meshMgr(100.0, 100.0, 100.0, 20, 20, 20, true, true);
     SetupComplexFractureNetwork(meshMgr);
 
     FieldManager_3D fieldMgr;
@@ -104,6 +104,7 @@ void RunTest_DFN_Initialization_And_Viz()
     LinearInitParams pInit;
     pInit.refVal = 10.0e6;
     pInit.grad_z = 1.0e5;
+  
 
     // [T] Temperature: 随 X 增加而增加 (横向温差)
     // T = 300 K + 1.0 K/m * X

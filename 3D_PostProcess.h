@@ -37,6 +37,41 @@ public:
      */
     void ExportTecplot(const std::string& filename, double time = 0.0);
 
+    /**
+     * @brief [FIM 数据降维解耦] 将 3D 自动微分场 (ADVar) 同步为纯双精度标量场 (double)
+     * @tparam N 独立自变量的数量 (如单相为2，两相为3)
+     * @param fieldMgr 3D 场管理器引用 (非 const，因需创建/修改新场)
+     * @param adFieldName 原始带梯度的自动微分场名称 (例如 "Temperature_AD")
+     * @param outScalarName 降维后用于导出的纯标量场名称 (例如 "Temperature")
+     * @details
+     * 自动遍历基岩域与裂缝域，安全剥离 ADVar.val 物理值并拷贝至 volScalarField。
+     * 配合 3D_PostProcess::GetAllUniqueFieldNames 中的 dynamic_pointer_cast 过滤器，
+     * 彻底解耦 FIM 数值求解层与 Tecplot 文件 I/O 层的耦合。
+     */
+    template<int N>
+    static void SyncADFieldToScalar(FieldManager_3D& fieldMgr, const std::string& adFieldName, const std::string& outScalarName)
+    {
+        // 1. 同步基岩域 (Matrix)
+        auto adMat = fieldMgr.getMatrixADScalar<N>(adFieldName);
+        if (adMat) {
+            auto scMat = fieldMgr.getOrCreateMatrixScalar(outScalarName);
+            const size_t nCells = adMat->data.size();
+            for (size_t i = 0; i < nCells; ++i) {
+                scMat->data[i] = adMat->data[i].val; // 根据 ADVar.hpp 解析，物理值为 val
+            }
+        }
+
+        // 2. 同步裂缝域 (Fracture)
+        auto adFrac = fieldMgr.getFractureADScalar<N>(adFieldName);
+        if (adFrac) {
+            auto scFrac = fieldMgr.getOrCreateFractureScalar(outScalarName);
+            const size_t nFracCells = adFrac->data.size();
+            for (size_t i = 0; i < nFracCells; ++i) {
+                scFrac->data[i] = adFrac->data[i].val; // 根据 ADVar.hpp 解析，物理值为 val
+            }
+        }
+    }
+
 private:
     const MeshManager_3D& meshMgr_;
     const FieldManager_3D& fieldMgr_;

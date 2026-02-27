@@ -37,14 +37,14 @@ int main()
     //return 0;
 
     //return EDFM_DFN_Geomtest_2D();
-    return Improved_3D_EDFM_MeshTest();
+    //return Improved_3D_EDFM_MeshTest();
 
     // =========================================================
     // 【Chapter2】EDFM-超临界CO2单相渗流换热模拟研究
     // =========================================================
     //RunTest_Initialization_And_Viz();                 //测试包含单根裂缝的初始化场的可视化验证                               结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
     
-    //RunTest_DFN_Initialization_And_Viz();             //测试包含DFN网络的初始化场的可视化验证                                结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
+    RunTest_DFN_Initialization_And_Viz();             //测试包含DFN网络的初始化场的可视化验证                                结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
 
     //RunTest_Property_Accuracy_Sweep();                //测试物性计算准确性扫描 (One-by-One Verify)                           结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\PropertyTest 通过Property_Accuracy_Sweep_HD.csv来表征
 

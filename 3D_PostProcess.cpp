@@ -31,10 +31,25 @@ PostProcess_3D::PostProcess_3D(const MeshManager_3D& meshMgr, const FieldManager
 {
 }
 
-std::vector<std::string> PostProcess_3D::GetAllUniqueFieldNames() const {
+std::vector<std::string> PostProcess_3D::GetAllUniqueFieldNames() const
+{
     std::set<std::string> uniqueNames;
-    for (const auto& pair : fieldMgr_.matrixFields.fields) uniqueNames.insert(pair.first);
-    for (const auto& pair : fieldMgr_.fractureFields.fields) uniqueNames.insert(pair.first);
+
+    // 1. 提取 3D 基岩域所有双精度标量场
+    for (const auto& pair : fieldMgr_.matrixFields.fields) {
+        // 安全过滤：若不是 volScalarField（如 ADVar 场），cast 会返回 nullptr
+        if (std::dynamic_pointer_cast<volScalarField>(pair.second)) {
+            uniqueNames.insert(pair.first);
+        }
+    }
+
+    // 2. 提取 3D 裂缝域所有双精度标量场
+    for (const auto& pair : fieldMgr_.fractureFields.fields) {
+        if (std::dynamic_pointer_cast<volScalarField>(pair.second)) {
+            uniqueNames.insert(pair.first);
+        }
+    }
+
     return std::vector<std::string>(uniqueNames.begin(), uniqueNames.end());
 }
 
