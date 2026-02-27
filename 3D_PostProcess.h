@@ -37,6 +37,9 @@ public:
      */
     void ExportTecplot(const std::string& filename, double time = 0.0);
 
+    // 在 PostProcess_3D 类中，与 ExportTecplot 并列
+    void ExportVTK(const std::string& filename, double time = 0.0);
+
     /**
      * @brief [FIM 数据降维解耦] 将 3D 自动微分场 (ADVar) 同步为纯双精度标量场 (double)
      * @tparam N 独立自变量的数量 (如单相为2，两相为3)

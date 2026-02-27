@@ -16,6 +16,8 @@
 #include "test_FVM_Grad_Benchmark.h"
 #include "Test_DOFMapper.h"
 #include "Test_ADVar.h"
+#include "3D_PropandInit_test.h"
+#include "Test_FluidEvaluator.h"
 
 int main()
 {
@@ -44,7 +46,7 @@ int main()
     // =========================================================
     //RunTest_Initialization_And_Viz();                 //测试包含单根裂缝的初始化场的可视化验证                               结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
     
-    RunTest_DFN_Initialization_And_Viz();             //测试包含DFN网络的初始化场的可视化验证                                结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
+    //RunTest_DFN_Initialization_And_Viz();             //测试包含DFN网络的初始化场的可视化验证                                结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
 
     //RunTest_Property_Accuracy_Sweep();                //测试物性计算准确性扫描 (One-by-One Verify)                           结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\PropertyTest 通过Property_Accuracy_Sweep_HD.csv来表征
 
@@ -97,4 +99,7 @@ int main()
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();
     //return SinglePhase_CO2_TH_withWell_reviese();
+    RunBenchmark_3D_PropTest();
+    //run_fluid_evaluator_test();
+    return 0;
 }
