@@ -97,7 +97,7 @@ void RunTestCase(const std::string& caseName, const std::vector<Fracture_2D>& fr
     // -----------------------------------------------------
     // 使用我们刚落地的 SolveIntersection3D
     std::cout << "-> Solving Fracture-Matrix Intersections (Improved 3D-EDFM)..." << std::endl;
-    manager.SolveIntersection3D_improved_twist_accleration(MeshManager_3D::IntersectionStrategy::Rasterization_14DOP);
+    manager.SolveIntersection3D_improved_twist_accleration(MeshManager_3D::IntersectionStrategy::Octree_Optimized);
 
     std::cout << "-> Post-processing intersection pairs..." << std::endl;
     manager.removeDuplicateInteractions();     // 清除幽灵交互和重复项

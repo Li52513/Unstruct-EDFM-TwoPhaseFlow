@@ -7,43 +7,73 @@
 #include <experimental/filesystem>
 
 
-namespace 
+namespace
 {
-    // 在 axis（升序）里定位 x 所在的小区间 [i0,i1] 以及分数 frac
+    /**
+     * @brief 边界钳位函数 (Boundary Clamping)
+     */
+    inline size_t clamp_idx(int idx, int max_idx) {
+        if (idx < 0) return 0;
+        if (idx > max_idx) return static_cast<size_t>(max_idx);
+        return static_cast<size_t>(idx);
+    }
+
+    /**
+     * @brief 定位区间与局部坐标
+     */
     inline void bracket2(const std::vector<double>& axis, double x,
         size_t& i0, size_t& i1, double& frac)
     {
-        // x==最大端时，upper_bound 会返回 end()，要手动夹住
         auto it1 = std::upper_bound(axis.begin(), axis.end(), x);
         size_t idx1 = size_t(it1 - axis.begin());
-        if (idx1 == 0) idx1 = 1;                             // x<=axis[0]
-        if (idx1 >= axis.size()) idx1 = axis.size() - 1;     // x>=axis.back()
+        if (idx1 == 0) idx1 = 1;
+        if (idx1 >= axis.size()) idx1 = axis.size() - 1;
         i1 = idx1;  i0 = idx1 - 1;
 
         double x0 = axis[i0], x1 = axis[i1];
-        frac = (x1 > x0) ? ((x - x0) / (x1 - x0)) : 0.0;    // 防 0 除
-        if (frac < 0) frac = 0; else if (frac > 1) frac = 1;
+        frac = (x1 > x0) ? ((x - x0) / (x1 - x0)) : 0.0;
+        if (frac < 0.0) frac = 0.0; else if (frac > 1.0) frac = 1.0;
     }
 
-    inline double bilerp_linear(double v00, double v10, double v01, double v11,
-        double a, double b)
-    {
-        // (x: a in [0,1], y: b in [0,1])
-        return (1 - a) * (1 - b) * v00 + a * (1 - b) * v10 + (1 - a) * b * v01 + a * b * v11;
+    inline double catmull_rom_1d(double p0, double p1, double p2, double p3, double t) {
+        double t2 = t * t;
+        double t3 = t2 * t;
+        return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
     }
 
-    inline double bilerp_logpos(double v00, double v10, double v01, double v11,
-        double a, double b)
-    {
-        // 对正量做 log 双线性。若有 <=0 值，自动退回线性
-        const double eps = 1e-300;
-        if (v00 > 0 && v10 > 0 && v01 > 0 && v11 > 0) {
-            double L00 = std::log(v00), L10 = std::log(v10);
-            double L01 = std::log(v01), L11 = std::log(v11);
-            double L = bilerp_linear(L00, L10, L01, L11, a, b);
-            return std::exp(L);
+    inline double catmull_rom_1d_deriv_t(double p0, double p1, double p2, double p3, double t) {
+        double t2 = t * t;
+        return 0.5 * ((-p0 + p2) + 2.0 * (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t + 3.0 * (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t2);
+    }
+
+    inline double bicubic_spline_linear(const double v[4][4], double a, double b) {
+        double arr[4];
+        for (int i = 0; i < 4; ++i) {
+            arr[i] = catmull_rom_1d(v[i][0], v[i][1], v[i][2], v[i][3], b);
         }
-        return bilerp_linear(v00, v10, v01, v11, a, b);
+        return catmull_rom_1d(arr[0], arr[1], arr[2], arr[3], a);
+    }
+
+    inline double bicubic_spline_logpos(const double v[4][4], double a, double b) {
+        double v_log[4][4];
+        bool all_positive = true;
+        for (int i = 0; i < 4; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                if (v[i][j] <= 0.0) { all_positive = false; break; }
+                v_log[i][j] = std::log(v[i][j]);
+            }
+            if (!all_positive) break;
+        }
+        if (all_positive) return std::exp(bicubic_spline_linear(v_log, a, b));
+        return bicubic_spline_linear(v, a, b);
+    }
+
+    inline double bicubic_spline_linear_deriv_a(const double v[4][4], double a, double b) {
+        double arr[4];
+        for (int i = 0; i < 4; ++i) {
+            arr[i] = catmull_rom_1d(v[i][0], v[i][1], v[i][2], v[i][3], b);
+        }
+        return catmull_rom_1d_deriv_t(arr[0], arr[1], arr[2], arr[3], a);
     }
 }
 namespace fs = std::experimental::filesystem;
@@ -181,49 +211,55 @@ void WaterPropertyTable::load(const std::string& filename)
 
 WaterProperties WaterPropertyTable::getProperties(const double& P, const double& T) const
 {
-
     if (P < pressures_.front() || P > pressures_.back()
         || T < temps_.front() || T > temps_.back())
         throw std::out_of_range("WaterPropertyTable: (P,T) outside bounds");
 
     size_t iP0, iP1, iT0, iT1; double a, b;
-    bracket2(pressures_, P, iP0, iP1, a);   // a: P 向的分数
-    bracket2(temps_, T, iT0, iT1, b);   // b: T 向的分数
+    bracket2(pressures_, P, iP0, iP1, a);
+    bracket2(temps_, T, iT0, iT1, b);
 
-    const auto& V00 = data_[iP0][iT0];
-    const auto& V10 = data_[iP1][iT0];
-    const auto& V01 = data_[iP0][iT1];
-    const auto& V11 = data_[iP1][iT1];
+    int nP = static_cast<int>(pressures_.size());
+    int nT = static_cast<int>(temps_.size());
+    int ip_base = static_cast<int>(iP0);
+    int it_base = static_cast<int>(iT0);
+
+    // 构建 4x4 局部网格模板数据 (Stencil)
+    double v_rho[4][4], v_mu[4][4], v_k[4][4];
+    double v_cp[4][4], v_cv[4][4], v_h[4][4];
+
+    for (int i = -1; i <= 2; ++i) {
+        size_t idx_P = clamp_idx(ip_base + i, nP - 1); // 边界防越界
+        for (int j = -1; j <= 2; ++j) {
+            size_t idx_T = clamp_idx(it_base + j, nT - 1);
+            const auto& w = data_[idx_P][idx_T];
+            v_rho[i + 1][j + 1] = w.rho;
+            v_mu[i + 1][j + 1] = w.mu;
+            v_k[i + 1][j + 1] = w.k;
+            v_cp[i + 1][j + 1] = w.cp;
+            v_cv[i + 1][j + 1] = w.cv;
+            v_h[i + 1][j + 1] = w.h;
+        }
+    }
 
     WaterProperties R;
-    // 水的 μ 变化也挺陡，你可以二选一：
-    // 1) 完全线性（更“保守”、与老结果接近）：
-    //R.mu  = bilerp_linear (V00.mu , V10.mu , V01.mu , V11.mu , a, b);
-    // 2) 用 log-lin（更贴近真实数量级变化，推荐）：
-    R.mu = bilerp_logpos(V00.mu, V10.mu, V01.mu, V11.mu, a, b);
+    // 黏度等强烈正态量应用对数平滑
+    R.mu = bicubic_spline_logpos(v_mu, a, b);
 
-    R.rho = bilerp_linear(V00.rho, V10.rho, V01.rho, V11.rho, a, b);
-    R.cp = bilerp_linear(V00.cp, V10.cp, V01.cp, V11.cp, a, b);
-    R.cv = bilerp_linear(V00.cv, V10.cv, V01.cv, V11.cv, a, b);
-    R.h = bilerp_linear(V00.h, V10.h, V01.h, V11.h, a, b);
-    R.k = bilerp_linear(V00.k, V10.k, V01.k, V11.k, a, b);
+    // 对于水相的主流参数，可以直接进行物理空间的高阶插值
+    R.rho = bicubic_spline_linear(v_rho, a, b);
+    R.cp = bicubic_spline_linear(v_cp, a, b);
+    R.cv = bicubic_spline_linear(v_cv, a, b);
+    R.h = bicubic_spline_linear(v_h, a, b);
+    R.k = bicubic_spline_linear(v_k, a, b);
 
-    // [新增] 动态计算压缩系数 c 和 dRho_dP
-    // 线性插值公式: f(a,b) = (1-b)*[(1-a)v00 + a*v10] + b*[(1-a)v01 + a*v11]
-    // df/da = (1-b)*(v10 - v00) + b*(v11 - v01)
-    // dP = (P1 - P0) * da  =>  da/dP = 1 / (P1 - P0)
-    // dRho/dP = (df/da) * (da/dP)
-
-    double P0 = pressures_[iP0];
-    double P1 = pressures_[iP1];
-    double deltaP_grid = P1 - P0;
-
+    // 解析推导链式法则导数，获取绝对平滑且精确的 dRho/dP
+    double deltaP_grid = pressures_[iP1] - pressures_[iP0];
     if (deltaP_grid > 1e-9) {
-        // 固定 T (即 b 不变)，对 a 求导
-        double dRho_da = (1.0 - b) * (V10.rho - V00.rho) + b * (V11.rho - V01.rho);
+        // d(rho)/da
+        double dRho_da = bicubic_spline_linear_deriv_a(v_rho, a, b);
         R.dRho_dP = dRho_da / deltaP_grid;
-
-        // c = (1/rho) * dRho/dP
+        // 动态计算水可压缩系数 c
         R.c = (R.rho > 1e-9) ? (R.dRho_dP / R.rho) : 0.0;
     }
     else {
@@ -232,7 +268,5 @@ WaterProperties WaterPropertyTable::getProperties(const double& P, const double&
     }
 
     return R;
-
-
 }
 

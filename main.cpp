@@ -18,6 +18,7 @@
 #include "Test_ADVar.h"
 #include "3D_PropandInit_test.h"
 #include "Test_FluidEvaluator.h"
+#include "3D_Benchmark_ComplexFractureNetwork.h"
 
 int main()
 {
@@ -99,7 +100,9 @@ int main()
     //return  EDFM_withFracture_Geomtry(); 
     //return run_IMPES_Iteration_TwoPhase_WellCase();
     //return SinglePhase_CO2_TH_withWell_reviese();
-    RunBenchmark_3D_PropTest();
-    //run_fluid_evaluator_test();
+    //RunBenchmark_3D_PropTest();
+    run_fluid_evaluator_test();
+
+    //RunBenchmark_ComplexFractureNetwork();
     return 0;
 }
