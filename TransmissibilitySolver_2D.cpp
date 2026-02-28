@@ -1,5 +1,6 @@
 #include "TransmissibilitySolver_2D.h"
 #include "SolverContrlStrName_op.h" // 包含 PhysicalProperties_string 定义
+#include "FVM_Ops.h"
 
 #include <cmath>
 #include <iostream>
@@ -61,7 +62,6 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
     Fracture_string frac_str;
     Water waterStr;
 
-    const double eps = 1e-30;
     const double MIN_VAL = 1e-15;
     const double thickness = 1.0;     // [Assumption] 2D 模拟单位厚度
 
@@ -173,25 +173,22 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         double d_m = Geometry_2D::PointToSegmentDistance(matrixCells[mIdx].center, p1, p2);
         d_m = std::max(d_m, 1e-6);
 
-        double term_m = d_m / (k_m_dir + MIN_VAL);
-        double term_f = Wf[fIdx] / (2.0 * Kf[fIdx] + MIN_VAL);
-
         double area = pElem->length * thickness;
-        T_Flow[job.nncIdx] = area / (term_m + term_f + MIN_VAL);
 
+        // 注意：裂缝侧的物理距离为半缝宽 (Wf / 2.0)，物理传导系数为裂缝渗透率 Kf
+        T_Flow[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, k_m_dir, Wf[fIdx] / 2.0, Kf[fIdx], area);
+      
         // 3. Heat Transmissibility
         if (Lam_m && Lam_f && Phi_f && LamFluid) {
             double lam_m_val = (*Lam_m)[mIdx];
-
             double phi_val = (*Phi_f)[fIdx];
             double lam_fluid_val = (*LamFluid)[fIdx];
             double lam_solid_val = (*Lam_f)[fIdx];
 
+            // 裂缝侧有效热导率
             double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
 
-            double term_m_h = d_m / (lam_m_val + MIN_VAL);
-            double term_f_h = Wf[fIdx] / (2.0 * lam_f_eff + MIN_VAL);
-            T_Heat[job.nncIdx] = area / (term_m_h + term_f_h + MIN_VAL);
+            T_Heat[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, lam_m_val, Wf[fIdx] / 2.0, lam_f_eff, area);
         }
     }
     std::cout << "[Solver 2D] NNC Done (" << jobs.size() << " pairs)." << std::endl;
@@ -206,7 +203,6 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
 
     Fracture_string fracStr;
     Water waterStr;
-    const double eps = 1e-15;
     const double thickness = 1.0;
 
     // [Fix] 调用 const 版本
@@ -277,8 +273,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
         double cond1 = Wf[s1] * KtF[s1];
         double cond2 = Wf[s2] * KtF[s2];
 
-        double res_term = (d1 / (cond1 + eps)) + (d2 / (cond2 + eps));
-        T_FF_Flow[i] = thickness / (res_term + eps);
+        T_FF_Flow[i] = FVM_Ops::Op_Math_Transmissibility(d1, cond1, d2, cond2, thickness);
 
         // --- Heat Transmissibility ---
         double lam_eff_1 = PhiF[s1] * LamFluid[s1] + (1.0 - PhiF[s1]) * LamF[s1];
@@ -287,8 +282,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
         double cond1_h = Wf[s1] * lam_eff_1;
         double cond2_h = Wf[s2] * lam_eff_2;
 
-        double res_term_h = (d1 / (cond1_h + eps)) + (d2 / (cond2_h + eps));
-        T_FF_Heat[i] = thickness / (res_term_h + eps);
+        T_FF_Heat[i] = FVM_Ops::Op_Math_Transmissibility(d1, cond1_h, d2, cond2_h, thickness);
     }
     std::cout << "[Solver 2D] FF Done (" << globalFFPts.size() << " connections)." << std::endl;
 }
