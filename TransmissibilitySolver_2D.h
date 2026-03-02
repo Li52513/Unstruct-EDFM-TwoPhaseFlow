@@ -41,6 +41,14 @@ public:
     static void Calculate_Transmissibility_Matrix(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);
 
     /**
+ * @brief 计算宏观裂缝内部相邻单元之间的静态传导率 (FI: Fracture Internal)
+ * @details 处理同一根宏观裂缝剖分后的线段单元间的连通性。采用串联阻力模型。
+ * @param meshMgr 2D 网格管理器
+ * @param fieldMgr 2D 场管理器
+ */
+    static void Calculate_Transmissibility_FractureInternal(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);
+
+    /**
      * @brief 计算基岩-裂缝 (NNC) 静态传导率 (Flow & Heat)
      * @details
      * 遍历所有基岩单元及其包含的裂缝段，计算传导率并存入 nncFields。

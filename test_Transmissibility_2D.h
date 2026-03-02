@@ -27,7 +27,7 @@ namespace Benchmark2D {
      * @brief 运行 2D 传导率基准测试全流程
      * @param exportPrefix 输出的 CSV 文件名前缀
      */
-    inline void run_TransmissibilityBenchmark_2D(const std::string& exportPrefix = "Transmissibility_2D_Benchmark")
+    inline void run_TransmissibilityBenchmark_2D(const std::string& exportPrefix = "Test/NNCTest/2D_EDFM/Transmissibility_2D_Benchmark")
     {
         std::cout << "\n========== [2D Transmissibility Benchmark Started] ==========" << std::endl;
 
@@ -37,7 +37,7 @@ namespace Benchmark2D {
         std::cout << "[Stage 1] Constructing 2D Orthogonal Mesh and Intersecting Fractures..." << std::endl;
 
         double Lx = 10.0, Ly = 10.0;
-        int nx = 10, ny = 10;
+        int nx = 3, ny = 3;
 
         // 1.1 生成 10x10 的结构化四边形极简网格 (用作完美对标)
         MeshManager meshMgr(Lx, Ly, 0.0, nx, ny, 0, false, true);
@@ -56,6 +56,9 @@ namespace Benchmark2D {
 
         // 1.5 建立全局矩阵系统索引
         meshMgr.BuildGlobalSystemIndexing();
+
+        meshMgr.exportMesh(exportPrefix + "_MatrixMesh");
+		meshMgr.exportFractures(exportPrefix + "_FractureMesh");
 
         // 1.6 精准统计各类型连接规模，用于内存预分配
         size_t nMat = meshMgr.mesh().getCells().size();
@@ -85,6 +88,7 @@ namespace Benchmark2D {
 
         PhysicalProperties_string_op::Rock rockStr;
         PhysicalProperties_string_op::Fracture_string fracStr;
+        PhysicalProperties_string_op::Water waterStr;
 
         // 2.1 注入基岩常数物理量 (渗透率 1e-15 m2, 导热 2.5)
         fieldMgr.getOrCreateMatrixScalar(rockStr.k_xx_tag, 1e-15);
@@ -97,7 +101,7 @@ namespace Benchmark2D {
         fieldMgr.getOrCreateFractureScalar(fracStr.aperture_tag, 0.01);
         fieldMgr.getOrCreateFractureScalar(fracStr.lambda_tag, 1.5);
         fieldMgr.getOrCreateFractureScalar(fracStr.phi_tag, 0.5);
-        fieldMgr.getOrCreateFractureScalar("LamFluid", 0.6);
+        fieldMgr.getOrCreateFractureScalar(waterStr.k_tag, 0.6);
 
         // =========================================================
         // Stage 3: 运行静态传导率引擎 (Transmissibility Solver)
@@ -105,8 +109,8 @@ namespace Benchmark2D {
         std::cout << "[Stage 3] Executing Static Transmissibility Solvers..." << std::endl;
         TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(meshMgr, fieldMgr);
         TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(meshMgr, fieldMgr);
-        // [已激活] 全力运行真正的 2D FF 交叉点传导率计算
         TransmissibilitySolver_2D::Calculate_Transmissibility_FF(meshMgr, fieldMgr);
+		TransmissibilitySolver_2D::Calculate_Transmissibility_FractureInternal(meshMgr, fieldMgr);
 
         // =========================================================
         // Stage 4: 数据提取与验证报表导出 (CSV 导出)
@@ -125,7 +129,7 @@ namespace Benchmark2D {
                 const auto& faces = meshMgr.mesh().getFaces();
                 for (size_t i = 0; i < faces.size(); ++i) {
                     if (faces[i].isBoundary()) continue;
-                    csv << "MatrixFace,Mat_" << faces[i].ownerCell << ",Mat_" << faces[i].neighborCell << ","
+                    csv << "MatrixFace,Mat_" << faces[i].ownerCell_index << ",Mat_" << faces[i].neighborCell_index << ","
                         << std::scientific << std::setprecision(6)
                         << (*t_mat_flow)[i] << "," << (*t_mat_heat)[i] << "\n";
                 }
@@ -143,6 +147,24 @@ namespace Benchmark2D {
                             << std::scientific << std::setprecision(6)
                             << (*t_nnc_flow)[nncIndex] << "," << (*t_nnc_heat)[nncIndex] << "\n";
                         nncIndex++;
+                    }
+                }
+            }
+
+            // 4.3 写入裂缝内部传导率 (FI)
+            auto t_fi_flow = fieldMgr.getFractureFaceScalar("T_FI_Flow");
+            auto t_fi_heat = fieldMgr.getFractureFaceScalar("T_FI_Heat");
+            if (t_fi_flow && t_fi_heat) {
+                size_t fiIdx = 0;
+                for (const auto& frac : meshMgr.fracture_network().fractures) {
+                    for (size_t i = 0; i < frac.elements.size() - 1; ++i) {
+                        if (fiIdx < t_fi_flow->data.size()) {
+                            csv << "FracInternal,Elem_" << frac.elements[i].solverIndex
+                                << ",Elem_" << frac.elements[i + 1].solverIndex << ","
+                                << std::scientific << std::setprecision(6)
+                                << t_fi_flow->data[fiIdx] << "," << t_fi_heat->data[fiIdx] << "\n";
+                            fiIdx++;
+                        }
                     }
                 }
             }

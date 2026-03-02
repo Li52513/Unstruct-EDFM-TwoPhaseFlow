@@ -20,6 +20,9 @@
 #include "Test_FluidEvaluator.h"
 #include "3D_Benchmark_ComplexFractureNetwork.h"
 
+#include "test_Transmissibility_2D.h"
+#include "test_Transmissibility_3D.h"
+
 int main()
 {
     // =========================================================
@@ -101,8 +104,30 @@ int main()
     //return run_IMPES_Iteration_TwoPhase_WellCase();
     //return SinglePhase_CO2_TH_withWell_reviese();
     //RunBenchmark_3D_PropTest();
-    run_fluid_evaluator_test();
+    //run_fluid_evaluator_test();
 
     //RunBenchmark_ComplexFractureNetwork();
+    // return 0;
+   
+    try {
+        std::cout << "Starting Transmissibility Solvers Benchmarking..." << std::endl;
+
+        // 1. 运行 2D 传导率基准测试
+        // 默认输出文件名为: Transmissibility_2D_Benchmark.csv
+        Benchmark2D::run_TransmissibilityBenchmark_2D();
+
+        std::cout << "\n-------------------------------------------\n" << std::endl;
+
+        // 2. 运行 3D 传导率基准测试
+        // 默认输出文件名为: Transmissibility_3D_Benchmark.csv
+        Benchmark3D::run_TransmissibilityBenchmark_3D();
+
+        std::cout << "\nAll benchmarks completed successfully!" << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Test failed with error: " << e.what() << std::endl;
+        return 1;
+    }
+
     return 0;
 }

@@ -126,6 +126,113 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(const MeshMana
     }
 }
 
+/**
+ * @brief 计算宏观裂缝内部相邻单元之间的静态传导率 (FI: Fracture Internal)
+ * @details 对应于 FieldManager 中的 FractureFace 场。处理同一根宏观裂缝剖分后的线段单元间的连通性。
+ * @param meshMgr 2D 网格管理器
+ * @param fieldMgr 2D 场管理器
+ */
+void TransmissibilitySolver_2D::Calculate_Transmissibility_FractureInternal(const MeshManager& meshMgr, FieldManager_2D& fieldMgr)
+{
+    std::cout << "\n[Solver 2D] Calculating Fracture Internal (FI) Transmissibility..." << std::endl;
+
+    // 1. 获取物性标签
+    PhysicalProperties_string_op::Fracture_string fracStr;
+    PhysicalProperties_string_op::Water waterStr;
+    const double thickness = 1.0; // 2D 默认厚度
+
+    const auto& frNet = meshMgr.fracture_network();
+    const auto& macroFractures = frNet.fractures;
+    const int nMat = static_cast<int>(meshMgr.mesh().getCells().size());
+
+    // 2. 提取物理场 (注意：使用 getFractureScalar 获取单元属性)
+    auto p_Kt = fieldMgr.getFractureScalar(fracStr.k_t_tag);
+    auto p_Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag);
+    auto p_LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag);
+    auto p_PhiF = fieldMgr.getFractureScalar(fracStr.phi_tag);
+    auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
+
+    if (!p_Kt || !p_Wf) {
+        std::cerr << "[Error] Critical fracture properties (Kt or Wf) missing!" << std::endl;
+        return;
+    }
+
+    const auto& Kt = p_Kt->data;
+    const auto& Wf = p_Wf->data;
+    const auto& vLamF = p_LamF->data;
+    const auto& vPhiF = p_PhiF->data;
+    const auto& vLamFluid = p_LamFluid->data;
+
+    // 3. 创建输出场 (使用您确认的 createFractureFaceScalar 函数)
+    // 注意：这里创建的是 faceScalarField，通常用于存储面上的传导率
+    auto p_T_Flow = fieldMgr.createFractureFaceScalar("T_FI_Flow", 0.0);
+    auto p_T_Heat = fieldMgr.createFractureFaceScalar("T_FI_Heat", 0.0);
+
+    if (!p_T_Flow || !p_T_Heat) {
+        std::cerr << "[Error] Failed to create FractureFace fields!" << std::endl;
+        return;
+    }
+
+    auto& T_FI_Flow = p_T_Flow->data;
+    auto& T_FI_Heat = p_T_Heat->data;
+
+    // 4. 遍历宏观裂缝并计算
+    // 在 2D 中，FI 连接的顺序严格遵循宏观裂缝 elements 的排列顺序
+    size_t currentConnIdx = 0;
+    for (size_t fId = 0; fId < macroFractures.size(); ++fId)
+    {
+        const auto& frac = macroFractures[fId];
+        const auto& elements = frac.elements;
+        if (elements.size() < 2) continue;
+
+        for (size_t i = 0; i < elements.size() - 1; ++i)
+        {
+            const auto& e1 = elements[i];
+            const auto& e2 = elements[i + 1];
+
+            // 检查索引安全性 (此处使用 currentConnIdx 必须小于 T_FI_Flow.size())
+            if (currentConnIdx >= T_FI_Flow.size()) {
+                std::cerr << "[Warning] FI index out of range at Frac " << fId << std::endl;
+                break;
+            }
+
+            // 全局索引转局部索引 (用于访问 Kf, Wf 等单元场)
+            int s1 = e1.solverIndex - nMat;
+            int s2 = e2.solverIndex - nMat;
+
+            if (s1 < 0 || s2 < 0 || s1 >= (int)Kt.size() || s2 >= (int)Kt.size()) {
+                currentConnIdx++;
+                continue;
+            }
+
+            // 几何计算：1D FVM 单元中心到端点的距离
+            double d1 = e1.length * 0.5;
+            double d2 = e2.length * 0.5;
+
+            // --- Flow Transmissibility ---
+            // 传导能力 cond = K_tangential * W_f
+            double cond1 = Kt[s1] * Wf[s1];
+            double cond2 = Kt[s2] * Wf[s2];
+
+            T_FI_Flow[currentConnIdx] = FVM_Ops::Op_Math_Transmissibility(d1, cond1, d2, cond2, thickness);
+
+            // --- Heat Transmissibility ---
+            if (!vLamF.empty() && !vPhiF.empty() && !vLamFluid.empty()) {
+                double lam_eff_1 = vPhiF[s1] * vLamFluid[s1] + (1.0 - vPhiF[s1]) * vLamF[s1];
+                double lam_eff_2 = vPhiF[s2] * vLamFluid[s2] + (1.0 - vPhiF[s2]) * vLamF[s2];
+
+                double h_cond1 = lam_eff_1 * Wf[s1];
+                double h_cond2 = lam_eff_2 * Wf[s2];
+
+                T_FI_Heat[currentConnIdx] = FVM_Ops::Op_Math_Transmissibility(d1, h_cond1, d2, h_cond2, thickness);
+            }
+
+            currentConnIdx++;
+        }
+    }
+
+    std::cout << "[Solver 2D] FI Done (" << currentConnIdx << " connections)." << std::endl;
+}
 // =========================================================================
 // 静态传导率计算：NNC (Matrix - Fracture)
 // =========================================================================
@@ -216,12 +323,19 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         int mIdx = job.mIdx;
         int fIdx = job.fSolverIdx;
 
-        // 获取裂缝单元
+        // 【核心修复】将全局 solverIndex 转换为 FieldManager 中的局部裂缝索引
+        int nMat = matrixCells.size();
+        int fLocIdx = (fIdx >= nMat) ? (fIdx - nMat) : fIdx;
+
+        // 越界安全保护
+        if (mIdx < 0 || mIdx >= Kxx.size()) continue;
+        if (fLocIdx < 0 || fLocIdx >= Wf.size()) continue;
+
+        // 获取裂缝单元 (底层仍需使用全局 solverIndex 查询拓扑)
         const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(fIdx);
         if (!pElem) continue;
 
-        // [Fix] 2D FractureElement 没有直接存储坐标，需要通过 parentFractureID 和 params 还原
-        // 确保 parentFractureID 有效
+        // 2D FractureElement 没有直接存储坐标，需要通过 parentFractureID 和 params 还原
         if (pElem->parentFractureID < 0 || pElem->parentFractureID >= macroFractures.size()) continue;
 
         const auto& parentFrac = macroFractures[pElem->parentFractureID];
@@ -250,20 +364,20 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
 
         double area = pElem->length * thickness;
 
-        // 注意：裂缝侧的物理距离为半缝宽 (Wf / 2.0)，物理传导系数为裂缝渗透率 Kf
-        T_Flow[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, k_m_dir, Wf[fIdx] / 2.0, Kf[fIdx], area);
-      
+        // 【修复】注意：这里物理场必须使用局部索引 fLocIdx 访问！
+        T_Flow[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, k_m_dir, Wf[fLocIdx] / 2.0, Kf[fLocIdx], area);
+
         // 3. Heat Transmissibility
         if (Lam_m && Lam_f && Phi_f && LamFluid) {
             double lam_m_val = (*Lam_m)[mIdx];
-            double phi_val = (*Phi_f)[fIdx];
-            double lam_fluid_val = (*LamFluid)[fIdx];
-            double lam_solid_val = (*Lam_f)[fIdx];
+            double phi_val = (*Phi_f)[fLocIdx];           
+            double lam_fluid_val = (*LamFluid)[fLocIdx];  
+            double lam_solid_val = (*Lam_f)[fLocIdx];     
 
             // 裂缝侧有效热导率
             double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
 
-            T_Heat[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, lam_m_val, Wf[fIdx] / 2.0, lam_f_eff, area);
+            T_Heat[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, lam_m_val, Wf[fLocIdx] / 2.0, lam_f_eff, area);
         }
     }
     std::cout << "[Solver 2D] NNC Done (" << jobs.size() << " pairs)." << std::endl;
@@ -327,10 +441,14 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
         int s1 = elem1.solverIndex;
         int s2 = elem2.solverIndex;
 
-        if (s1 < 0 || s2 < 0 || s1 >= static_cast<int>(KtF.size()) || s2 >= static_cast<int>(KtF.size())) continue;
+        // 【核心修复】将全局 solverIndex 转换为局部裂缝索引，避免被越界保护静默跳过
+        int nMat = meshMgr.mesh().getCells().size();
+        int fLoc1 = (s1 >= nMat) ? (s1 - nMat) : s1;
+        int fLoc2 = (s2 >= nMat) ? (s2 - nMat) : s2;
 
-        // [Fix] 计算 elem1 和 elem2 的几何中心 (center)
-        // 使用 elem1.param0, param1 和 f1 的起终点
+        if (fLoc1 < 0 || fLoc2 < 0 || fLoc1 >= static_cast<int>(KtF.size()) || fLoc2 >= static_cast<int>(KtF.size())) continue;
+
+        // [保持原有几何坐标计算代码不变...]
         Vector v1 = f1.end - f1.start;
         Vector c1 = f1.start + v1 * ((elem1.param0 + elem1.param1) * 0.5);
 
@@ -340,22 +458,22 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
         // 计算几何距离
         double d1 = Geometry_2D::Mag(c1 - ffPt.point);
         double d2 = Geometry_2D::Mag(c2 - ffPt.point);
-
         d1 = std::max(d1, 1e-6);
         d2 = std::max(d2, 1e-6);
 
         // --- Flow Transmissibility ---
-        double cond1 = Wf[s1] * KtF[s1];
-        double cond2 = Wf[s2] * KtF[s2];
+        // 【修复】使用局部索引 fLoc1 和 fLoc2 获取场变量
+        double cond1 = Wf[fLoc1] * KtF[fLoc1];
+        double cond2 = Wf[fLoc2] * KtF[fLoc2];
 
         T_FF_Flow[i] = FVM_Ops::Op_Math_Transmissibility(d1, cond1, d2, cond2, thickness);
 
         // --- Heat Transmissibility ---
-        double lam_eff_1 = PhiF[s1] * LamFluid[s1] + (1.0 - PhiF[s1]) * LamF[s1];
-        double lam_eff_2 = PhiF[s2] * LamFluid[s2] + (1.0 - PhiF[s2]) * LamF[s2];
+        double lam_eff_1 = PhiF[fLoc1] * LamFluid[fLoc1] + (1.0 - PhiF[fLoc1]) * LamF[fLoc1];
+        double lam_eff_2 = PhiF[fLoc2] * LamFluid[fLoc2] + (1.0 - PhiF[fLoc2]) * LamF[fLoc2];
 
-        double cond1_h = Wf[s1] * lam_eff_1;
-        double cond2_h = Wf[s2] * lam_eff_2;
+        double cond1_h = Wf[fLoc1] * lam_eff_1;
+        double cond2_h = Wf[fLoc2] * lam_eff_2;
 
         T_FF_Heat[i] = FVM_Ops::Op_Math_Transmissibility(d1, cond1_h, d2, cond2_h, thickness);
     }

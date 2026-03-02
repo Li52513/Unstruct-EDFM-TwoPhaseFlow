@@ -175,6 +175,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
     const auto& pairs = meshMgr.getInteractionPairs();
     const size_t numPairs = pairs.size();
     if (T_Flow.size() != numPairs) { T_Flow.resize(numPairs); T_Heat.resize(numPairs); }
+    const int nMat = static_cast<int>(meshMgr.mesh().getCells().size());
 
     const double MIN_VAL = 1e-20;
 
@@ -185,6 +186,8 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
         int mIdx = pair.matrixSolverIndex;
         int fIdx = pair.fracCellSolverIndex;
 
+        int fLocIdx = fIdx - nMat;
+
         // 1. Matrix Directional Permeability
         double nx = pair.polygonNormal.m_x;
         double ny = pair.polygonNormal.m_y;
@@ -194,27 +197,26 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
         // 2. Flow Transmissibility
         double dist = std::max(pair.distMatrixToFracPlane, 1e-6);
         // 调用底层算子，裂缝侧物理距离为 Wf/2.0
-        T_Flow[i] = FVM_Ops::Op_Math_Transmissibility(dist, k_m_dir, Wf[fIdx] / 2.0, Kf[fIdx], pair.intersectionArea);
+        T_Flow[i] = FVM_Ops::Op_Math_Transmissibility(dist, k_m_dir, Wf[fLocIdx] / 2.0, Kf[fLocIdx], pair.intersectionArea);
 
         // 3. Heat Transmissibility [Modified]
         // 使用有效热导率：lam_eff = phi * lam_fluid + (1-phi) * lam_solid
         if (Lam_m && Lam_f && Phi_f && LamFluid) {
             double lam_m_val = (*Lam_m)[mIdx];
-            double phi_val = (*Phi_f)[fIdx];
-            double lam_fluid_val = (*LamFluid)[fIdx];
-            double lam_solid_val = (*Lam_f)[fIdx];
+            double phi_val = (*Phi_f)[fLocIdx];
+            double lam_fluid_val = (*LamFluid)[fLocIdx];
+            double lam_solid_val = (*Lam_f)[fLocIdx];
 
             // 计算裂缝侧有效热导率
             double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
-
-            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(dist, lam_m_val, Wf[fIdx] / 2.0, lam_f_eff, pair.intersectionArea);
+            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(dist, lam_m_val, Wf[fLocIdx] / 2.0, lam_f_eff, pair.intersectionArea);
         }
         else if (Lam_m && Lam_f) // Fallback for pure solid conduction (Compatibility)
         {
             double lam_m_val = (*Lam_m)[mIdx];
-            double lam_f_val = (*Lam_f)[fIdx];
+            double lam_f_val = (*Lam_f)[fLocIdx];
 
-            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(dist, lam_m_val, Wf[fIdx] / 2.0, lam_f_val, pair.intersectionArea);
+            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(dist, lam_m_val, Wf[fLocIdx] / 2.0, lam_f_val, pair.intersectionArea);
         }
 
     }
@@ -231,9 +233,6 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
 
     Fracture_string fracStr;
     Water waterStr;
-    const double eps = 1e-15;
-    const double lam_fluid_ref = 0.6;
-
     const auto& frNet = meshMgr.fracture_network();
     const auto& ffIntersections = frNet.ffIntersections;
     const auto& fracturesVec = frNet.getFractures();
@@ -243,22 +242,19 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     auto& LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag)->data;
     auto& PhiF = fieldMgr.getFractureScalar(fracStr.phi_tag)->data;
     auto& Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag)->data;
-
-    // 2. [New] 获取流体属性 (从 Water 结构体中获取 "lambda_w")
     auto& LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag)->data;
 
-    const std::string tag_T_NNC_Flow = "T_FF_Flow";                                // 渗流传导率标签
-    const std::string tag_T_NNC_Heat = "T_FF_Heat";                                // 传热传导率标签
+    const std::string tag_T_FF_Flow = "T_FF_Flow";
+    const std::string tag_T_FF_Heat = "T_FF_Heat";
 
-    auto& T_Flow = fieldMgr.createNNCScalar(tag_T_NNC_Flow, 0.0)->data;
-    auto& T_Heat = fieldMgr.createNNCScalar(tag_T_NNC_Heat, 0.0)->data;
+    // 注意：3D FF 应该分配到 FFScalar 容器中（修正之前代码中可能存在的 createNNCScalar 笔误）
+    auto& T_Flow = fieldMgr.createFFScalar(tag_T_FF_Flow, 0.0)->data;
+    auto& T_Heat = fieldMgr.createFFScalar(tag_T_FF_Heat, 0.0)->data;
 
-    // 构建 ID 映射
     std::unordered_map<int, size_t> idToIndexMap;
     idToIndexMap.reserve(fracturesVec.size());
     for (size_t k = 0; k < fracturesVec.size(); ++k) idToIndexMap[fracturesVec[k].id] = k;
 
-    // 预计算 offset 以便并行
     std::vector<size_t> offsets(ffIntersections.size() + 1, 0);
     for (size_t i = 0; i < ffIntersections.size(); ++i) offsets[i + 1] = offsets[i] + ffIntersections[i].segments.size();
 
@@ -266,8 +262,11 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
         T_Flow.resize(offsets.back()); T_Heat.resize(offsets.back());
     }
 
+    // 【新增】获取基岩网格偏置
+    const int nMat = static_cast<int>(meshMgr.mesh().getCells().size());
+
 #pragma omp parallel for schedule(dynamic)
-    for (long long i = 0; i < ffIntersections.size(); ++i)
+    for (long long i = 0; i < (long long)ffIntersections.size(); ++i)
     {
         const auto& interaction = ffIntersections[i];
         size_t base_idx = offsets[i];
@@ -285,31 +284,30 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
             int s1 = seg.solverIndex_1;
             int s2 = seg.solverIndex_2;
 
-            if (s1 < 0 || s2 < 0 || s1 >= static_cast<int>(Kf.size()) || s2 >= static_cast<int>(Kf.size())) continue;
+            // 【修改标注】映射到局部索引
+            int fLoc1 = s1 - nMat;
+            int fLoc2 = s2 - nMat;
 
-            // Geometry
+            if (fLoc1 < 0 || fLoc2 < 0 || fLoc1 >= (int)Kf.size() || fLoc2 >= (int)Kf.size()) continue;
+
             int lid1 = seg.cellID_1;
             int lid2 = seg.cellID_2;
-            if (lid1 >= static_cast<int>(f1.fracCells.size()) || lid2 >= static_cast<int>(f2.fracCells.size())) continue;
+            if (lid1 >= (int)f1.fracCells.size() || lid2 >= (int)f2.fracCells.size()) continue;
 
-            // 使用 Geometry_3D 辅助函数计算点到线段距离
             double d1 = std::max(Geometry_3D::PointToSegmentDistance(f1.fracCells[lid1].centroid, seg.start, seg.end), 1e-6);
             double d2 = std::max(Geometry_3D::PointToSegmentDistance(f2.fracCells[lid2].centroid, seg.start, seg.end), 1e-6);
 
-            // --- Flow Transmissibility (Series Resistance) ---
-            // T = L / ( d1/(w1*K1) + d2/(w2*K2) )
-            // Resistance 1 per length: R1 = d1 / (Wf[s1] * Kf[s1])
-            double cond1 = Wf[s1] * Kf[s1];
-            double cond2 = Wf[s2] * Kf[s2];
+            // 【修改标注】使用 fLoc 局部索引获取物理场
+            double cond1 = Wf[fLoc1] * Kf[fLoc1];
+            double cond2 = Wf[fLoc2] * Kf[fLoc2];
 
             T_Flow[base_idx + j] = FVM_Ops::Op_Math_Transmissibility(d1, cond1, d2, cond2, seg.length);
 
-            // --- Heat Transmissibility ---
-            double lam_eff_1 = PhiF[s1] * LamFluid[s1] + (1.0 - PhiF[s1]) * LamF[s1];
-            double lam_eff_2 = PhiF[s2] * LamFluid[s2] + (1.0 - PhiF[s2]) * LamF[s2];
+            double lam_eff_1 = PhiF[fLoc1] * LamFluid[fLoc1] + (1.0 - PhiF[fLoc1]) * LamF[fLoc1];
+            double lam_eff_2 = PhiF[fLoc2] * LamFluid[fLoc2] + (1.0 - PhiF[fLoc2]) * LamF[fLoc2];
 
-            double cond1_h = Wf[s1] * lam_eff_1;
-            double cond2_h = Wf[s2] * lam_eff_2;
+            double cond1_h = Wf[fLoc1] * lam_eff_1;
+            double cond2_h = Wf[fLoc2] * lam_eff_2;
 
             T_Heat[base_idx + j] = FVM_Ops::Op_Math_Transmissibility(d1, cond1_h, d2, cond2_h, seg.length);
         }
