@@ -25,6 +25,16 @@
 class TransmissibilitySolver_3D
 {
 public:
+
+    /**
+     * @brief 计算 3D 基岩-基岩 (Matrix-Matrix) 静态面传导率 (Flow & Heat)
+     * @details
+     * 引入 OpenMP 并行化支持，基于 Kxx/Kyy/Kzz 全对角张量投影。
+     * @param meshMgr 网格管理器
+     * @param fieldMgr 场管理器
+     */
+    static void Calculate_Transmissibility_Matrix(const MeshManager_3D& meshMgr, FieldManager_3D& fieldMgr);
+
     /**
      * @brief 计算基岩-裂缝 (NNC) 静态传导率 (Flow & Heat)
      * @details

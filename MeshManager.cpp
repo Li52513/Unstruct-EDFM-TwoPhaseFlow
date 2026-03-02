@@ -107,13 +107,6 @@ void MeshManager::DetectAndSubdivideFractures(IntersectionSearchStrategy_2D sear
     frNet_.printFractureInfo();
 }
 
-
-void MeshManager::ComputeFractureGeometryCouplingCoefficient()
-{
-    for (auto& F : frNet_.fractures)
-        F.computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
-}
-
 void MeshManager::setDFNRandomSeed(unsigned seed)
 {
 	frNet_.setRandomSeed(seed);

@@ -96,7 +96,6 @@ void run_Benchmark_2D_EDFM_Grad()
     mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
     mgr.BuildGlobalSystemIndexing();
     mgr.BuildFracturetoFractureTopology();
-    mgr.ComputeFractureGeometryCouplingCoefficient();
 
     auto fm = std::make_shared<FieldManager_2D>();
     size_t nMatrix = mgr.mesh().getGridCount();

@@ -532,26 +532,6 @@ void Fracture::subdivide(const std::vector<Cell>& meshCells,
 }
 
 /*
- * 计算几何耦合系数 geomCI 和 geomAlpha（待修正）
- */
-void Fracture::computeGeometryCouplingCoefficientgeomCIandgeomAlpha()
-{
-    constexpr double eps_d = 1e-12;
-    // 逐段填充纯几何耦合系数
-    for (auto& elem : elements)
-    {
-        //基岩网格各端点到裂缝段的平均距离d 
-        double d = max(elem.avgDistance, eps_d);
-        // 横截面积 = 段长 * 裂缝厚度（2D 为1）
-        double A_fr = elem.length * 1;  //Note: 2D中 此时为1m 
-        // geomCI: 纯几何耦合  CI = Af/d  ref:Modeling study of the thermal-hydraulic-mechanical coupling process for EGS based on the framework of EDFM and XFEM
-        elem.geomCI = A_fr / d;
-        // geomAlpha: 纯几何 α  alpha= 2/ L ref:Modeling study of the thermal-hydraulic-mechanical coupling process for EGS based on the framework of EDFM and XFEM
-        elem.geomAlpha = 2.0 / elem.length;
-    }
-}
-
-/*
  * 给定 param，定位它属于哪一段
  */
 int Fracture::locateSegment(double param) const

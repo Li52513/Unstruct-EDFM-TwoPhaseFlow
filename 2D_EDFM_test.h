@@ -58,12 +58,6 @@ void run2D_EDFM_test(
 	auto endTotal = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> elapsed = endTotal - startTotal;
 
-    /**************************EDFM-几何耦合系数计算******************************/
-	std::cout << "\n--------------------------------------------------------" << std::endl;
-	std::cout << "              2D-EDFM Geometric Coupling is calculating            " << std::endl;
-	std::cout << " --------------------------------------------------------" << std::endl;
-    mgr.ComputeFractureGeometryCouplingCoefficient();
-
 	/**************************裂缝网格结果导出******************************/
     std::cout << "\n--------------------------------------------------------" << std::endl;
 	std::cout << "              1D-Fractions mesh information is exporting            " << std::endl;

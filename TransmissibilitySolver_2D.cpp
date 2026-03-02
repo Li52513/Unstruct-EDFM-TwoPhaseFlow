@@ -52,6 +52,79 @@ namespace Geometry_2D {
         return Mag(P - ClosestPoint);
     }
 }
+// ==================== 新增部分开始：2D Matrix 传导率计算 ====================
+void TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(const MeshManager& meshMgr, FieldManager_2D& fieldMgr)
+{
+    // 1. 获取基岩网格数据与映射表
+    const Mesh& mesh = meshMgr.mesh(); 
+    const auto& faces = mesh.getFaces();
+    const auto& cells = mesh.getCells();
+    const auto& cellId2Idx = mesh.getCellId2Index();
+
+    // 2. 获取基岩体心物性场 (消除硬编码)
+    PhysicalProperties_string_op::Rock rockStr; // 实例化名称结构体
+    auto Kxx = fieldMgr.getMatrixScalar(rockStr.k_xx_tag);
+    auto Kyy = fieldMgr.getMatrixScalar(rockStr.k_yy_tag);
+    auto Lam_m = fieldMgr.getMatrixScalar(rockStr.lambda_tag);
+
+    // 严苛的安全检查
+    if (!Kxx || !Kyy) {
+        std::cerr << "[Warning] Matrix Permeability (Kxx, Kyy) not found! Skipping 2D Flow Transmissibility." << std::endl;
+        return;
+    }
+
+    // 3. 获取或分配面心传导率场 (默认值 0.0)
+    auto T_Flow = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Flow", 0.0);
+    auto T_Heat = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Heat", 0.0);
+
+    // 2D 模型的默认单位厚度
+    const double thickness = 1.0;
+
+    // 4. 遍历所有网格面，仅对内部面进行静态传导率计算
+    for (size_t i = 0; i < faces.size(); ++i)
+    {
+        const Face& face = faces[i];
+
+        // 边界面的流量受边界条件控制，此处静态传导率不作计算，维持为 0
+        if (face.isBoundary()) {
+            continue;
+        }
+
+        // 提取 owner 和 neighbor 在 vector 容器中的局部索引
+        size_t idxO = cellId2Idx.at(face.ownerCell);
+        size_t idxN = cellId2Idx.at(face.neighborCell);
+
+        // 获取该面的单位法向量
+        double nx = face.normal.m_x;
+        double ny = face.normal.m_y;
+
+        // 【核心】依据法向量计算张量渗透率在法向上的投影 (Directional Permeability)
+        double KO = (nx * nx * (*Kxx)[idxO]) + (ny * ny * (*Kyy)[idxO]);
+        double KN = (nx * nx * (*Kxx)[idxN]) + (ny * ny * (*Kyy)[idxN]);
+
+        // 计算相邻网格体心到面的法向投影距离 (投影逻辑与插值权重解耦，确保绝对物理距离)
+        Vector dVecO = face.midpoint - cells[idxO].center;
+        Vector dVecN = cells[idxN].center - face.midpoint;
+
+        // 限幅保护，避免极端畸变导致距离为0
+        double dO = std::max(std::abs(dVecO.m_x * nx + dVecO.m_y * ny), 1e-6);
+        double dN = std::max(std::abs(dVecN.m_x * nx + dVecN.m_y * ny), 1e-6);
+
+        // 提取已算好的正交分解面积（2D中为有效正交长度）
+        double normE = face.vectorE.Mag();
+        double area = normE * thickness; // 转化为二维物理横截面积
+
+        // 调用刚刚落地的 FVM 底层数学算子计算流体传导率
+        (*T_Flow)[i] = FVM_Ops::Op_Math_Transmissibility(dO, KO, dN, KN, area);
+
+        // 计算热传导率 (若存在)
+        if (Lam_m) {
+            double LO = (*Lam_m)[idxO];
+            double LN = (*Lam_m)[idxN];
+            (*T_Heat)[i] = FVM_Ops::Op_Math_Transmissibility(dO, LO, dN, LN, area);
+        }
+    }
+}
 
 // =========================================================================
 // 静态传导率计算：NNC (Matrix - Fracture)
@@ -101,37 +174,39 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
     auto& T_Flow = fieldMgr.createNNCScalar(tag_T_NNC_Flow, 0.0)->data;
     auto& T_Heat = fieldMgr.createNNCScalar(tag_T_NNC_Heat, 0.0)->data;
 
-    // --- 构建任务列表 ---
-    const auto& matrixCells = meshMgr.mesh().getCells();
+    // --- 构建任务列表 (O(N_NNC) 极致性能优化版) ---
     struct NNCJob {
         int mIdx;         // Matrix Local Index
         int fSolverIdx;   // Frac Solver Index
         size_t nncIdx;    // Index in T_NNC array
     };
 
+    const auto& nncMap = meshMgr.getNNCTopologyMap();
     std::vector<NNCJob> jobs;
-    jobs.reserve(fieldMgr.numNNCPairs);
+
+    // 预分配准确内存，彻底杜绝 std::vector 动态扩容开销
+    size_t exactNNCCount = 0;
+    for (const auto& kv : nncMap) { exactNNCCount += kv.second.size(); }
+    jobs.reserve(exactNNCCount);
 
     size_t nncIndex = 0;
-    for (const auto& cell : matrixCells) {
-        int mGlobalID = cell.id;
-        int mIdx = meshMgr.mesh().getCellIndex(mGlobalID);
-
-        
-        std::vector<int> fracIndices = meshMgr.mesh().getFracElemSolverIndexfromCellGlobalId(mGlobalID);
-
-        for (int fSolverIdx : fracIndices) {
+    // 【核心提速】直接遍历含有裂缝的网格，跳过百万级无裂缝基岩
+    for (const auto& kv : nncMap) {
+        int mIdx = kv.first; // kv.first 严格对应基岩网格的局部索引 (Local Index)
+        for (int fSolverIdx : kv.second) {
             jobs.push_back({ mIdx, fSolverIdx, nncIndex++ });
         }
     }
 
+    // 动态校准 FieldManager 数组大小以匹配实际有效 NNC 数量
     if (T_Flow.size() != jobs.size()) {
         T_Flow.resize(jobs.size());
         T_Heat.resize(jobs.size());
     }
 
-    // 获取宏观裂缝列表以便并行中访问几何
+    // 获取宏观裂缝列表与基岩单元列表，以便在后续并行循环中 O(1) 访问几何
     const auto& macroFractures = meshMgr.fracture_network().fractures;
+    const auto& matrixCells = meshMgr.mesh().getCells();
 
     // --- 计算循环 ---
 #pragma omp parallel for schedule(static)

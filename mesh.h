@@ -250,6 +250,15 @@ public:
      */
     std::vector<int> getFracElemLocalIdfromCellGlobalId(int cellGlobalID) const;
 
+    /**
+     * @brief 【适用 2D EDFM】获取全局 NNC 拓扑映射表
+     * @return 返回 Key: Cell Local Index, Value: 裂缝段 SolverIndex 列表的哈希映射表
+     * @details 用于 O(N_NNC) 的极速遍历，彻底避免遍历百万级无裂缝基岩网格
+     */
+    const std::unordered_map<int, std::vector<int>>& getCellToFracMap_SolverIndex() const {
+        return CellLocalIndexToFracElemSolverIndexMap_;
+    }
+
     // =========================================================
     // 7. I/O 与 调试接口 (Input/Output & Debug)
     // =========================================================

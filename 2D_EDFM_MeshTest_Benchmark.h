@@ -364,7 +364,6 @@ void run_Benchmark_Topology_Test(
     auto end = std::chrono::high_resolution_clock::now();
 
     // 5. µ¼³ö
-    mgr.ComputeFractureGeometryCouplingCoefficient();
     mgr.exportFractures(caseName + "_FractureMesh");
 
     std::cout << " 5. Exporting Benchmark Diagnostics..." << std::endl;

@@ -115,12 +115,6 @@ public:
      * IntersectionSearchStrategy_2D::GridIndexing   // 方法3：背景网格索引 (Grid-based Indexing)
      */
     void DetectAndSubdivideFractures(IntersectionSearchStrategy_2D searchStrategy);
-    
-    //【裂缝】
-    /**
-    * @brief 计算基岩-裂缝质量交换几何系数CI_geom 和Alpha_alpha
-    */
-    void ComputeFractureGeometryCouplingCoefficient();
 
 
     // =========================================================
@@ -153,6 +147,14 @@ public:
      * 如果 solverIdx 属于基岩范围或越界，返回 nullptr。
      */
     const FractureElement* getFractureElementBySolverIndex(int solverIdx) const;
+
+    /**
+     * @brief 获取 NNC 映射表 (用于 2D 快速遍历与内存分配)
+     * @return 返回底层 Mesh 对象的 NNC 映射表引用
+     */
+    const std::unordered_map<int, std::vector<int>>& getNNCTopologyMap() const {
+        return mesh_.getCellToFracMap_SolverIndex();
+    }
 
     /**
      * @brief 获取基岩自由度总数 (Matrix DOFs)

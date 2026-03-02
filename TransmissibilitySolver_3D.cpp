@@ -57,6 +57,75 @@ namespace Geometry_3D {
     }
 }
 
+// ==================== 新增部分开始：3D Matrix 传导率计算 ====================
+void TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(const MeshManager_3D& meshMgr, FieldManager_3D& fieldMgr)
+{
+    // 1. 获取 3D 基岩网格数据
+    const Mesh& mesh = meshMgr.mesh(); // [已修复] 调用正确的 mesh() 接口
+    const auto& faces = mesh.getFaces();
+    const auto& cells = mesh.getCells();
+    const auto& cellId2Idx = mesh.getCellId2Index();
+
+    // 2. 获取 3D 基岩物性场 (消除硬编码)
+    PhysicalProperties_string_op::Rock rockStr; // 实例化名称结构体
+    auto Kxx = fieldMgr.getMatrixScalar(rockStr.k_xx_tag);
+    auto Kyy = fieldMgr.getMatrixScalar(rockStr.k_yy_tag);
+    auto Kzz = fieldMgr.getMatrixScalar(rockStr.k_zz_tag);
+    auto Lam_m = fieldMgr.getMatrixScalar(rockStr.lambda_tag);
+
+    if (!Kxx || !Kyy || !Kzz) {
+        std::cerr << "[Warning] Matrix Permeability (Kxx, Kyy, Kzz) not found! Skipping 3D Flow Transmissibility." << std::endl;
+        return;
+    }
+
+    // 3. 分配面心场容器
+    auto T_Flow = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Flow", 0.0);
+    auto T_Heat = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Heat", 0.0);
+
+    // 4. 面计算具有完美的独立性，安全开启 OpenMP 加速以应对百万级面计算
+#pragma omp parallel for
+    for (int i = 0; i < static_cast<int>(faces.size()); ++i)
+    {
+        const Face& face = faces[i];
+
+        // 边界跳过机制
+        if (face.isBoundary()) {
+            continue;
+        }
+
+        size_t idxO = cellId2Idx.at(face.ownerCell);
+        size_t idxN = cellId2Idx.at(face.neighborCell);
+
+        double nx = face.normal.m_x;
+        double ny = face.normal.m_y;
+        double nz = face.normal.m_z;
+
+        // 3D 渗透率对角张量基于面法向的标量投影
+        double KO = (nx * nx * (*Kxx)[idxO]) + (ny * ny * (*Kyy)[idxO]) + (nz * nz * (*Kzz)[idxO]);
+        double KN = (nx * nx * (*Kxx)[idxN]) + (ny * ny * (*Kyy)[idxN]) + (nz * nz * (*Kzz)[idxN]);
+
+        Vector dVecO = face.midpoint - cells[idxO].center;
+        Vector dVecN = cells[idxN].center - face.midpoint;
+
+        // 3D 绝对法向投影距离计算
+        double dO = std::max(std::abs(dVecO.m_x * nx + dVecO.m_y * ny + dVecO.m_z * nz), 1e-6);
+        double dN = std::max(std::abs(dVecN.m_x * nx + dVecN.m_y * ny + dVecN.m_z * nz), 1e-6);
+
+        // 3D 场景下，正交分解得到的 |E| 模长，本身即为真实的有效正交表面积
+        double area = face.vectorE.Mag();
+
+        // 写入结果 (数组索引 i 直接严格对齐 Face 的全局数组索引)
+        (*T_Flow)[i] = FVM_Ops::Op_Math_Transmissibility(dO, KO, dN, KN, area);
+
+        if (Lam_m) {
+            double LO = (*Lam_m)[idxO];
+            double LN = (*Lam_m)[idxN];
+            (*T_Heat)[i] = FVM_Ops::Op_Math_Transmissibility(dO, LO, dN, LN, area);
+        }
+    }
+}
+// ==================== 新增部分结束 ====================
+
 // =========================================================================
 // 静态传导率计算：NNC (Matrix - Fracture)
 // =========================================================================

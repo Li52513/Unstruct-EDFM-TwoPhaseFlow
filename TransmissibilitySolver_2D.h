@@ -29,6 +29,17 @@
 class TransmissibilitySolver_2D
 {
 public:
+
+    /**
+     * @brief 计算基岩-基岩 (Matrix-Matrix) 静态面传导率 (Flow & Heat)
+     * @details
+     * 遍历所有基岩网格的内部面，利用非正交分解提取的正交分量模长 |E| 作为有效面积，
+     * 计算相邻基岩网格间流体和热量的稳态传导系数，结果存入面心场。
+     * @param meshMgr 网格管理器 (提供拓扑关系与几何距离)
+     * @param fieldMgr 场管理器 (提供 K, Lam_m 等物性场及输出目标)
+     */
+    static void Calculate_Transmissibility_Matrix(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);
+
     /**
      * @brief 计算基岩-裂缝 (NNC) 静态传导率 (Flow & Heat)
      * @details
@@ -47,4 +58,5 @@ public:
      * @param fieldMgr 场管理器 (提供 K, Phi, Lambda 等物性场及输出目标)
      */
     static void Calculate_Transmissibility_FF(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);
+
 };
