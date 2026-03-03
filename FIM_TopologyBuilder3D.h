@@ -83,9 +83,37 @@ private:
             throw std::runtime_error("[Build 3D] FF Topology pairs mismatch with array lengths!");
         }
 
+        const auto& frNet = meshMgr.fracture_network();
+        const auto& elems = frNet.getOrderedFractureElements();
+        const int offset = frNet.getSolverIndexOffset();
+
         for (size_t i = 0; i < ffPairs.size(); ++i) {
-            connMgr.PushConnection(ffPairs[i].first, ffPairs[i].second,
-                pFlow->data[i], pHeat->data[i], 1.0, 1.0, ConnectionType::Fracture_Fracture);
+            const int sI = ffPairs[i].first;
+            const int sJ = ffPairs[i].second;
+
+            const int lI = sI - offset;
+            const int lJ = sJ - offset;
+            if (lI < 0 || lJ < 0 || lI >= static_cast<int>(elems.size()) || lJ >= static_cast<int>(elems.size()) ||
+                elems[lI] == nullptr || elems[lJ] == nullptr) {
+                throw std::runtime_error("[Build 3D] FF solverIndex out of ordered fracture cache range.");
+            }
+
+            const auto* eI = elems[lI];
+            const auto* eJ = elems[lJ];
+
+            double auxArea = 0.5 * (std::max(eI->area, 0.0) + std::max(eJ->area, 0.0));
+            if (auxArea <= 1e-14) auxArea = 1.0;
+
+            double auxDist = (eI->centroid - eJ->centroid).Mag();
+            if (auxDist <= 1e-14) auxDist = 1e-12;
+
+            connMgr.PushConnection(
+                sI, sJ,
+                pFlow->data[i], pHeat->data[i],
+                auxArea, auxDist,
+                ConnectionType::Fracture_Fracture
+            );
         }
     }
+
 };

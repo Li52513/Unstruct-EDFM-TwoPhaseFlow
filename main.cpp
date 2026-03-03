@@ -22,9 +22,25 @@
 
 #include "test_Transmissibility_2D.h"
 #include "test_Transmissibility_3D.h"
+#include "Test_FVM_Ops_AD.h"  // <--- 【1】包含 Day 2 测试排雷器
+#include "ADVar.hpp"          // 确保自动微分核心库被包含 (如果有用到)
 
 int main()
 {
+    // =========================================================
+    // 【Day 2 专项测试】: 算子排雷与 CI 验证
+    // =========================================================
+    // 这里以 N=3 (如：P, Sw, T 三个自由度) 为例实例化 ADVar
+    // 泛型参数 <3, ADVar<3>> 将自动适配你项目中的自动微分体系
+    std::cout << "\n=======================================" << std::endl;
+    std::cout << ">>> 正在执行 Day 2: FVM-AD 离散算子验收测试 <<<" << std::endl;
+    std::cout << "=======================================\n" << std::endl;
+
+    Test_FVM::Run_All_Day2_Tests<3, ADVar<3>>();
+
+    std::cout << "\n>>> Day 2 验收测试执行完毕，准备继续原有流程... <<<\n" << std::endl;
+    // =========================================================
+    // 
     // =========================================================
     // 【Chapter1】EDFM裂缝网格快速生成方法
     // =========================================================
@@ -109,25 +125,26 @@ int main()
     //RunBenchmark_ComplexFractureNetwork();
     // return 0;
    
-    try {
-        std::cout << "Starting Transmissibility Solvers Benchmarking..." << std::endl;
+	//测试2D和3D传导率计算的性能和准确性
+    //try {
+    //    std::cout << "Starting Transmissibility Solvers Benchmarking..." << std::endl;
 
-        // 1. 运行 2D 传导率基准测试
-        // 默认输出文件名为: Transmissibility_2D_Benchmark.csv
-        Benchmark2D::run_TransmissibilityBenchmark_2D();
+    //    // 1. 运行 2D 传导率基准测试
+    //    // 默认输出文件名为: Transmissibility_2D_Benchmark.csv
+    //    Benchmark2D::run_TransmissibilityBenchmark_2D();
 
-        std::cout << "\n-------------------------------------------\n" << std::endl;
+    //    std::cout << "\n-------------------------------------------\n" << std::endl;
 
-        // 2. 运行 3D 传导率基准测试
-        // 默认输出文件名为: Transmissibility_3D_Benchmark.csv
-        Benchmark3D::run_TransmissibilityBenchmark_3D();
+    //    // 2. 运行 3D 传导率基准测试
+    //    // 默认输出文件名为: Transmissibility_3D_Benchmark.csv
+    //    Benchmark3D::run_TransmissibilityBenchmark_3D();
 
-        std::cout << "\nAll benchmarks completed successfully!" << std::endl;
-    }
-    catch (const std::exception& e) {
-        std::cerr << "Test failed with error: " << e.what() << std::endl;
-        return 1;
-    }
+    //    std::cout << "\nAll benchmarks completed successfully!" << std::endl;
+    //}
+    //catch (const std::exception& e) {
+    //    std::cerr << "Test failed with error: " << e.what() << std::endl;
+    //    return 1;
+    //}
 
     return 0;
 }

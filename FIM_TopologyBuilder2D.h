@@ -113,7 +113,7 @@ private:
         }
     }
 
-    static void _loadFF(FIM_ConnectionManager& connMgr, const MeshManager&, const FieldManager_2D& fieldMgr) {
+    static void _loadFF(FIM_ConnectionManager& connMgr, const MeshManager& meshMgr, const FieldManager_2D& fieldMgr) {
         auto pFlow = fieldMgr.getFFScalar("T_FF_Flow");
         auto pHeat = fieldMgr.getFFScalar("T_FF_Heat");
         if (!pFlow || !pHeat) return;
@@ -124,12 +124,28 @@ private:
         }
 
         for (size_t i = 0; i < ffPairs.size(); ++i) {
+            const int sI = ffPairs[i].first;
+            const int sJ = ffPairs[i].second;
+
+            const FractureElement* eI = meshMgr.getFractureElementBySolverIndex(sI);
+            const FractureElement* eJ = meshMgr.getFractureElementBySolverIndex(sJ);
+            if (!eI || !eJ) {
+                throw std::runtime_error("[Build 2D] FF solverIndex cannot map to fracture element.");
+            }
+
+            const double mI = std::max(eI->length * std::max(eI->aperture, 1e-12), 1e-12);
+            const double mJ = std::max(eJ->length * std::max(eJ->aperture, 1e-12), 1e-12);
+
+            double auxArea = 0.5 * (mI + mJ);                         // 2D 等效“交换尺度”
+            double auxDist = std::max(0.5 * (eI->length + eJ->length), 1e-12);
+
             connMgr.PushConnection(
-                ffPairs[i].first, ffPairs[i].second,
+                sI, sJ,
                 pFlow->data[i], pHeat->data[i],
-                1.0, 1.0,
+                auxArea, auxDist,
                 ConnectionType::Fracture_Fracture
             );
         }
     }
+
 };

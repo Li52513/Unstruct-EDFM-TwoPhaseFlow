@@ -27,6 +27,7 @@ inline void Benchmark_FIM_Topology_Pipeline(const MeshManager_3D& meshMgr, const
     FIM_ConnectionManager connMgr;
     FIM_TopologyBuilder3D::LoadAllConnections(connMgr, meshMgr, fieldMgr);
     connMgr.FinalizeAndAggregate();
+    connMgr.PrintAggregationStats();
     const auto& conns = connMgr.GetConnections();
 
     std::unordered_set<ConnectionKey, ConnectionKeyHash> uniqueKeySet;
@@ -91,6 +92,7 @@ inline void Benchmark_FIM_Topology_Pipeline_2D(const MeshManager& meshMgr, const
     FIM_ConnectionManager connMgr;
     FIM_TopologyBuilder2D::LoadAllConnections(connMgr, meshMgr, fieldMgr);
     connMgr.FinalizeAndAggregate();
+    connMgr.PrintAggregationStats();
     const auto& conns = connMgr.GetConnections();
 
     std::unordered_set<ConnectionKey, ConnectionKeyHash> uniqueKeySet;

@@ -12,6 +12,7 @@
 #include <cmath>
 #include <iostream>
 #include <string>
+#include <array>
 
 enum class ConnectionType {
     Matrix_Matrix = 0,
@@ -56,6 +57,31 @@ class FIM_ConnectionManager {
 public:
     FIM_ConnectionManager() = default;
 
+    struct AggregationStats {
+        size_t raw_count = 0;
+        size_t unique_count = 0;
+        size_t merged_count = 0; // 实际执行“累加聚合”的重复条数
+        std::array<size_t, 4> merged_by_type{ 0, 0, 0, 0 };
+        std::array<size_t, 4> physical_parallel_by_type{ 0, 0, 0, 0 };
+        std::array<size_t, 4> geometric_duplicate_by_type{ 0, 0, 0, 0 };
+    };
+
+    const AggregationStats& GetAggregationStats() const { return stats_; }
+
+    void PrintAggregationStats(std::ostream& os = std::cout) const {
+        os << "[FIM Aggregation] raw=" << stats_.raw_count
+            << ", unique=" << stats_.unique_count
+            << ", merged=" << stats_.merged_count << "\n";
+        for (int t = 0; t < 4; ++t) {
+            os << "  - " << TypeName(static_cast<ConnectionType>(t))
+                << ": merged=" << stats_.merged_by_type[t]
+                << ", physical_parallel=" << stats_.physical_parallel_by_type[t]
+                << ", geometric_duplicate=" << stats_.geometric_duplicate_by_type[t]
+                << "\n";
+        }
+    }
+
+
     void PushConnection(int nodeI, int nodeJ, double t_flow, double t_heat, double aux_area, double aux_dist, ConnectionType type) {
         if (nodeI < 0 || nodeJ < 0 || nodeI == nodeJ) return;
 
@@ -77,7 +103,20 @@ public:
     }
 
     void FinalizeAndAggregate() {
+        stats_ = AggregationStats{};
+        stats_.raw_count = rawBuffer_.size();
+
         std::unordered_map<ConnectionKey, Connection, ConnectionKeyHash> aggMap;
+
+        struct Sig {
+            double area;
+            double dist;
+            double tf;
+            double th;
+        };
+        std::unordered_map<ConnectionKey, std::vector<Sig>, ConnectionKeyHash> signatures;
+
+        // pair = (aux_area, aux_dist)
 
         for (const auto& raw : rawBuffer_) {
             ConnectionKey key{ raw.type, raw.nodeI, raw.nodeJ };
@@ -85,23 +124,58 @@ public:
 
             if (it == aggMap.end()) {
                 aggMap.insert({ key, raw });
+                signatures[key].push_back({ raw.aux_area, raw.aux_dist, raw.T_Flow, raw.T_Heat });
+                continue;
+            }
+
+            const size_t tid = TypeToIdx(raw.type);
+
+            // 先分类：几何重复 / 物理并联（启发式）
+            bool sameGeom = false;
+            bool sameGeomAndTrans = false;
+            auto& sigs = signatures[key];
+
+            for (const auto& s : sigs) {
+                const bool g = NearlyEqual(s.area, raw.aux_area, 1e-6, 1e-10) &&
+                    NearlyEqual(s.dist, raw.aux_dist, 1e-6, 1e-10);
+                if (g) {
+                    sameGeom = true;
+                    const bool t = NearlyEqual(s.tf, raw.T_Flow, 1e-6, 1e-12) &&
+                        NearlyEqual(s.th, raw.T_Heat, 1e-6, 1e-12);
+                    if (t) {
+                        sameGeomAndTrans = true;
+                        break;
+                    }
+                }
+            }
+
+            if (sameGeomAndTrans) {
+                stats_.geometric_duplicate_by_type[tid]++;
             }
             else {
-                // 【核心物理规则】：仅允许 NNC 与 FF 出现多通道并联，并进行物理传导率精准累加
-                if (raw.type == ConnectionType::Matrix_Fracture || raw.type == ConnectionType::Fracture_Fracture) {
-                    it->second.T_Flow += raw.T_Flow;
-                    it->second.T_Heat += raw.T_Heat;
-                    double totalArea = it->second.aux_area + raw.aux_area;
-                    if (totalArea > 1e-14) {
-                        it->second.aux_dist = (it->second.aux_dist * it->second.aux_area + raw.aux_dist * raw.aux_area) / totalArea;
-                    }
-                    it->second.aux_area = totalArea;
+                stats_.physical_parallel_by_type[tid]++;
+                sigs.push_back({ raw.aux_area, raw.aux_dist, raw.T_Flow, raw.T_Heat });
+            }
+
+            // 仅 NNC / FF 允许重复并聚合
+            if (raw.type == ConnectionType::Matrix_Fracture || raw.type == ConnectionType::Fracture_Fracture) {
+                it->second.T_Flow += raw.T_Flow;
+                it->second.T_Heat += raw.T_Heat;
+                double totalArea = it->second.aux_area + raw.aux_area;
+                if (totalArea > 1e-14) {
+                    it->second.aux_dist =
+                        (it->second.aux_dist * it->second.aux_area + raw.aux_dist * raw.aux_area) / totalArea;
                 }
-                else {
-                    // Matrix_Matrix 和 Fracture_Internal 在拓扑上绝对不应该出现重复连接
-                    throw std::logic_error("[FIM Topology Error] Duplicate Matrix or FI connection detected at nodes (" +
-                        std::to_string(raw.nodeI) + ", " + std::to_string(raw.nodeJ) + ")!");
-                }
+                it->second.aux_area = totalArea;
+
+                stats_.merged_count++;
+                stats_.merged_by_type[tid]++;
+            }
+            else {
+                throw std::logic_error(
+                    "[FIM Topology Error] Duplicate Matrix/FI connection at (" +
+                    std::to_string(raw.nodeI) + "," + std::to_string(raw.nodeJ) + ")"
+                );
             }
         }
 
@@ -110,13 +184,14 @@ public:
         for (const auto& kv : aggMap) globalConnections_.push_back(kv.second);
         rawBuffer_.clear();
 
-        // 强确定性排序
         std::sort(globalConnections_.begin(), globalConnections_.end(),
             [](const Connection& a, const Connection& b) {
                 if (a.type != b.type) return static_cast<int>(a.type) < static_cast<int>(b.type);
                 if (a.nodeI != b.nodeI) return a.nodeI < b.nodeI;
                 return a.nodeJ < b.nodeJ;
             });
+
+        stats_.unique_count = globalConnections_.size();
     }
 
     const std::vector<Connection>& GetConnections() const { return globalConnections_; }
@@ -124,4 +199,25 @@ public:
 private:
     std::vector<Connection> rawBuffer_;
     std::vector<Connection> globalConnections_;
+
+    AggregationStats stats_;
+
+    static size_t TypeToIdx(ConnectionType t) {
+        return static_cast<size_t>(t);
+    }
+
+    static const char* TypeName(ConnectionType t) {
+        switch (t) {
+        case ConnectionType::Matrix_Matrix: return "Matrix_Matrix";
+        case ConnectionType::Fracture_Internal: return "Fracture_Internal";
+        case ConnectionType::Matrix_Fracture: return "Matrix_Fracture";
+        case ConnectionType::Fracture_Fracture: return "Fracture_Fracture";
+        default: return "Unknown";
+        }
+    }
+
+    static bool NearlyEqual(double a, double b, double rel = 1e-8, double abs = 1e-12) {
+        return std::fabs(a - b) <= std::max(abs, rel * std::max(std::fabs(a), std::fabs(b)));
+    }
+
 };
