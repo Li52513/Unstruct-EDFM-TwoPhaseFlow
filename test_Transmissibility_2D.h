@@ -15,6 +15,8 @@
 #include <fstream>
 #include <iomanip>
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "MeshManager.h"
 #include "2D_FieldManager.h"
@@ -71,12 +73,32 @@ namespace Benchmark2D {
             exactNNCCount += kv.second.size();
         }
 
-        // [修复核心] 严格从 2D_EDFM 专属的 FractureNetwork.h 中获取 globalFFPts
-        size_t nFF = meshMgr.fracture_network().globalFFPts.size();
+        // [修复核心] 使用 Star-Delta 模型重构 FF 数量统计
+        std::unordered_map<int, std::vector<int>> junctionMap;
+        for (const auto& frac : meshMgr.fracture_network().fractures) {
+            for (const auto& elem : frac.elements) {
+                if (elem.isFFatStart && elem.gIDstart >= 0) junctionMap[elem.gIDstart].push_back(elem.solverIndex);
+                if (elem.isFFatEnd && elem.gIDend >= 0) junctionMap[elem.gIDend].push_back(elem.solverIndex);
+            }
+        }
+
+        size_t nFF = 0;
+        for (const auto& kv : junctionMap) {
+            size_t n = kv.second.size();
+            if (n > 1) nFF += n * (n - 1) / 2; // 完全匹配星角变换对数
+        }
+
+        size_t nFI = 0;
+        for (const auto& frac : meshMgr.fracture_network().fractures) {
+            if (frac.elements.size() > 1) {
+                nFI += (frac.elements.size() - 1);
+            }
+        }
 
         std::cout << "  -> Matrix Cells: " << nMat << "\n"
             << "  -> Fracture Elements: " << nFrac << "\n"
             << "  -> NNC Pairs (Exact): " << exactNNCCount << "\n"
+            << "  -> FI Connections: " << nFI << "\n" // 新增打印
             << "  -> FF Intersections: " << nFF << std::endl;
 
         // =========================================================
@@ -84,7 +106,7 @@ namespace Benchmark2D {
         // =========================================================
         std::cout << "[Stage 2] Initializing Fields with Constant Physical Properties..." << std::endl;
         FieldManager_2D fieldMgr;
-        fieldMgr.InitSizes(nMat, nFrac, exactNNCCount, nFF, nMatFaces, 0);
+        fieldMgr.InitSizes(nMat, nFrac, exactNNCCount, nFF, nMatFaces, nFI);
 
         PhysicalProperties_string_op::Rock rockStr;
         PhysicalProperties_string_op::Fracture_string fracStr;
@@ -142,8 +164,9 @@ namespace Benchmark2D {
                 size_t nncIndex = 0;
                 for (const auto& kv : nncMap) {
                     int matrixGlobalId = meshMgr.mesh().getCells()[kv.first].id;
+					int matrixLocalId = kv.first;
                     for (int fSolverIdx : kv.second) {
-                        csv << "NNC,MatGlobal_" << matrixGlobalId << ",FracSolver_" << fSolverIdx << ","
+                        csv << "NNC,MatGlobal_" << matrixLocalId << ",FracSolver_" << fSolverIdx << ","
                             << std::scientific << std::setprecision(6)
                             << (*t_nnc_flow)[nncIndex] << "," << (*t_nnc_heat)[nncIndex] << "\n";
                         nncIndex++;
@@ -169,19 +192,32 @@ namespace Benchmark2D {
                 }
             }
 
-            // 4.3 FF 交叉传导率导出 (完美对齐 2D_EDFM 的 globalFFPts)
+            // 4.3 FF 交叉传导率导出 (对齐 Star-Delta 展开后的微观单元对)
             auto t_ff_flow = fieldMgr.getFFScalar("T_FF_Flow");
             auto t_ff_heat = fieldMgr.getFFScalar("T_FF_Heat");
             if (t_ff_flow && t_ff_heat) {
-                const auto& globalFFPts = meshMgr.fracture_network().globalFFPts;
-                for (size_t i = 0; i < t_ff_flow->data.size(); ++i) {
-                    if (i < globalFFPts.size()) {
-                        // 严格匹配 FractureNetwork.h 中 GlobalFFPoint 的 fracA 和 fracB 属性
-                        csv << "FF,MacroFrac_" << globalFFPts[i].fracA
-                            << ",MacroFrac_" << globalFFPts[i].fracB << ","
-                            << std::scientific << std::setprecision(6)
-                            // [修复核心2] 同样通过 ->data[i] 来读取具体的数值
-                            << t_ff_flow->data[i] << "," << t_ff_heat->data[i] << "\n";
+                // 为了与计算顺序绝对一致，这里重新取一遍排序好的 JunctionID
+                std::vector<int> junctionIDs;
+                for (const auto& kv : junctionMap) junctionIDs.push_back(kv.first);
+                std::sort(junctionIDs.begin(), junctionIDs.end());
+
+                size_t ffIdx = 0;
+                for (int jID : junctionIDs) {
+                    const auto& elemIndices = junctionMap[jID];
+                    size_t nElems = elemIndices.size();
+                    if (nElems < 2) continue;
+
+                    for (size_t i = 0; i < nElems; ++i) {
+                        for (size_t j = i + 1; j < nElems; ++j) {
+                            if (ffIdx < t_ff_flow->data.size()) {
+                                // 现在 FF 输出的是微观段对段的真实连接，而非宏观裂缝！
+                                csv << "FF_StarDelta,FracElem_" << elemIndices[i]
+                                    << ",FracElem_" << elemIndices[j] << ","
+                                    << std::scientific << std::setprecision(6)
+                                    << t_ff_flow->data[ffIdx] << "," << t_ff_heat->data[ffIdx] << "\n";
+                                ffIdx++;
+                            }
+                        }
                     }
                 }
             }

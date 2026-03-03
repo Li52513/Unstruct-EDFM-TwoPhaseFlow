@@ -36,6 +36,17 @@ public:
     static void Calculate_Transmissibility_Matrix(const MeshManager_3D& meshMgr, FieldManager_3D& fieldMgr);
 
     /**
+         * @brief 计算 3D 宏观裂缝内部相邻网格面之间的静态传导率 (FI)
+         * @details
+         * 基于 FractureNetwork 提供的 globalEdges，计算沿裂缝多边形共享边 (1D Line)
+         * 的面内 (In-plane) 流体传导能力。
+         * @param meshMgr 3D 网格管理器
+         * @param fieldMgr 3D 场管理器
+         */
+    static void Calculate_Transmissibility_FractureInternal(const MeshManager_3D& meshMgr, FieldManager_3D& fieldMgr);
+
+
+    /**
      * @brief 计算基岩-裂缝 (NNC) 静态传导率 (Flow & Heat)
      * @details
      * 使用标准的半宽距离模型 (Factor=2) 计算裂缝侧阻力

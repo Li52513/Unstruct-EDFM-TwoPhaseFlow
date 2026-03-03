@@ -56,13 +56,13 @@ public:
      * * @param meshMgr 网格管理器 (提供拓扑关系)
      * @param fieldMgr 场管理器 (提供 K, Phi, Lambda 等物性场及输出目标)
      */
-    static void Calculate_Transmissibility_NNC(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);
-
-    /**
+    static void Calculate_Transmissibility_NNC(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);    /**
      * @brief 计算裂缝-裂缝 (FF) 静态传导率 (Flow & Heat)
      * @details
-     * 遍历全局裂缝交点 (GlobalFFPoint)，计算交点处的串联传导率。
-     * * @param meshMgr 网格管理器 (提供 FractureNetwork 和 FF 交点信息)
+     * 路线 B：以交点 ID 为核心提取 Junction 关联裂缝段，并执行 Star-Delta 变换，
+     * 生成扁平化的 FF 传导率对 (Pairwise FF Connections)。
+     * 输出场长度等于所有 Junction 组合对数量总和，而非 globalFFPts 数量。
+     * @param meshMgr 网格管理器 (提供 FractureNetwork、裂缝段与交点拓扑)
      * @param fieldMgr 场管理器 (提供 K, Phi, Lambda 等物性场及输出目标)
      */
     static void Calculate_Transmissibility_FF(const MeshManager& meshMgr, FieldManager_2D& fieldMgr);

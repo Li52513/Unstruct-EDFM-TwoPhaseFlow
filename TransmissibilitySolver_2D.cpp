@@ -6,6 +6,8 @@
 #include <iostream>
 #include <algorithm>
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
 
 using namespace PhysicalProperties_string_op;
 
@@ -236,6 +238,12 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FractureInternal(cons
 // =========================================================================
 // 静态传导率计算：NNC (Matrix - Fracture)
 // =========================================================================
+/**
+ * @brief 计算基岩-裂缝 (NNC) 的静态传导率
+ * @details 极致性能优化版，杜绝重复几何计算，直接调用预处理阶段积分生成的 avgDistance。
+ * @param meshMgr 2D 网格管理器
+ * @param fieldMgr 2D 场管理器
+ */
 void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager& meshMgr, FieldManager_2D& fieldMgr)
 {
     Rock rock_str;
@@ -317,7 +325,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
 
     // --- 计算循环 ---
 #pragma omp parallel for schedule(static)
-    for (long long i = 0; i < jobs.size(); ++i)
+    for (long long i = 0; i < (long long)jobs.size(); ++i)
     {
         const auto& job = jobs[i];
         int mIdx = job.mIdx;
@@ -328,15 +336,15 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         int fLocIdx = (fIdx >= nMat) ? (fIdx - nMat) : fIdx;
 
         // 越界安全保护
-        if (mIdx < 0 || mIdx >= Kxx.size()) continue;
-        if (fLocIdx < 0 || fLocIdx >= Wf.size()) continue;
+        if (mIdx < 0 || mIdx >= (int)Kxx.size()) continue;
+        if (fLocIdx < 0 || fLocIdx >= (int)Wf.size()) continue;
 
         // 获取裂缝单元 (底层仍需使用全局 solverIndex 查询拓扑)
         const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(fIdx);
         if (!pElem) continue;
 
         // 2D FractureElement 没有直接存储坐标，需要通过 parentFractureID 和 params 还原
-        if (pElem->parentFractureID < 0 || pElem->parentFractureID >= macroFractures.size()) continue;
+        if (pElem->parentFractureID < 0 || pElem->parentFractureID >= (int)macroFractures.size()) continue;
 
         const auto& parentFrac = macroFractures[pElem->parentFractureID];
         Vector fracStart = parentFrac.start;
@@ -346,7 +354,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         Vector p1 = fracStart + fracVec * pElem->param0;
         Vector p2 = fracStart + fracVec * pElem->param1;
 
-        // 计算法向 (2D)
+        // 计算法向 (2D) 以用于获取渗透率张量的等效主值
         Vector tangent = p2 - p1;
         Vector normal(-tangent.m_y, tangent.m_x, 0.0);
         double len = Geometry_2D::Mag(normal);
@@ -358,21 +366,19 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         double ny = normal.m_y;
         double k_m_dir = (nx * nx * Kxx[mIdx]) + (ny * ny * Kyy[mIdx]);
 
-        // 2. Flow Transmissibility
-        double d_m = Geometry_2D::PointToSegmentDistance(matrixCells[mIdx].center, p1, p2);
-        d_m = std::max(d_m, 1e-6);
+        double d_m = std::max(pElem->avgDistance, 1e-6);
 
         double area = pElem->length * thickness;
 
-        // 【修复】注意：这里物理场必须使用局部索引 fLocIdx 访问！
+        // 物理场必须使用局部索引 fLocIdx 访问！
         T_Flow[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, k_m_dir, Wf[fLocIdx] / 2.0, Kf[fLocIdx], area);
 
         // 3. Heat Transmissibility
         if (Lam_m && Lam_f && Phi_f && LamFluid) {
             double lam_m_val = (*Lam_m)[mIdx];
-            double phi_val = (*Phi_f)[fLocIdx];           
-            double lam_fluid_val = (*LamFluid)[fLocIdx];  
-            double lam_solid_val = (*Lam_f)[fLocIdx];     
+            double phi_val = (*Phi_f)[fLocIdx];
+            double lam_fluid_val = (*LamFluid)[fLocIdx];
+            double lam_solid_val = (*Lam_f)[fLocIdx];
 
             // 裂缝侧有效热导率
             double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
@@ -381,31 +387,85 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         }
     }
     std::cout << "[Solver 2D] NNC Done (" << jobs.size() << " pairs)." << std::endl;
-}
-
-// =========================================================================
+}// =========================================================================
 // 静态传导率计算：FF (Fracture - Fracture)
 // =========================================================================
+/**
+ * @brief 路线 B：基于 Junction 的 FF 传导率重构 (Star-Delta 扁平化)
+ * @details
+ * 1. 从 MeshManager/FractureNetwork 中提取以交点 ID 为核心的 Junction 关联裂缝段集合。
+ * 2. 对每个 Junction 计算每条分支到交点的星形导纳 (Flow/Heat)。
+ * 3. 通过 Star-Delta 变换生成扁平化的两两 FF 连接传导率：
+ *    T_ij = (G_i * G_j) / sum_k(G_k)
+ * 4. 输出场 T_FF_Flow/T_FF_Heat 的长度为所有 Junction 的 pair 数总和。
+ * @param meshMgr 网格管理器
+ * @param fieldMgr 场管理器
+ */
+ // =========================================================================
+ // 静态传导率计算：FF (Fracture - Fracture Star-Delta Transformation)
+ // =========================================================================
+ /**
+  * @brief 基于星角变换 (Star-Delta) 计算微观裂缝单元间的交叉传导率
+  * @details 将传统宏观的两两交叉升级为微观节点枢纽 (Junction) 的多路流量分配模型。
+  * 消除虚拟节点压力，直接生成任意相交微段间的等效传导率配对。
+  */
 void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager& meshMgr, FieldManager_2D& fieldMgr)
 {
-    std::cout << "\n[Solver 2D] Calculating FF Transmissibility..." << std::endl;
+    std::cout << "\n[Solver 2D] Calculating FF Transmissibility (Star-Delta)..." << std::endl;
 
-    Fracture_string fracStr;
-    Water waterStr;
+    PhysicalProperties_string_op::Fracture_string fracStr;
+    PhysicalProperties_string_op::Water waterStr;
     const double thickness = 1.0;
 
-    // [Fix] 调用 const 版本
     const auto& frNet = meshMgr.fracture_network();
-    const auto& globalFFPts = frNet.globalFFPts;
+    const auto& macroFractures = frNet.fractures;
+    const int nMat = static_cast<int>(meshMgr.mesh().getCells().size());
 
     // --- 获取场数据 ---
-    auto& KtF = fieldMgr.getOrCreateFractureScalar(fracStr.k_t_tag, 1e-12)->data;
-    auto& LamF = fieldMgr.getOrCreateFractureScalar(fracStr.lambda_tag, 2.0)->data;
-    auto& PhiF = fieldMgr.getOrCreateFractureScalar(fracStr.phi_tag, 1.0)->data;
-    auto& Wf = fieldMgr.getOrCreateFractureScalar(fracStr.aperture_tag, 1e-3)->data;
+    auto p_Kt = fieldMgr.getFractureScalar(fracStr.k_t_tag);
+    auto p_Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag);
+    auto p_LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag);
+    auto p_PhiF = fieldMgr.getFractureScalar(fracStr.phi_tag);
+    auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
-    // 获取流体热导率
-    auto& LamFluid = fieldMgr.getOrCreateFractureScalar(waterStr.k_tag, 0.6)->data;
+    if (!p_Kt || !p_Wf) {
+        std::cerr << "[Error] Critical fracture properties missing for FF!" << std::endl;
+        return;
+    }
+
+    const auto& KtF = p_Kt->data;
+    const auto& Wf = p_Wf->data;
+    const auto& LamF = p_LamF ? p_LamF->data : std::vector<double>();
+    const auto& PhiF = p_PhiF ? p_PhiF->data : std::vector<double>();
+    const auto& LamFluid = p_LamFluid ? p_LamFluid->data : std::vector<double>();
+
+    // =====================================================================
+    // 步骤 1：构建 Junction (枢纽) 到 FractureElement 的精确拓扑映射
+    // Key: GlobalFFPoint ID
+    // Value: vector of 全局 Solver Index (所有连接到该点的裂缝微段)
+    // =====================================================================
+    std::unordered_map<int, std::vector<int>> junctionMap;
+    for (const auto& frac : macroFractures) {
+        for (const auto& elem : frac.elements) {
+            // 利用网格底层的打标，直接完成绝对精确的聚类
+            if (elem.isFFatStart && elem.gIDstart >= 0) {
+                junctionMap[elem.gIDstart].push_back(elem.solverIndex);
+            }
+            if (elem.isFFatEnd && elem.gIDend >= 0) {
+                junctionMap[elem.gIDend].push_back(elem.solverIndex);
+            }
+        }
+    }
+
+    // =====================================================================
+    // 步骤 2：统计所需的 Star-Delta 展开配对总数，并安全分配内存
+    // 公式: sum( n * (n - 1) / 2 )
+    // =====================================================================
+    size_t totalFFPairs = 0;
+    for (const auto& kv : junctionMap) {
+        size_t n = kv.second.size();
+        if (n > 1) totalFFPairs += n * (n - 1) / 2;
+    }
 
     const std::string tag_T_FF_Flow = "T_FF_Flow";
     const std::string tag_T_FF_Heat = "T_FF_Heat";
@@ -413,69 +473,84 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
     auto& T_FF_Flow = fieldMgr.createFFScalar(tag_T_FF_Flow, 0.0)->data;
     auto& T_FF_Heat = fieldMgr.createFFScalar(tag_T_FF_Heat, 0.0)->data;
 
-    if (T_FF_Flow.size() != globalFFPts.size()) {
-        T_FF_Flow.resize(globalFFPts.size());
-        T_FF_Heat.resize(globalFFPts.size());
+    if (T_FF_Flow.size() != totalFFPairs) {
+        T_FF_Flow.assign(totalFFPairs, 0.0);
+        T_FF_Heat.assign(totalFFPairs, 0.0);
     }
 
-#pragma omp parallel for schedule(dynamic)
-    for (long long i = 0; i < globalFFPts.size(); ++i)
-    {
-        const auto& ffPt = globalFFPts[i];
+    // =====================================================================
+    // 步骤 3：遍历 Junction 节点，执行严格的星角变换数学计算
+    // 为了保证科研求解在跨平台时的绝对一致性，必须对 unordered_map 的 Key 进行排序
+    // =====================================================================
+    std::vector<int> junctionIDs;
+    junctionIDs.reserve(junctionMap.size());
+    for (const auto& kv : junctionMap) junctionIDs.push_back(kv.first);
+    std::sort(junctionIDs.begin(), junctionIDs.end());
 
-        if (ffPt.fracA >= frNet.fractures.size() || ffPt.fracB >= frNet.fractures.size()) continue;
+    size_t ffIdx = 0;
+    for (int jID : junctionIDs) {
+        const auto& elemSolverIndices = junctionMap[jID];
+        size_t nElems = elemSolverIndices.size();
+        if (nElems < 2) continue; // 只有一条裂缝接触到此点 (无效交点) 不发生 FF 交换
 
-        // 这里需要原始宏观裂缝对象来计算几何
-        const auto& f1 = frNet.fractures[ffPt.fracA];
-        const auto& f2 = frNet.fractures[ffPt.fracB];
+        // 预计算该 Junction 下各个分支的“半传导率” (Half-Transmissibility, T_i)
+        std::vector<double> half_T_Flow(nElems, 0.0);
+        std::vector<double> half_T_Heat(nElems, 0.0);
+        double sum_T_Flow = 0.0;
+        double sum_T_Heat = 0.0;
 
-        int segIdx1 = f1.locateSegment(ffPt.paramA);
-        int segIdx2 = f2.locateSegment(ffPt.paramB);
+        for (size_t i = 0; i < nElems; ++i) {
+            int sIdx = elemSolverIndices[i];
+            int fLocIdx = sIdx - nMat;
 
-        if (segIdx1 < 0 || segIdx1 >= f1.elements.size()) continue;
-        if (segIdx2 < 0 || segIdx2 >= f2.elements.size()) continue;
+            if (fLocIdx < 0 || fLocIdx >= (int)KtF.size()) continue; // 安全保护
 
-        const auto& elem1 = f1.elements[segIdx1];
-        const auto& elem2 = f2.elements[segIdx2];
+            const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(sIdx);
+            if (!pElem) continue;
 
-        int s1 = elem1.solverIndex;
-        int s2 = elem2.solverIndex;
+            // 物理距离：网格在交点处被打断，故交点正好在段的末端。中心到交点的距离严谨为 L/2
+            double d = std::max(pElem->length * 0.5, 1e-12);
 
-        // 【核心修复】将全局 solverIndex 转换为局部裂缝索引，避免被越界保护静默跳过
-        int nMat = meshMgr.mesh().getCells().size();
-        int fLoc1 = (s1 >= nMat) ? (s1 - nMat) : s1;
-        int fLoc2 = (s2 >= nMat) ? (s2 - nMat) : s2;
+            // 支路渗流传导能力 T_i = (K_t * W_f * thickness) / d
+            double cond = KtF[fLocIdx] * Wf[fLocIdx];
+            double t_f = (cond * thickness) / d;
+            half_T_Flow[i] = t_f;
+            sum_T_Flow += t_f;
 
-        if (fLoc1 < 0 || fLoc2 < 0 || fLoc1 >= static_cast<int>(KtF.size()) || fLoc2 >= static_cast<int>(KtF.size())) continue;
+            // 支路热传导能力
+            if (!LamF.empty() && !PhiF.empty() && !LamFluid.empty()) {
+                double lam_eff = PhiF[fLocIdx] * LamFluid[fLocIdx] + (1.0 - PhiF[fLocIdx]) * LamF[fLocIdx];
+                double cond_h = lam_eff * Wf[fLocIdx];
+                double t_h = (cond_h * thickness) / d;
+                half_T_Heat[i] = t_h;
+                sum_T_Heat += t_h;
+            }
+        }
 
-        // [保持原有几何坐标计算代码不变...]
-        Vector v1 = f1.end - f1.start;
-        Vector c1 = f1.start + v1 * ((elem1.param0 + elem1.param1) * 0.5);
+        // 星角变换展开：T_ij = (T_i * T_j) / Sum(T_k)
+        for (size_t i = 0; i < nElems; ++i) {
+            for (size_t j = i + 1; j < nElems; ++j) {
+                // Flow
+                if (sum_T_Flow > 1e-25) {
+                    T_FF_Flow[ffIdx] = (half_T_Flow[i] * half_T_Flow[j]) / sum_T_Flow;
+                }
+                else {
+                    T_FF_Flow[ffIdx] = 0.0;
+                }
 
-        Vector v2 = f2.end - f2.start;
-        Vector c2 = f2.start + v2 * ((elem2.param0 + elem2.param1) * 0.5);
+                // Heat
+                if (sum_T_Heat > 1e-25) {
+                    T_FF_Heat[ffIdx] = (half_T_Heat[i] * half_T_Heat[j]) / sum_T_Heat;
+                }
+                else {
+                    T_FF_Heat[ffIdx] = 0.0;
+                }
 
-        // 计算几何距离
-        double d1 = Geometry_2D::Mag(c1 - ffPt.point);
-        double d2 = Geometry_2D::Mag(c2 - ffPt.point);
-        d1 = std::max(d1, 1e-6);
-        d2 = std::max(d2, 1e-6);
-
-        // --- Flow Transmissibility ---
-        // 【修复】使用局部索引 fLoc1 和 fLoc2 获取场变量
-        double cond1 = Wf[fLoc1] * KtF[fLoc1];
-        double cond2 = Wf[fLoc2] * KtF[fLoc2];
-
-        T_FF_Flow[i] = FVM_Ops::Op_Math_Transmissibility(d1, cond1, d2, cond2, thickness);
-
-        // --- Heat Transmissibility ---
-        double lam_eff_1 = PhiF[fLoc1] * LamFluid[fLoc1] + (1.0 - PhiF[fLoc1]) * LamF[fLoc1];
-        double lam_eff_2 = PhiF[fLoc2] * LamFluid[fLoc2] + (1.0 - PhiF[fLoc2]) * LamF[fLoc2];
-
-        double cond1_h = Wf[fLoc1] * lam_eff_1;
-        double cond2_h = Wf[fLoc2] * lam_eff_2;
-
-        T_FF_Heat[i] = FVM_Ops::Op_Math_Transmissibility(d1, cond1_h, d2, cond2_h, thickness);
+                ffIdx++;
+            }
+        }
     }
-    std::cout << "[Solver 2D] FF Done (" << globalFFPts.size() << " connections)." << std::endl;
+
+    std::cout << "[Solver 2D] FF Done (" << totalFFPairs << " Star-Delta pairs over "
+        << junctionIDs.size() << " junctions)." << std::endl;
 }

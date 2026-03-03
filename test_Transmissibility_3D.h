@@ -1,10 +1,10 @@
 /**
  * @file test_Transmissibility_3D.h
- * @brief 3D EDFM 静态传导率算子 (Matrix, NNC, FF) 全流程独立基准测试
+ * @brief 3D EDFM 静态传导率算子 (Matrix, NNC, FI, FF Star-Delta) 全流程独立基准测试
  * @details
  * 该测试不依赖外部网格文件，通过程序化构建极简的正交六面体网格和两片交叉裂缝，
  * 为物性场赋予常数值后，执行静态传导率计算，并输出易于手算的 CSV 报表。
- * 完美对接 3D_MeshManager 的 Level-3 交互对象抽象架构。
+ * 完美对接 3D_MeshManager 的 Level-3 交互对象抽象架构及工业级 Star-Delta 算法。
  */
 
 #pragma once
@@ -15,6 +15,9 @@
 #include <fstream>
 #include <iomanip>
 #include <chrono>
+#include <unordered_map>
+#include <algorithm>
+#include <tuple>
 
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
@@ -38,7 +41,7 @@ namespace Benchmark3D {
 
         // 1.1 生成 10x10x10 的结构化六面体极简网格 (总计 1000 个单元)
         double Lx = 100.0, Ly = 100.0, Lz = 100.0;
-        int nx = 10, ny = 10, nz = 10;
+        int nx = 3, ny = 3, nz = 3;
         MeshManager_3D meshMgr(Lx, Ly, Lz, nx, ny, nz, true, false); // usePrism=true 实际生成六面体
         meshMgr.BuildSolidMatrixGrid_3D(NormalVectorCorrectionMethod::OrthogonalCorrection, "3D_Matrix_Benchmark");
 
@@ -70,10 +73,8 @@ namespace Benchmark3D {
         meshMgr.resolveCoplanarInteractions();
         meshMgr.buildTopologyMaps();
 
-        meshMgr.exportMeshInfortoTxt(exportPrefix+"MatrixMesh");
-
-        meshMgr.exportFracturesNetworkInfortoTxt_improved(exportPrefix + "FractureMesh");
-
+        meshMgr.exportMeshInfortoTxt(exportPrefix);
+        meshMgr.exportFracturesNetworkInfortoTxt_improved(exportPrefix);
         meshMgr.exportInteractionPolygonsToTxt_improved(exportPrefix + "InterPoly");
 
         // 1.8 统计网格尺寸以用于内存分配
@@ -85,22 +86,59 @@ namespace Benchmark3D {
         }
 
         size_t nMatFaces = meshMgr.mesh().getFaces().size();
+
+        // 3D 架构的 FI 直接来源于全局边的数量
         size_t nFracEdges = meshMgr.fracture_network().getGlobalEdges().size();
 
         // 3D 架构的 NNC 直接来源于扁平化的 interactionPairs
         size_t nNNC = meshMgr.getInteractionPairs().size();
 
-        // 3D 架构的 FF 需要累加每条交叉线上的微观线段数量
+        // 3D 架构的 FF (Star-Delta) 统计：采用端点量化无向键聚类
         size_t nFF = 0;
         const auto& ffIntersections = meshMgr.fracture_network().ffIntersections;
+
+        const double TOL = 1e-4;
+        auto quantize = [TOL](const Vector& v) {
+            return std::make_tuple(
+                (long long)std::floor(v.m_x / TOL + 0.5),
+                (long long)std::floor(v.m_y / TOL + 0.5),
+                (long long)std::floor(v.m_z / TOL + 0.5));
+            };
+
+        auto getKey = [&](const Vector& p1, const Vector& p2) {
+            auto q1 = quantize(p1), q2 = quantize(p2);
+            if (q1 > q2) std::swap(q1, q2);
+            return std::to_string(std::get<0>(q1)) + "_" + std::to_string(std::get<1>(q1)) + "_" + std::to_string(std::get<2>(q1)) + "-" +
+                std::to_string(std::get<0>(q2)) + "_" + std::to_string(std::get<1>(q2)) + "_" + std::to_string(std::get<2>(q2));
+            };
+
+        // 聚类收集
+        std::unordered_map<std::string, std::vector<int>> clusterMap;
         for (const auto& inter : ffIntersections) {
-            nFF += inter.segments.size();
+            for (const auto& seg : inter.segments) {
+                std::string key = getKey(seg.start, seg.end);
+                if (seg.solverIndex_1 >= 0) {
+                    if (std::find(clusterMap[key].begin(), clusterMap[key].end(), seg.solverIndex_1) == clusterMap[key].end())
+                        clusterMap[key].push_back(seg.solverIndex_1);
+                }
+                if (seg.solverIndex_2 >= 0) {
+                    if (std::find(clusterMap[key].begin(), clusterMap[key].end(), seg.solverIndex_2) == clusterMap[key].end())
+                        clusterMap[key].push_back(seg.solverIndex_2);
+                }
+            }
+        }
+
+        // 此处的统计保留合法网格对，去除越界数据（留给求解器最终裁决后会安全舍弃，预估只多不少）
+        for (const auto& kv : clusterMap) {
+            size_t n = kv.second.size();
+            if (n >= 2) nFF += n * (n - 1) / 2;
         }
 
         std::cout << "  -> Matrix Cells: " << nMat << "\n"
             << "  -> Fracture Elements: " << nFrac << "\n"
             << "  -> NNC Pairs (Exact): " << nNNC << "\n"
-            << "  -> FF Segments: " << nFF << std::endl;
+            << "  -> FI Edges (Allocated): " << nFracEdges << "\n"
+            << "  -> FF Star-Delta Pairs (Estimated): " << nFF << std::endl;
 
         // =========================================================
         // Stage 2: 场内存预分配与测试常量注入 (Mocking Properties)
@@ -108,7 +146,7 @@ namespace Benchmark3D {
         std::cout << "[Stage 2] Initializing Fields with Constant Physical Properties..." << std::endl;
         FieldManager_3D fieldMgr;
 
-        // 基于精准的尺寸统计初始化场管理器
+        // 基于精准的尺寸统计初始化场管理器 (第6个参数传 nFracEdges 给 FI)
         fieldMgr.InitSizes(nMat, nFrac, nNNC, nFF, nMatFaces, nFracEdges);
 
         PhysicalProperties_string_op::Rock rockStr;
@@ -137,6 +175,7 @@ namespace Benchmark3D {
         std::cout << "[Stage 3] Executing Static Transmissibility Solvers..." << std::endl;
         TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(meshMgr, fieldMgr);
         TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(meshMgr, fieldMgr);
+        TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(meshMgr, fieldMgr); // 加入 FI 计算
         TransmissibilitySolver_3D::Calculate_Transmissibility_FF(meshMgr, fieldMgr);
 
         // =========================================================
@@ -166,10 +205,8 @@ namespace Benchmark3D {
             auto t_nnc_flow = fieldMgr.getNNCScalar("T_NNC_Flow");
             auto t_nnc_heat = fieldMgr.getNNCScalar("T_NNC_Heat");
             if (t_nnc_flow && t_nnc_heat) {
-                // 3D 的 NNC 直接与 interactionPairs_ 1:1 对齐
                 const auto& pairs = meshMgr.getInteractionPairs();
                 for (size_t i = 0; i < pairs.size(); ++i) {
-                    // 取出基岩的全局 ID 和裂缝单元的全局 ID 供核对
                     csv << "NNC,MatGlobal_" << pairs[i].matrixCellGlobalID
                         << ",FracElemGlobal_" << pairs[i].fracElementGlobalID << ","
                         << std::scientific << std::setprecision(6)
@@ -177,19 +214,50 @@ namespace Benchmark3D {
                 }
             }
 
-            // 4.3 写入裂缝-裂缝相交通导率 (FF)
+            // 4.3 写入裂缝内部传导率 (FI)
+            auto t_fi_flow = fieldMgr.getFractureEdgeScalar("T_FI_Flow");
+            auto t_fi_heat = fieldMgr.getFractureEdgeScalar("T_FI_Heat");
+            if (t_fi_flow && t_fi_heat) {
+                const auto& globalEdges = meshMgr.fracture_network().getGlobalEdges();
+                for (size_t i = 0; i < globalEdges.size(); ++i) {
+                    const auto& edge = globalEdges[i];
+                    // 在对齐映射的数组中，仅剔除掉边界边的 0 值，保留有效内部流通对
+                    if (edge.neighborCell_solverIndex >= 0) {
+                        csv << "FracInternal,FracElemGlobal_" << edge.ownerCell_solverIndex
+                            << ",FracElemGlobal_" << edge.neighborCell_solverIndex << ","
+                            << std::scientific << std::setprecision(6)
+                            << t_fi_flow->data[i] << "," << t_fi_heat->data[i] << "\n";
+                    }
+                }
+            }
+
+            // 4.4 写入裂缝-裂缝相交通导率 (FF - Deterministic Star-Delta)
             auto t_ff_flow = fieldMgr.getFFScalar("T_FF_Flow");
             auto t_ff_heat = fieldMgr.getFFScalar("T_FF_Heat");
             if (t_ff_flow && t_ff_heat) {
-                size_t base_idx = 0;
-                for (const auto& inter : ffIntersections) {
-                    for (size_t j = 0; j < inter.segments.size(); ++j) {
-                        csv << "FF,MacroFrac_" << inter.fracID_1
-                            << ",MacroFrac_" << inter.fracID_2 << ","
-                            << std::scientific << std::setprecision(6)
-                            << t_ff_flow->data[base_idx + j] << "," << t_ff_heat->data[base_idx + j] << "\n";
+                // 保证导出顺序与求解器绝对一致的确定性字典序
+                std::vector<std::string> sortedKeys;
+                sortedKeys.reserve(clusterMap.size());
+                for (const auto& kv : clusterMap) sortedKeys.push_back(kv.first);
+                std::sort(sortedKeys.begin(), sortedKeys.end());
+
+                size_t ffIdx = 0;
+                for (const auto& key : sortedKeys) {
+                    const auto& indices = clusterMap[key];
+                    size_t n = indices.size();
+                    if (n < 2) continue;
+
+                    for (size_t i = 0; i < n; ++i) {
+                        for (size_t j = i + 1; j < n; ++j) {
+                            if (ffIdx < t_ff_flow->data.size()) {
+                                csv << "FF_StarDelta,FracElemGlobal_" << indices[i]
+                                    << ",FracElemGlobal_" << indices[j] << ","
+                                    << std::scientific << std::setprecision(6)
+                                    << t_ff_flow->data[ffIdx] << "," << t_ff_heat->data[ffIdx] << "\n";
+                                ffIdx++;
+                            }
+                        }
                     }
-                    base_idx += inter.segments.size();
                 }
             }
 
