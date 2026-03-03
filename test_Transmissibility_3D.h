@@ -23,6 +23,7 @@
 #include "3D_FieldManager.h"
 #include "TransmissibilitySolver_3D.h"
 #include "SolverContrlStrName_op.h"
+#include "Test_FIM_Topology.h"
 
 namespace Benchmark3D {
 
@@ -267,6 +268,13 @@ namespace Benchmark3D {
         else {
             std::cerr << "  -> [Error] Failed to create benchmark CSV file: " << csvName << std::endl;
         }
+
+        // =========================================================
+        // Stage 5: [Day 1] FIM Global Topology Assembly & Verification
+        // =========================================================
+        std::cout << "\n[Stage 5] Executing Day 1 FIM Topology Aggregation Pipeline..." << std::endl;
+        // 直接将当前的局部 meshMgr 和 fieldMgr 喂给 Day 1 验证管线
+        Benchmark_FIM_Topology_Pipeline(meshMgr, fieldMgr);
 
         std::cout << "========== [3D Benchmark Completed Successfully] ==========\n" << std::endl;
     }

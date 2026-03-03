@@ -1,7 +1,6 @@
 /**
  * @file FIM_ConnectionManager.h
- * @brief 维度无关的纯代数连接聚合引擎
- * @details 统一处理 2D/3D 传入的散乱边，执行安全过滤、多连通聚合与确定性排序。
+ * @brief 维度无关的纯代数连接聚合引擎 (支持 FF 多通道并联)
  */
 
 #pragma once
@@ -13,19 +12,12 @@
 #include <cmath>
 #include <iostream>
 #include <string>
-#include <cstddef>
 
 enum class ConnectionType {
     Matrix_Matrix = 0,
     Fracture_Internal = 1,
     Matrix_Fracture = 2, ///< NNC (基岩-裂缝)
-    Fracture_Fracture = 3
-};
-
-enum class DuplicatePolicy {
-    ThrowError,         ///< 强阻断：抛出异常 (适合严格测试阶段)
-    WarnAndAccumulate,  ///< 柔性：警告并物理累加 (适合复杂网格容错)
-    SilentAccumulate    ///< 静默：直接累加 
+    Fracture_Fracture = 3  ///< FF (裂缝-裂缝)
 };
 
 struct Connection {
@@ -33,7 +25,7 @@ struct Connection {
     int nodeJ;
     double T_Flow;
     double T_Heat;
-    double aux_area;  ///< 辅助几何量：面积 (非严格欧氏面积时用作权重)
+    double aux_area;  ///< 辅助几何量：面积 (用作权重)
     double aux_dist;  ///< 辅助几何量：特征距离
     ConnectionType type;
 
@@ -84,7 +76,7 @@ public:
         rawBuffer_.emplace_back(nodeI, nodeJ, t_flow, t_heat, aux_area, aux_dist, type);
     }
 
-    void FinalizeAndAggregate(DuplicatePolicy nonNNCPolicy = DuplicatePolicy::WarnAndAccumulate) {
+    void FinalizeAndAggregate() {
         std::unordered_map<ConnectionKey, Connection, ConnectionKeyHash> aggMap;
 
         for (const auto& raw : rawBuffer_) {
@@ -95,24 +87,21 @@ public:
                 aggMap.insert({ key, raw });
             }
             else {
-                if (raw.type != ConnectionType::Matrix_Fracture) {
-                    if (nonNNCPolicy == DuplicatePolicy::ThrowError) {
-                        throw std::logic_error("[FIM Topology Error] Duplicate non-NNC connection detected!");
+                // 【核心物理规则】：仅允许 NNC 与 FF 出现多通道并联，并进行物理传导率精准累加
+                if (raw.type == ConnectionType::Matrix_Fracture || raw.type == ConnectionType::Fracture_Fracture) {
+                    it->second.T_Flow += raw.T_Flow;
+                    it->second.T_Heat += raw.T_Heat;
+                    double totalArea = it->second.aux_area + raw.aux_area;
+                    if (totalArea > 1e-14) {
+                        it->second.aux_dist = (it->second.aux_dist * it->second.aux_area + raw.aux_dist * raw.aux_area) / totalArea;
                     }
-                    else if (nonNNCPolicy == DuplicatePolicy::WarnAndAccumulate) {
-                        std::cerr << "[FIM Warning] Legitimate duplicate path detected for type "
-                            << static_cast<int>(raw.type) << " at nodes ("
-                            << raw.nodeI << "," << raw.nodeJ << "). Values are accumulating." << std::endl;
-                    }
+                    it->second.aux_area = totalArea;
                 }
-
-                it->second.T_Flow += raw.T_Flow;
-                it->second.T_Heat += raw.T_Heat;
-                double totalArea = it->second.aux_area + raw.aux_area;
-                if (totalArea > 1e-14) {
-                    it->second.aux_dist = (it->second.aux_dist * it->second.aux_area + raw.aux_dist * raw.aux_area) / totalArea;
+                else {
+                    // Matrix_Matrix 和 Fracture_Internal 在拓扑上绝对不应该出现重复连接
+                    throw std::logic_error("[FIM Topology Error] Duplicate Matrix or FI connection detected at nodes (" +
+                        std::to_string(raw.nodeI) + ", " + std::to_string(raw.nodeJ) + ")!");
                 }
-                it->second.aux_area = totalArea;
             }
         }
 
@@ -121,6 +110,7 @@ public:
         for (const auto& kv : aggMap) globalConnections_.push_back(kv.second);
         rawBuffer_.clear();
 
+        // 强确定性排序
         std::sort(globalConnections_.begin(), globalConnections_.end(),
             [](const Connection& a, const Connection& b) {
                 if (a.type != b.type) return static_cast<int>(a.type) < static_cast<int>(b.type);

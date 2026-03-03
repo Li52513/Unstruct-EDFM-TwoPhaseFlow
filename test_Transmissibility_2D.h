@@ -22,6 +22,7 @@
 #include "2D_FieldManager.h"
 #include "TransmissibilitySolver_2D.h"
 #include "SolverContrlStrName_op.h"
+#include "Test_FIM_Topology.h"
 
 namespace Benchmark2D {
 
@@ -39,7 +40,7 @@ namespace Benchmark2D {
         std::cout << "[Stage 1] Constructing 2D Orthogonal Mesh and Intersecting Fractures..." << std::endl;
 
         double Lx = 10.0, Ly = 10.0;
-        int nx = 3, ny = 3;
+        int nx = 4, ny =4;
 
         // 1.1 生成 10x10 的结构化四边形极简网格 (用作完美对标)
         MeshManager meshMgr(Lx, Ly, 0.0, nx, ny, 0, false, true);
@@ -228,6 +229,13 @@ namespace Benchmark2D {
         else {
             std::cerr << "  -> [Error] Failed to create benchmark CSV file: " << csvName << std::endl;
         }
+
+        // =========================================================
+        // Stage 5: [Day 1] FIM Global Topology Assembly & Verification (2D)
+        // =========================================================
+        std::cout << "\n[Stage 5] Executing Day 1 FIM Topology Aggregation Pipeline (2D)..." << std::endl;
+        // 调用我们刚刚写的 2D 重载版本
+        Benchmark_FIM_Topology_Pipeline_2D(meshMgr, fieldMgr);
 
         std::cout << "========== [2D Benchmark Completed Successfully] ==========\n" << std::endl;
     }
