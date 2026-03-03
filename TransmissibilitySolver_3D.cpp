@@ -527,10 +527,15 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
         }
 
         // Star-Delta 展开
+        fieldMgr.ff_topology.clear();
+        fieldMgr.ff_topology.reserve(totalFFPairs);
         for (size_t i = 0; i < nElems; ++i) {
             for (size_t j = i + 1; j < nElems; ++j) {
                 T_FF_Flow[ffIdx] = (sum_T_Flow > 1e-25) ? ((half_T_Flow[i] * half_T_Flow[j]) / sum_T_Flow) : 0.0;
                 T_FF_Heat[ffIdx] = (sum_T_Heat > 1e-25) ? ((half_T_Heat[i] * half_T_Heat[j]) / sum_T_Heat) : 0.0;
+
+                fieldMgr.ff_topology.emplace_back(cluster.solverIndices[i], cluster.solverIndices[j]);
+
                 ffIdx++;
             }
         }

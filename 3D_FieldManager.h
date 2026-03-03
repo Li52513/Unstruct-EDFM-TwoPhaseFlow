@@ -26,6 +26,9 @@ public:
     FaceFieldRegistry matrixFaceFields;    ///< 基岩面数据
     FaceFieldRegistry fractureEdgeFields;  ///< 裂缝边数据
 
+    // === 动态记录的 FF 拓扑对 ===
+    std::vector<std::pair<int, int>> ff_topology;
+
     // =========================================================
     // 尺寸记录 (用于创建新场时的默认大小)
     // =========================================================

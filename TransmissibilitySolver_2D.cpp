@@ -526,6 +526,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
                 sum_T_Heat += t_h;
             }
         }
+        fieldMgr.ff_topology.clear();
+        fieldMgr.ff_topology.reserve(totalFFPairs);
 
         // ÐÇ½Ç±ä»»Õ¹¿ª£ºT_ij = (T_i * T_j) / Sum(T_k)
         for (size_t i = 0; i < nElems; ++i) {
@@ -545,6 +547,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
                 else {
                     T_FF_Heat[ffIdx] = 0.0;
                 }
+
+                fieldMgr.ff_topology.emplace_back(elemSolverIndices[i], elemSolverIndices[j]);
 
                 ffIdx++;
             }

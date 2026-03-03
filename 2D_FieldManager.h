@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <utility>
 
 #include "FieldRegistry.h"
 #include "FaceFieldRegistry.h"
@@ -36,6 +37,9 @@ public:
     /// @brief 裂缝内部连接面（节点）数据 (Size = N_frac_internal_nodes)
     /// @note 对于 1D 裂缝，"Face" 实际上是裂缝段之间的连接节点 (Vertex)
     FaceFieldRegistry fractureFaceFields;
+
+    // === [DAY 1 新增注入点] 动态记录的 FF 拓扑对 ===
+    std::vector<std::pair<int, int>> ff_topology;
 
     // =========================================================
     // 尺寸记录 (用于创建新场时的默认大小)
