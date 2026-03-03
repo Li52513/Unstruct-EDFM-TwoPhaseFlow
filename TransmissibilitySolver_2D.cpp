@@ -488,6 +488,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
     std::sort(junctionIDs.begin(), junctionIDs.end());
 
     size_t ffIdx = 0;
+    fieldMgr.ff_topology.clear();
+    fieldMgr.ff_topology.reserve(totalFFPairs);
     for (int jID : junctionIDs) {
         const auto& elemSolverIndices = junctionMap[jID];
         size_t nElems = elemSolverIndices.size();
@@ -526,8 +528,6 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
                 sum_T_Heat += t_h;
             }
         }
-        fieldMgr.ff_topology.clear();
-        fieldMgr.ff_topology.reserve(totalFFPairs);
 
         // ÐÇ½Ç±ä»»Õ¹¿ª£ºT_ij = (T_i * T_j) / Sum(T_k)
         for (size_t i = 0; i < nElems; ++i) {

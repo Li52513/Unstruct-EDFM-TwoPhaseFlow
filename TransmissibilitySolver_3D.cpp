@@ -492,6 +492,9 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     // 步骤 3：遍历合法枢纽，执行 Star-Delta 星角变换
     // =====================================================================
     size_t ffIdx = 0;
+    fieldMgr.ff_topology.clear();
+    fieldMgr.ff_topology.reserve(totalFFPairs);
+
     for (const auto& cluster : validClusters) {
         size_t nElems = cluster.solverIndices.size();
 
@@ -527,8 +530,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
         }
 
         // Star-Delta 展开
-        fieldMgr.ff_topology.clear();
-        fieldMgr.ff_topology.reserve(totalFFPairs);
+
         for (size_t i = 0; i < nElems; ++i) {
             for (size_t j = i + 1; j < nElems; ++j) {
                 T_FF_Flow[ffIdx] = (sum_T_Flow > 1e-25) ? ((half_T_Flow[i] * half_T_Flow[j]) / sum_T_Flow) : 0.0;
@@ -539,6 +541,10 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
                 ffIdx++;
             }
         }
+    }
+
+    if (ffIdx != totalFFPairs) {
+        throw std::runtime_error("[Solver 3D] FF topology size mismatch with totalFFPairs.");
     }
 
     std::cout << "[Solver 3D] FF Done (" << totalFFPairs << " Deterministic Star-Delta pairs over "
