@@ -67,22 +67,23 @@ Evidence (fill):
 
 ## Day 3 - Boundary Conditions and Leakoff Discretization
 
-Status: `[ ]`
+Status: `[x]`
 
 Implementation checklist:
-- [ ] Integrate Dirichlet/Neumann into residual and Jacobian
-- [ ] Add parameterized leakoff source/sink with switch
-- [ ] Ensure boundary derivatives enter correct blocks
+- [x] Integrate Dirichlet/Neumann into residual and Jacobian
+- [x] Add parameterized leakoff source/sink with switch
+- [x] Ensure boundary derivatives enter correct blocks
 
 Strict acceptance gates:
-- [ ] `--case=boundary_export` PASS
-- [ ] R1 PASS
-- [ ] Linear pressure-drop and adiabatic patch tests PASS
+- [x] `--case=day3_bc_patch` PASS
+- [x] `--case=day3_leakoff_switch` PASS
+- [x] Linear pressure-drop and adiabatic patch tests PASS
+- [x] 2D/3D grid-level boundary assembly PASS with row-offset check
 
 Evidence (fill):
-- Commit:
-- Logs:
-- Verdict: PASS / FAIL
+- Commit: dirty working tree (uncommitted)
+- Logs: `--case=day3_bc_patch`, `--case=day3_leakoff_switch`, `--case=day3_viz`
+- Verdict: PASS (including 2D/3D VTK visualization export and field sanity)
 
 ---
 
@@ -175,4 +176,5 @@ Evidence (fill):
 | Date | Day | Owner | Commit | Required Checks | Result | Notes |
 |---|---|---|---|---|---|---|
 | 2026-03-04 | Day 2 | Yongwei | dirty working tree | R1 + grad_all + hydrostatic gate | PASS | Day2 FVM-AD suite all PASS; 2D/3D grad patch tests PASS |
+| 2026-03-04 | Day 3 | Yongwei | dirty working tree | day3_bc_patch + day3_leakoff_switch + day3_viz | PASS | BC patch + Leakoff OFF/ON + two-phase AD + 2D/3D grid-level assembly PASS; VTK export PASS; area-weighted boundary residual pattern observed |
 | YYYY-MM-DD | Day N |  |  | R? / case? | PASS/FAIL |  |

@@ -58,8 +58,6 @@ namespace BoundarySetting {
         bcRegistry_[tagID] = def;
     }
 
-
-
     void BoundaryConditionManager::SetNeumannBC(int tagID, double constantFlux) {
         BCDefinition def;
         def.a = 0.0;
@@ -69,6 +67,25 @@ namespace BoundarySetting {
         def.desc = "Neumann (Constant=" + std::to_string(constantFlux) + ")";
 
         bcRegistry_[tagID] = def;
+    }
+
+    void BoundaryConditionManager::SetRobinBC(int tagID, double beta, double farFieldValue) {
+        BCDefinition def;
+        // [修复符号冲突] 统一外流为正: Flux_out = beta * (Phi_b - farFieldValue)
+        // 移项以适应 FVM 组装的 a * Phi_b + b * Flux_b = c 形式:
+        // -beta * Phi_b + 1.0 * Flux_out = -beta * farFieldValue
+        def.a = -beta;
+        def.b = 1.0;
+        def.type = BoundaryType::Robin;
+        double c_val = -beta * farFieldValue;
+        def.valFunc = [c_val](const Vector&) { return c_val; };
+        def.desc = "Robin (beta=" + std::to_string(beta) + ", FarField=" + std::to_string(farFieldValue) + ")";
+        bcRegistry_[tagID] = def;
+    }
+
+    void BoundaryConditionManager::SetLeakoffEquivalentBC(int tagID, double C_L, double P_farfield) {
+        SetRobinBC(tagID, C_L, P_farfield);
+        bcRegistry_[tagID].desc = "Leakoff (C_L=" + std::to_string(C_L) + ", P_far=" + std::to_string(P_farfield) + ")";
     }
     // =========================================================
     // 查询接口实现

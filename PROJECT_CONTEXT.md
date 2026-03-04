@@ -4,9 +4,9 @@
 
 | Item | Value |
 |---|---|
-| Last Updated | 2026-03-04 (Asia/Shanghai, day1 explicit dispatcher cases added) |
+| Last Updated | 2026-03-04 (Asia/Shanghai, Day3 boundary/leakoff + postprocess capability sync) |
 | Git Branch | `main` |
-| Git Commit | `f075501 (dirty working tree)` |
+| Git Commit | `d9ddb9e (dirty working tree)` |
 | Owner / Maintainer | Yongwei (请按实际维护人更新) |
 | Project Root | `2D-Unstr-Quadrilateral-EDFM` |
 | Current Entry Mode | `main.cpp` 已支持参数化 dispatcher（`--case=...` / `--list` / `--help`） |
@@ -87,6 +87,7 @@
 ├─ FVM_Ops.h / FVM_Ops_AD.h / FVM_Grad.*     # 离散算子
 ├─ FIM_ConnectionManager.h                   # FIM 连接聚合器
 ├─ FIM_TopologyBuilder2D.h / 3D.h            # 拓扑到代数连接装载
+├─ 2D_PostProcess.* / 3D_PostProcess.*       # 结果导出与可视化（Tecplot / VTK）
 ├─ test_*.h / *_test.h                       # 各模块验证与基准
 └─ Test/                                     # 导出结果与可视化脚本目录
 ```
@@ -135,6 +136,17 @@
 
 - `FIM_TopologyBuilder2D/3D`：从 T 字段装载 MM/FI/NNC/FF 连接
 - `FIM_ConnectionManager`：连接去重、聚合、守恒检查、排序输出
+
+### 3.5 后处理与可视化导出
+
+- `PostProcess_2D`（`2D_PostProcess.h/.cpp`）
+  - 当前能力：`ExportTecplot(...)`，输出 2D 基岩 + 1D 裂缝 Zone（BLOCK, cell-centered）
+  - 支持 `SyncADFieldToScalar<N>(...)`，将 ADVar 场降维到标量场后再导出
+  - 当前缺口：尚未提供 `ExportVTK(...)`（ParaView 直连能力待补齐）
+- `PostProcess_3D`（`3D_PostProcess.h/.cpp`）
+  - 当前能力：`ExportTecplot(...)` + `ExportVTK(...)`
+  - `ExportVTK(...)` 采用 `UNSTRUCTURED_GRID`，输出基岩+裂缝混合网格、`CELL_TYPES` 与 `DomainID`
+  - 同样支持 `SyncADFieldToScalar<N>(...)` 以解耦求解层与导出层
 
 ---
 
@@ -284,14 +296,17 @@ msbuild .\2D-Unstr-Quadrilateral-EDFM.sln /p:Configuration=Debug /p:Platform=x64
 
 ### 8.1 已完成
 
+- Day3 已新增 `BoundaryAssembler` 生产级边界/漏失装配入口，修复 Robin/Dirichlet 的除零风险与装配向量边界检查，并补齐两相 Leakoff AD 断言与 Day3 显式回归判据。
 - 章节一对应的 2D/3D EDFM 几何嵌入、候选筛选、交互重构、拓扑导出与一致性检查链条已成型。
 - 静态传导率四类机制（MM/FI/NNC/FF）在 2D/3D 均有对应实现与基准导出。
 - FIM 拓扑连接聚合链（Builder + ConnectionManager）可用于守恒检查与连接净化。
+- 3D 后处理已具备 Tecplot + VTK 双导出路径，可直接在 ParaView 做网格与场可视化检查。
 
 ### 8.2 进行中
 
 - 单相/两相热流耦合从“模块验证”向“统一时间推进求解入口”收敛。
 - 章节三的 IMPES/FIM 工程化主流程（强重力分异/滤失/交替注采）仍需系统串联与回归测试矩阵。
+- 2D 后处理仍缺少 VTK 导出接口；需与 3D 后处理对齐后，再将可视化校验纳入 Day3/Day4 常规回归。
 
 ### 8.3 待开展
 
@@ -332,4 +347,6 @@ msbuild .\2D-Unstr-Quadrilateral-EDFM.sln /p:Configuration=Debug /p:Platform=x64
 - `main.cpp` 已切换为参数化 dispatcher。新增测试入口时，必须同步更新 `--list` 可见 case 名称与描述。
 - 已新增 `REGRESSION_CASES.md`。每次重要改动后至少执行其中的最小回归集并记录结果。
 - `PROJECT_CONTEXT.md` 设为必更新文件：每次重要改动后至少更新 `Last Updated` 与 `Git Commit`（若未提交则标注 `dirty working tree`）。
+
+
 

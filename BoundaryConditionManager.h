@@ -28,10 +28,10 @@ namespace BoundarySetting {
      * @enum BoundaryType
      * @brief 边界条件类型枚举
      */
-
     enum class BoundaryType {
-        Dirichlet,  ///< 第一类边界条件 (定值，如定压、定温)
-        Neumann     ///< 第二类边界条件 (定流，如定流量、绝热)
+        Dirichlet,  ///< 第一类边界条件 (定值)
+        Neumann,    ///< 第二类边界条件 (定流)
+        Robin       ///< 第三类边界条件 (混合，如 Leakoff 等效)
     };
 
     /**
@@ -108,6 +108,10 @@ namespace BoundarySetting {
          * 此时 a=0, b=1, c=fluxValue
          */
         void SetNeumannBC(int tagID, double fluxValue);
+		
+        void SetRobinBC(int tagID, double beta, double farFieldValue);
+
+        void SetLeakoffEquivalentBC(int tagID, double C_L, double P_farfield);
 
         // =========================================================
         // 查询接口 (供 Discretization 模块调用)

@@ -130,6 +130,41 @@ namespace FVM_Ops {
         return q_cond + q_conv;
     }
 
+    template <int N, typename ADVarType>
+    inline ADVarType Op_Boundary_Dirichlet_AD(double T_face, const ADVarType& Phi_cell, double Phi_bc) {
+        return T_face * (Phi_cell - Phi_bc);
+    }
+
+    template <int N, typename ADVarType>
+    inline ADVarType Op_Boundary_Neumann_AD(double area, double Flux_bc) {
+        ADVarType q_N; q_N.val = area * Flux_bc;
+        for (int i = 0; i < N; ++i) q_N.grad(i) = 0.0;
+        return q_N;
+    }
+
+    template <int N, typename ADVarType>
+    inline ADVarType Op_Leakoff_Source_AD(bool enable, double C_L, const ADVarType& P_cell, double P_farfield) {
+        if (!enable) {
+            ADVarType zero; zero.val = 0.0;
+            for (int i = 0; i < N; ++i) zero.grad(i) = 0.0;
+            return zero;
+        }
+        return C_L * (P_cell - P_farfield);
+    }
+
+    template <int N, typename ADVarType>
+    inline void Op_Leakoff_TwoPhase_AD(bool enable, double C_L_w, double C_L_g,
+        const ADVarType& P_cell_w, const ADVarType& P_cell_g,
+        double P_farfield, ADVarType& q_w_out, ADVarType& q_g_out) {
+        if (!enable) {
+            q_w_out.val = 0.0; q_g_out.val = 0.0;
+            for (int i = 0; i < N; ++i) { q_w_out.grad(i) = 0.0; q_g_out.grad(i) = 0.0; }
+            return;
+        }
+        q_w_out = C_L_w * (P_cell_w - P_farfield);
+        q_g_out = C_L_g * (P_cell_g - P_farfield);
+    }
+
 } // namespace FVM_Ops
 
 #endif // FVM_OPS_AD_H

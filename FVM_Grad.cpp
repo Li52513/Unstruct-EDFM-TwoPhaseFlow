@@ -360,7 +360,17 @@ double FVM_Grad::_getBoundaryFaceValue_GG(int faceIndex, double cellValue) const
     const auto& face = mesh_.getFaces()[faceIndex];
     if (bcMgr_ && bcMgr_->HasBC(face.physicalGroupId)) {
         auto bc = bcMgr_->GetBCCoefficients(face.physicalGroupId, face.midpoint);
-        if (bc.type == BoundarySetting::BoundaryType::Dirichlet && std::abs(bc.a) > kEpsilon) return bc.c / bc.a;
+        if (bc.type == BoundarySetting::BoundaryType::Dirichlet && std::abs(bc.a) > kEpsilon) {
+            return bc.c / bc.a;
+        }
+        else if (bc.type == BoundarySetting::BoundaryType::Robin) {
+            static bool warned = false;
+            if (!warned) {
+                std::cout << "[FVM_Grad] Info: Robin/Leakoff boundary detected. Explicitly ignored in geometric gradient estimation." << std::endl;
+                warned = true;
+            }
+            return cellValue;
+        }
     }
     return cellValue;
 }

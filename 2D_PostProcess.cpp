@@ -204,6 +204,159 @@ void PostProcess_2D::ExportTecplot(const std::string& filename, double time) con
 }
 
 // ==============================================================================
+// 导出到 ParaView (VTK)
+// ==============================================================================
+void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
+{
+    std::cout << "[PostProcess_2D] Exporting ParaView VTK file: " << filename << " (t=" << time << ")" << std::endl;
+
+    std::ofstream out(filename);
+    if (!out.is_open()) {
+        std::cerr << "[Error] Cannot open file: " << filename << std::endl;
+        return;
+    }
+
+    out << std::scientific << std::setprecision(6);
+    std::vector<std::string> varNames = GetAllUniqueFieldNames();
+
+    const auto& matrixNodes = meshMgr_.mesh().getNodes();
+    const auto& matrixCells = meshMgr_.mesh().getCells();
+    size_t numMatrixNodes = matrixNodes.size();
+    size_t numMatrixCells = matrixCells.size();
+
+    // 建立基岩节点到 0-based 索引的映射 (VTK 必须从 0 开始)
+    std::unordered_map<int, int> nodeID2Index;
+    for (size_t i = 0; i < numMatrixNodes; ++i) {
+        nodeID2Index[matrixNodes[i].id] = static_cast<int>(i);
+    }
+
+    const auto& fractures = meshMgr_.fracture_network().fractures;
+    size_t totalFracCells = 0;
+    for (const auto& frac : fractures) {
+        totalFracCells += frac.elements.size();
+    }
+    // 1D 裂缝在 VTK 中需要独立的物理节点来渲染线段
+    size_t totalFracNodes = totalFracCells * 2;
+
+    size_t totalNodes = numMatrixNodes + totalFracNodes;
+    size_t totalCells = numMatrixCells + totalFracCells;
+
+    // 计算 CELLS 列表的总长度
+    size_t cellListSize = 0;
+    for (const auto& cell : matrixCells) {
+        cellListSize += (1 + cell.CellNodeIDs.size());
+    }
+    cellListSize += totalFracCells * 3; // 裂缝线段: 1(节点数2) + 2(节点索引) = 3
+
+    // 1. VTK Header
+    out << "# vtk DataFile Version 3.0\n";
+    out << "2D-EDFM Simulation Result (Time: " << time << ")\n";
+    out << "ASCII\n";
+    out << "DATASET UNSTRUCTURED_GRID\n";
+
+    // 2. POINTS
+    out << "POINTS " << totalNodes << " double\n";
+    int col = 0;
+    for (const auto& node : matrixNodes) {
+        out << node.coord.m_x << " " << node.coord.m_y << " 0.0 "; // 2D 补齐 Z=0
+        if (++col % 3 == 0) out << "\n";
+    }
+    for (const auto& frac : fractures) {
+        double dx = frac.end.m_x - frac.start.m_x;
+        double dy = frac.end.m_y - frac.start.m_y;
+        for (const auto& cell : frac.elements) {
+            out << (frac.start.m_x + dx * cell.param0) << " " << (frac.start.m_y + dy * cell.param0) << " 0.0 ";
+            if (++col % 3 == 0) out << "\n";
+            out << (frac.start.m_x + dx * cell.param1) << " " << (frac.start.m_y + dy * cell.param1) << " 0.0 ";
+            if (++col % 3 == 0) out << "\n";
+        }
+    }
+    if (col % 3 != 0) out << "\n";
+
+    // 3. CELLS
+    out << "CELLS " << totalCells << " " << cellListSize << "\n";
+    for (const auto& cell : matrixCells) {
+        out << cell.CellNodeIDs.size() << " ";
+        for (int id : cell.CellNodeIDs) {
+            auto it = nodeID2Index.find(id);
+            if (it != nodeID2Index.end()) {
+                out << it->second << " ";
+            }
+            else {
+                // [严格模式] 遇到缺失节点直接报错熔断，绝不掩盖网格拓扑错误
+                out.close();
+                throw std::runtime_error("[PostProcess_2D Error] Node ID " + std::to_string(id) + " not found in Matrix Mesh!");
+            }
+        }
+        out << "\n";
+    }
+
+    size_t fracNodeOffset = numMatrixNodes;
+    for (size_t i = 0; i < totalFracCells; ++i) {
+        out << "2 " << fracNodeOffset << " " << (fracNodeOffset + 1) << "\n";
+        fracNodeOffset += 2;
+    }
+
+    // 4. CELL_TYPES
+    out << "CELL_TYPES " << totalCells << "\n";
+    for (const auto& cell : matrixCells) {
+        size_t n = cell.CellNodeIDs.size();
+        if (n == 3) {
+            out << "5\n";      // VTK_TRIANGLE
+        }
+        else if (n == 4) {
+            out << "9\n";      // VTK_QUAD
+        }
+        else {
+            // [严格模式] 拒绝 2D Matrix 中出现非 3/4 节点的退化或多边形单元，防止导出错误模型
+            out.close();
+            throw std::runtime_error("[PostProcess_2D Error] Invalid matrix cell detected with " + std::to_string(n) + " nodes. Only Triangle (3) and Quad (4) are strictly supported.");
+        }
+    }
+    for (size_t i = 0; i < totalFracCells; ++i) {
+        out << "3\n";                  // VTK_LINE
+    }
+
+    // 5. CELL_DATA (物理场)
+    out << "CELL_DATA " << totalCells << "\n";
+
+    // 隐式域标记 (0: 基岩, 1: 裂缝)
+    out << "SCALARS DomainID int 1\nLOOKUP_TABLE default\n";
+    for (size_t i = 0; i < numMatrixCells; ++i) out << "0\n";
+    for (size_t i = 0; i < totalFracCells; ++i) out << "1\n";
+
+    for (const auto& name : varNames) {
+        out << "SCALARS " << name << " double 1\nLOOKUP_TABLE default\n";
+
+        // [高危修复1] 严格限定写出次数等于 totalCells 的拆分，防溢出和断档
+        auto matField = fieldMgr_.getMatrixScalar(name);
+        if (matField) {
+            for (size_t i = 0; i < numMatrixCells; ++i) {
+                double val = (i < matField->data.size()) ? matField->data[i] : 0.0;
+                out << (std::isfinite(val) ? val : 0.0) << "\n";
+            }
+        }
+        else {
+            for (size_t i = 0; i < numMatrixCells; ++i) out << "0.0\n";
+        }
+
+        auto fracField = fieldMgr_.getFractureScalar(name);
+        if (fracField) {
+            for (size_t i = 0; i < totalFracCells; ++i) {
+                double val = (i < fracField->data.size()) ? fracField->data[i] : 0.0;
+                out << (std::isfinite(val) ? val : 0.0) << "\n";
+            }
+        }
+        else {
+            for (size_t i = 0; i < totalFracCells; ++i) out << "0.0\n";
+        }
+    }
+
+    out.close();
+    std::cout << "[PostProcess_2D] VTK Export completed successfully.\n";
+}
+
+// ==============================================================================
 // 内部辅助函数
 // ==============================================================================
 

@@ -33,6 +33,14 @@ public:
     void ExportTecplot(const std::string& filename, double time = 0.0) const;
 
     /**
+     * @brief 导出全场数据到 ParaView (VTK 格式)
+     * @param filename 输出文件名 (如 "Result_2D.vtk")
+     * @param time 当前模拟时间
+     * @details 自动映射基岩 (Tri/Quad) 和 1D 裂缝 (Line) 到 VTK 的 Unstructured Grid 格式
+     */
+    void ExportVTK(const std::string& filename, double time = 0.0) const;
+
+    /**
      * @brief [FIM 数据降维解耦] 将 2D 自动微分场 (ADVar) 同步为纯双精度标量场 (double)
      * @tparam N 独立自变量的数量 (如单相为2，两相为3)
      * @param fieldMgr 2D 场管理器引用 (非 const，因需创建/修改新场)

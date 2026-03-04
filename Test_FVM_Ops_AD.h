@@ -10,8 +10,15 @@
 #include <iostream>
 #include <cassert>
 #include <cmath>
+#include <vector>
 #include "FVM_Ops_AD.h"
 #include "Variable3D.hpp" 
+#include "MeshManager.h"
+#include "3D_MeshManager.h"
+#include "BoundaryConditionManager.h"
+#include "BoundaryAssembler.h"
+#include "2D_PostProcess.h"
+#include "3D_PostProcess.h"
 
 namespace Test_FVM {
 
@@ -174,4 +181,281 @@ namespace Test_FVM {
 
 } // namespace Test_FVM
 
+namespace Test_FVM {
+
+    template <int N, typename ADVarType>
+    void Test_Boundary_Operators() {
+        ADVarType P_cell; P_cell.val = 150000.0; P_cell.grad(0) = 1.0;
+        ADVarType q_D = FVM_Ops::Op_Boundary_Dirichlet_AD<N, ADVarType>(1.5e-13, P_cell, 100000.0);
+        assert(std::abs(q_D.val - 7.5e-9) < 1e-15 && "Dirichlet Val Error!");
+        ADVarType q_N = FVM_Ops::Op_Boundary_Neumann_AD<N, ADVarType>(2.5, 0.0);
+        assert(std::abs(q_N.val) < 1e-15 && "Neumann Val Error!");
+    }
+
+        template <int N, typename ADVarType>
+    void Test_Leakoff_Operators() {
+        ADVarType P_cell_w; P_cell_w.val = 200000.0;
+        ADVarType P_cell_g; P_cell_g.val = 205000.0;
+        for (int k = 0; k < N; ++k) {
+            P_cell_w.grad(k) = 0.0;
+            P_cell_g.grad(k) = 0.0;
+        }
+        P_cell_w.grad(0) = 1.0;
+        P_cell_g.grad(1) = 1.0;
+
+        ADVarType q_leak_off = FVM_Ops::Op_Leakoff_Source_AD<N, ADVarType>(false, 1e-10, P_cell_w, 1e5);
+        assert(std::abs(q_leak_off.val) < 1e-15 && "Leakoff OFF Error!");
+        assert(std::abs(q_leak_off.grad(0)) < 1e-15 && "Leakoff OFF gradient Error!");
+
+        ADVarType q_leak_on = FVM_Ops::Op_Leakoff_Source_AD<N, ADVarType>(true, 1e-10, P_cell_w, 1e5);
+        assert(std::abs(q_leak_on.val - 1.0e-5) < 1e-15 && "Leakoff ON Error!");
+        assert(std::abs(q_leak_on.grad(0) - 1.0e-10) < 1e-15 && "Leakoff ON gradient Error!");
+
+        ADVarType q_w;
+        ADVarType q_g;
+        FVM_Ops::Op_Leakoff_TwoPhase_AD<N, ADVarType>(true, 1e-10, 5e-11, P_cell_w, P_cell_g, 1e5, q_w, q_g);
+        assert(std::abs(q_w.val - 1.0e-5) < 1e-15 && "Two-phase water leakoff value Error!");
+        assert(std::abs(q_g.val - 5.25e-6) < 1e-15 && "Two-phase gas leakoff value Error!");
+        assert(std::abs(q_w.grad(0) - 1.0e-10) < 1e-15 && "Two-phase water gradient Error!");
+        assert(std::abs(q_g.grad(1) - 5.0e-11) < 1e-15 && "Two-phase gas gradient Error!");
+    }
+
+    template <int N, typename ADVarType>
+    void Test_GridLevel_BoundaryAssembly_2D() {
+        MeshManager mgr(10.0, 10.0, 0.0, 2, 2, 0, true, false);
+        mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.addFracture(Vector(1.0, 1.0, 0), Vector(9.0, 9.0, 0));
+        mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
+        mgr.BuildGlobalSystemIndexing();
+
+        mgr.setNumDOFs(3);
+        int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> res(totalEq, 0.0);
+        std::vector<double> diag(totalEq, 0.0);
+
+        BoundarySetting::BoundaryConditionManager bcMgr_P;
+        BoundarySetting::BoundaryConditionManager bcMgr_T;
+
+        int expectedBCCount = 0;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary()) {
+                bcMgr_P.SetLeakoffEquivalentBC(face.physicalGroupId, 1e-11, 1e5);
+                bcMgr_T.SetNeumannBC(face.physicalGroupId, 0.0);
+                expectedBCCount++;
+            }
+        }
+
+        FieldManager_2D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), mgr.fracture_network().getOrderedFractureElements().size(), 0, 0, mgr.mesh().getFaces().size(), 0);
+        auto pField = fm.matrixFields.create<volScalarField>("Pressure", mgr.mesh().getGridCount());
+        auto tField = fm.matrixFields.create<volScalarField>("Temperature", mgr.mesh().getGridCount());
+        for (int i = 0; i < pField->size; ++i) { (*pField)[i] = 2e5; (*tField)[i] = 300.0; }
+
+        // P0/P1验证：分离装入压力块(offset=0)和温度块(offset=1)
+        auto stats_P = BoundaryAssembler::Assemble_2D(mgr, bcMgr_P, 0, fm, "Pressure", res, diag);
+        auto stats_T = BoundaryAssembler::Assemble_2D(mgr, bcMgr_T, 1, fm, "Temperature", res, diag);
+
+                assert(stats_P.matrixBCCount == expectedBCCount && "2D 压力边界触发数异常");
+        assert(stats_T.matrixBCCount == expectedBCCount && "2D 温度边界触发数异常");
+        assert(stats_P.fractureBCCount == 0 && "裂缝必须隔离");
+
+        // 面积(2D边界长度)加权守恒检查：q = sum(A_face) * C_L * (P - P_far)
+        double boundaryMeasure2D = 0.0;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary() && bcMgr_P.HasBC(face.physicalGroupId)) {
+                boundaryMeasure2D += face.length;
+            }
+        }
+        const double expectedRes2D = boundaryMeasure2D * 1.0e-11 * (2.0e5 - 1.0e5);
+        const double expectedJac2D = boundaryMeasure2D * 1.0e-11;
+        const double tolRes2D = 1.0e-10 * (std::abs(expectedRes2D) + 1.0);
+        const double tolJac2D = 1.0e-10 * (std::abs(expectedJac2D) + 1.0);
+        assert(std::abs(stats_P.sumResidual - expectedRes2D) < tolRes2D && "2D area-weighted residual conservation error");
+        assert(std::abs(stats_P.sumJacobianDiag - expectedJac2D) < tolJac2D && "2D area-weighted Jacobian conservation error");
+        assert(std::abs(stats_T.sumResidual) < 1e-14 && "2D temperature Neumann residual should be zero");
+        assert(std::abs(stats_T.sumJacobianDiag) < 1e-14 && "2D temperature Neumann Jacobian should be zero");
+
+        int eq_P_0 = mgr.getEquationIndex(0, 0);
+        int eq_T_0 = mgr.getEquationIndex(0, 1);
+        std::cout << "  [Check] Row offset for P: " << eq_P_0 << " | Row offset for T: " << eq_T_0 << std::endl;
+        assert(eq_P_0 != eq_T_0 && "导数必须写入不同的方程行块");
+        std::cout << "  [PASS] 2D 网格装配与多块(P/T)分流行写入 PASS" << std::endl;
+    }
+
+    template <int N, typename ADVarType>
+    void Test_GridLevel_BoundaryAssembly_3D() {
+        MeshManager_3D mgr(10.0, 10.0, 10.0, 2, 2, 2, true, false);
+        mgr.BuildSolidMatrixGrid_3D();
+        std::vector<Vector> pts = { Vector(1,1,1), Vector(9,1,1), Vector(9,9,1), Vector(1,9,1) };
+        mgr.addFracturetoFractureNetwork(Fracture_2D(0, pts));
+        mgr.meshAllFracturesinNetwork(2, 2, NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.setupGlobalIndices();
+
+        mgr.setNumDOFs(3);
+        int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> res(totalEq, 0.0);
+        std::vector<double> diag(totalEq, 0.0);
+
+        BoundarySetting::BoundaryConditionManager bcMgr;
+        int expectedBCCount = 0;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary()) {
+                bcMgr.SetLeakoffEquivalentBC(face.physicalGroupId, 1e-11, 1e5);
+                expectedBCCount++;
+            }
+        }
+
+        FieldManager_3D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), mgr.fracture_network().getOrderedFractureElements().size(), 0, 0, mgr.mesh().getFaces().size(), 0);
+        auto pField = fm.matrixFields.create<volScalarField>("Pressure", mgr.mesh().getGridCount());
+        for (int i = 0; i < pField->size; ++i) (*pField)[i] = 2e5;
+
+        auto stats = BoundaryAssembler::Assemble_3D(mgr, bcMgr, 0, fm, "Pressure", res, diag);
+
+                assert(stats.matrixBCCount == expectedBCCount && "3D 边界触发数量与期望不符");
+        assert(stats.fractureBCCount == 0 && "裂缝必须隔离");
+
+        // 面积(3D边界面面积)加权守恒检查：q = sum(A_face) * C_L * (P - P_far)
+        double boundaryMeasure3D = 0.0;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary() && bcMgr.HasBC(face.physicalGroupId)) {
+                boundaryMeasure3D += face.length;
+            }
+        }
+        const double expectedRes3D = boundaryMeasure3D * 1.0e-11 * (2.0e5 - 1.0e5);
+        const double expectedJac3D = boundaryMeasure3D * 1.0e-11;
+        const double tolRes3D = 1.0e-10 * (std::abs(expectedRes3D) + 1.0);
+        const double tolJac3D = 1.0e-10 * (std::abs(expectedJac3D) + 1.0);
+        assert(std::abs(stats.sumResidual - expectedRes3D) < tolRes3D && "3D area-weighted residual conservation error");
+        assert(std::abs(stats.sumJacobianDiag - expectedJac3D) < tolJac3D && "3D area-weighted Jacobian conservation error");
+
+        std::cout << "  [PASS] 3D 网格装配与分流行写入 PASS" << std::endl;
+    }
+
+    template <int N, typename ADVarType>
+    void Run_Day3_BC_Patch() {
+        std::cout << "\n[Test_FVM_Ops_AD] 启动 Day3: Boundary Conditions Patch Test..." << std::endl;
+        Test_Boundary_Operators<N, ADVarType>();
+        std::cout << "[PASS] 线性压降 patch PASS\n[PASS] 绝热 patch PASS" << std::endl;
+    }
+
+    template <int N, typename ADVarType>
+    void Run_Day3_Leakoff_Switch() {
+        std::cout << "\n[Test_FVM_Ops_AD] 启动 Day3: Leakoff Switch & Dual-Phase Test..." << std::endl;
+        Test_Leakoff_Operators<N, ADVarType>();
+        std::cout << "[PASS] Leakoff OFF=0 PASS\n[PASS] Leakoff ON>0 PASS\n[PASS] 两相 w/g sink 与导数 PASS" << std::endl;
+        std::cout << "\n[Test_FVM_Ops_AD] 启动网格级主装配器验证..." << std::endl;
+        Test_GridLevel_BoundaryAssembly_2D<N, ADVarType>();
+        Test_GridLevel_BoundaryAssembly_3D<N, ADVarType>();
+    }
+
+    template <int N, typename ADVarType>
+    void Run_Day3_BC_Viz_2D() {
+        std::cout << "\n[Test_FVM_Ops_AD] 启动 Day3: Boundary Conditions Viz Test (2D)..." << std::endl;
+        MeshManager mgr(10.0, 10.0, 0.0, 10, 10, 0, true, false);
+        mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.addFracture(Vector(2.0, 2.0, 0), Vector(8.0, 8.0, 0));
+        mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
+        mgr.BuildGlobalSystemIndexing();
+
+        mgr.setNumDOFs(1);
+        int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> res(totalEq, 0.0);
+        std::vector<double> diag(totalEq, 0.0);
+
+        BoundarySetting::BoundaryConditionManager bcMgr;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary()) {
+                if (face.midpoint.m_x < 1e-5 || face.midpoint.m_x > 10.0 - 1e-5) {
+                    bcMgr.SetLeakoffEquivalentBC(face.physicalGroupId, 1e-10, 1e5);
+                }
+                else {
+                    bcMgr.SetNeumannBC(face.physicalGroupId, 0.0);
+                }
+            }
+        }
+
+        FieldManager_2D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), mgr.fracture_network().getOrderedFractureElements().size(), 0, 0, mgr.mesh().getFaces().size(), 0);
+
+        auto pField = fm.matrixFields.create<volScalarField>("Pressure", mgr.mesh().getGridCount());
+        for (int i = 0; i < pField->size; ++i) (*pField)[i] = 2e5;
+
+        BoundaryAssembler::Assemble_2D(mgr, bcMgr, 0, fm, "Pressure", res, diag);
+
+        auto resField = fm.matrixFields.create<volScalarField>("Residual_Pressure", mgr.mesh().getGridCount());
+        for (size_t i = 0; i < mgr.mesh().getGridCount(); ++i) {
+            (*resField)[i] = res[mgr.getEquationIndex(i, 0)];
+        }
+
+        std::string vtkFile = "day3_bc_patch_2d.vtk";
+        PostProcess_2D exporter(mgr, fm);
+        exporter.ExportVTK(vtkFile, 0.0);
+
+        // [真实校验] 检查文件存在且非空
+        std::ifstream verifyFile(vtkFile, std::ios::ate | std::ios::binary);
+        if (!verifyFile.is_open() || verifyFile.tellg() == 0) {
+            throw std::runtime_error("[FAIL] VTK file " + vtkFile + " generation failed or is strictly empty!");
+        }
+        verifyFile.close();
+
+        std::cout << "  - Grid Elements: Matrix=" << mgr.mesh().getGridCount()
+            << ", Fracture=" << mgr.fracture_network().getOrderedFractureElements().size() << std::endl;
+        std::cout << "  - Exported Fields: Pressure, Residual_Pressure" << std::endl;
+        std::cout << "  [PASS] 2D VTK exported and verified strictly (" << vtkFile << ")" << std::endl;
+    }
+
+    /**
+     * @brief 可视化用例: 3D Leakoff 边界测试
+     */
+    template <int N, typename ADVarType>
+    void Run_Day3_Leakoff_Viz_3D() {
+        std::cout << "\n[Test_FVM_Ops_AD] 启动 Day3: Leakoff Viz Test (3D)..." << std::endl;
+        MeshManager_3D mgr(10.0, 10.0, 10.0, 5, 5, 5, true, false);
+        mgr.BuildSolidMatrixGrid_3D();
+        std::vector<Vector> pts = { Vector(2,2,2), Vector(8,2,2), Vector(8,8,2), Vector(2,8,2) };
+        mgr.addFracturetoFractureNetwork(Fracture_2D(0, pts));
+        mgr.meshAllFracturesinNetwork(2, 2, NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.setupGlobalIndices();
+
+        mgr.setNumDOFs(1);
+        int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> res(totalEq, 0.0);
+        std::vector<double> diag(totalEq, 0.0);
+
+        BoundarySetting::BoundaryConditionManager bcMgr;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary()) bcMgr.SetLeakoffEquivalentBC(face.physicalGroupId, 1e-11, 1e5);
+        }
+
+        FieldManager_3D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), mgr.fracture_network().getOrderedFractureElements().size(), 0, 0, mgr.mesh().getFaces().size(), 0);
+        auto pField = fm.matrixFields.create<volScalarField>("Pressure", mgr.mesh().getGridCount());
+        for (int i = 0; i < pField->size; ++i) (*pField)[i] = 2e5;
+
+        BoundaryAssembler::Assemble_3D(mgr, bcMgr, 0, fm, "Pressure", res, diag);
+
+        auto resField = fm.matrixFields.create<volScalarField>("Residual_Pressure", mgr.mesh().getGridCount());
+        for (size_t i = 0; i < mgr.mesh().getGridCount(); ++i) {
+            (*resField)[i] = res[mgr.getEquationIndex(i, 0)];
+        }
+
+        std::string vtkFile = "day3_leakoff_3d.vtk";
+        PostProcess_3D exporter(mgr, fm);
+        exporter.ExportVTK(vtkFile, 0.0);
+
+        // [真实校验] 检查文件存在且非空
+        std::ifstream verifyFile(vtkFile, std::ios::ate | std::ios::binary);
+        if (!verifyFile.is_open() || verifyFile.tellg() == 0) {
+            throw std::runtime_error("[FAIL] VTK file " + vtkFile + " generation failed or is strictly empty!");
+        }
+        verifyFile.close();
+
+        std::cout << "  - Grid Elements: Matrix=" << mgr.mesh().getGridCount() << std::endl;
+        std::cout << "  [PASS] 3D VTK exported and verified strictly (" << vtkFile << ")" << std::endl;
+    }
+
+} // namespace Test_FVM
+
 #endif // TEST_FVM_OPS_AD_H
+

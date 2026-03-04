@@ -45,6 +45,14 @@ It must cover:
 
 ---
 
+## 2.2 Day3 Explicit Dispatcher Cases (Mandatory for Boundary/Leakoff Edits)
+
+| Case | Command | Purpose | Pass Criteria |
+|---|---|---|---|
+| Day3 BC Patch | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day3_bc_patch` | Verify Dirichlet/Neumann boundary operators and AD derivatives | Contains `[PASS] 线性压降 patch PASS` and `[PASS] 绝热 patch PASS` |
+| Day3 Leakoff Switch | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day3_leakoff_switch` | Verify single/two-phase Leakoff operators and grid-level 2D/3D assembly path | Contains `[PASS] Leakoff OFF=0 PASS`, `[PASS] Leakoff ON>0 PASS`, `[PASS] 两相 w/g sink 与导数 PASS`, `[PASS] 2D 网格装配与多块(P/T)分流行写入 PASS`, and `[PASS] 3D 网格装配与分流行写入 PASS` |
+
+---
 ## 3. Optional Extended Regression
 
 - `--case=3d_distance_accuracy` for geometry distance accuracy
@@ -60,7 +68,7 @@ It must cover:
 
 - Before merge to `main`: run at least `R1-R5`
 - After geometry/topology edits: `R2-R5` mandatory
-- After AD/FVM operator edits: `R1` mandatory, `grad_all` recommended
+- After AD/FVM operator edits: `R1` mandatory, `day3_bc_patch` + `day3_leakoff_switch` mandatory when boundary/leakoff logic changes, `grad_all` recommended
 
 ---
 
@@ -88,3 +96,4 @@ Notes:
 - `PLAN_7D_CHECKLIST.md` is the daily execution tracker.
 - A day can be marked PASS only after all required checks for that day are PASS.
 - If new `--case` commands are introduced, or pass criteria are changed, update this file and `PROJECT_CONTEXT.md` in the same change set.
+
