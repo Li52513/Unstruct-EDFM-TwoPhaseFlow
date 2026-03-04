@@ -4,9 +4,9 @@
 
 | Item | Value |
 |---|---|
-| Last Updated | 2026-03-04 (Asia/Shanghai, dispatcher+regression baseline updated) |
+| Last Updated | 2026-03-04 (Asia/Shanghai, day1 explicit dispatcher cases added) |
 | Git Branch | `main` |
-| Git Commit | `1b74f9c (dirty working tree)` |
+| Git Commit | `f075501 (dirty working tree)` |
 | Owner / Maintainer | Yongwei (请按实际维护人更新) |
 | Project Root | `2D-Unstr-Quadrilateral-EDFM` |
 | Current Entry Mode | `main.cpp` 已支持参数化 dispatcher（`--case=...` / `--list` / `--help`） |
@@ -147,6 +147,9 @@
   - `--list`：列出全部可运行 case
   - `--case=<name>` 或 `--case <name>`：运行指定 case
   - `--help`：输出用法与 case 列表
+- Day1 显式验收入口：
+  - `--case=day1_arch_conn`：串行执行 R4(`trans_2d`) + R5(`trans_3d`)
+  - `--case=day1_arch_conn_repro`：执行 `trans_2d x2 + trans_3d x2` 用于可复现性检查
 - 结论：`main.cpp` 已从“注释开关板”升级为可脚本化的 case dispatcher。
 
 ### 4.2 典型调用链（3D 几何+耦合）
@@ -228,14 +231,12 @@ flowchart TD
 - Visual Studio v143 / MSBuild
 - Eigen
 - Gmsh (`gmsh.lib`)
-- CoolProp (`CoolProp.lib`)
 - OpenMP
 
 工程文件内示例路径（本机配置）：
 
 - Gmsh include/lib: `D:\1gmesh\gmsh-source\...`
 - Eigen: `D:\1Eigen\eigen-5.0.0\...`
-- CoolProp: `D:\1CoolProp\CoolPropStaticLibrary\...`
 
 ---
 
@@ -268,6 +269,8 @@ msbuild .\2D-Unstr-Quadrilateral-EDFM.sln /p:Configuration=Debug /p:Platform=x64
 - 运行指定 case（示例）：
 
 ```powershell
+.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day1_arch_conn
+.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day1_arch_conn_repro
 .\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=2d_edfm_dfn
 .\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=trans_3d
 ```

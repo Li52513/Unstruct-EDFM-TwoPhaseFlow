@@ -25,43 +25,43 @@ Evidence:
 
 ## Day 1 - Architecture Freeze and Connection Consistency
 
-Status: `[ ]`
+Status: `[x]`
 
 Implementation checklist:
-- [ ] Freeze DOF mapping conventions for single-phase and two-phase paths
-- [ ] Unify MM/FI/NNC/FF connection key and deterministic ordering
-- [ ] Freeze connection stats output format (CI-friendly)
+- [x] Freeze DOF mapping conventions for single-phase and two-phase paths
+- [x] Unify MM/FI/NNC/FF connection key and deterministic ordering
+- [x] Freeze connection stats output format (CI-friendly)
 
 Strict acceptance gates:
-- [ ] R4 PASS (2D transmissibility + FIM conservation)
-- [ ] R5 PASS (3D transmissibility + FIM conservation)
-- [ ] Connection stats are reproducible for same input
+- [x] R4 PASS (2D transmissibility + FIM conservation)
+- [x] R5 PASS (3D transmissibility + FIM conservation)
+- [x] Connection stats are reproducible for same input
 
 Evidence (fill):
-- Commit:
-- Logs:
-- Verdict: PASS / FAIL
+- Commit: dirty working tree (uncommitted)
+- Logs: --case=day1_arch_conn, --case=day1_arch_conn_repro
+- Verdict: PASS
 
 ---
 
 ## Day 2 - Potential, Upwind, and Phase-Flux Kernel
 
-Status: `[ ]`
+Status: `[x]`
 
 Implementation checklist:
-- [ ] Finalize potential-difference interface (including gravity)
-- [ ] Finalize upwind-by-potential logic with correct AD derivative direction
-- [ ] Integrate two-phase phase-flux assembly on shared kernel
+- [x] Finalize potential-difference interface (including gravity)
+- [x] Finalize upwind-by-potential logic with correct AD derivative direction
+- [x] Integrate two-phase phase-flux assembly on shared kernel
 
 Strict acceptance gates:
-- [ ] R1 PASS (FVM-AD operator tests)
-- [ ] `--case=grad_all` PASS
-- [ ] No non-physical net flow in hydrostatic/gravity equilibrium case
+- [x] R1 PASS (FVM-AD operator tests)
+- [x] `--case=grad_all` PASS
+- [x] No non-physical net flow in hydrostatic/gravity equilibrium case
 
 Evidence (fill):
-- Commit:
-- Logs:
-- Verdict: PASS / FAIL
+- Commit: dirty working tree (manual run, uncommitted)
+- Logs: --case=day2_fvm_ad, --case=grad_all
+- Verdict: PASS
 
 ---
 
@@ -174,5 +174,5 @@ Evidence (fill):
 
 | Date | Day | Owner | Commit | Required Checks | Result | Notes |
 |---|---|---|---|---|---|---|
+| 2026-03-04 | Day 2 | Yongwei | dirty working tree | R1 + grad_all + hydrostatic gate | PASS | Day2 FVM-AD suite all PASS; 2D/3D grad patch tests PASS |
 | YYYY-MM-DD | Day N |  |  | R? / case? | PASS/FAIL |  |
-

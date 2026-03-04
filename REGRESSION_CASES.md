@@ -36,12 +36,23 @@ It must cover:
 
 ---
 
+## 2.1 Day1 Explicit Dispatcher Cases (Recommended)
+
+| Case | Command | Purpose | Pass Criteria |
+|---|---|---|---|
+| Day1 Gate | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day1_arch_conn` | Run Day1 main gate in one command (R4 + R5) | Both 2D and 3D conservation PASS lines appear |
+| Day1 Repro Gate | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day1_arch_conn_repro` | Run reproducibility sequence (`trans_2d x2 + trans_3d x2`) | Aggregation stats are consistent across repeated runs |
+
+---
+
 ## 3. Optional Extended Regression
 
 - `--case=3d_distance_accuracy` for geometry distance accuracy
 - `--case=3d_nnc_ff_static` for static NNC/FF analytic consistency
 - `--case=property_sweep` for CO2/water property sweep stability
 - `--case=grad_all` for 2D/3D gradient operator checks
+- `--case=day1_arch_conn` for one-shot Day1 gate
+- `--case=day1_arch_conn_repro` for one-shot Day1 reproducibility check
 
 ---
 
