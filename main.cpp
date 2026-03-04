@@ -1,17 +1,16 @@
+#include "3D_Improved_EDFM_test.h"
+#include "2D_EDFM_test.h"
+#include "2D_EDFM_MeshTest_Benchmark.h"
 
-#include    "3D_Improved_EDFM_test.h"
-#include    "2D_EDFM_test.h"
-#include    "2D_EDFM_MeshTest_Benchmark.h"
+#include "3D_TwistFracIntersectionTest.h"
+#include "3D_EDFM_GeomTest.h"
+#include "3D_EDFM_MeshTest_Benchmark.h"
+#include "3D_EDFM_Transmissibility_test.h"
+#include "3D_InitializerTest.h"
+#include "3D_InitializerTest_multiFrac.h"
+#include "3D_PropTest_HD.h"
 
-#include    "3D_TwistFracIntersectionTest.h"
-#include	"3D_EDFM_GeomTest.h"
-#include    "3D_EDFM_MeshTest_Benchmark.h"
-#include    "3D_EDFM_Transmissibility_test.h"
-#include    "3D_InitializerTest.h"
-#include    "3D_InitializerTest_multiFrac.h"
-#include    "3D_PropTest_HD.h"
-
-#include    "3D_BoundarySetup_Test.h"
+#include "3D_BoundarySetup_Test.h"
 
 #include "test_FVM_Grad_Benchmark.h"
 #include "Test_DOFMapper.h"
@@ -22,129 +21,176 @@
 
 #include "test_Transmissibility_2D.h"
 #include "test_Transmissibility_3D.h"
-#include "Test_FVM_Ops_AD.h"  // <--- 【1】包含 Day 2 测试排雷器
-#include "ADVar.hpp"          // 确保自动微分核心库被包含 (如果有用到)
+#include "Test_FVM_Ops_AD.h"
+#include "ADVar.hpp"
 
-int main()
-{
-    // =========================================================
-    // 【Day 2 专项测试】: 算子排雷与 CI 验证
-    // =========================================================
-    // 这里以 N=3 (如：P, Sw, T 三个自由度) 为例实例化 ADVar
-    // 泛型参数 <3, ADVar<3>> 将自动适配你项目中的自动微分体系
-    std::cout << "\n=======================================" << std::endl;
-    std::cout << ">>> 正在执行 Day 2: FVM-AD 离散算子验收测试 <<<" << std::endl;
-    std::cout << "=======================================\n" << std::endl;
+#include <exception>
+#include <functional>
+#include <iostream>
+#include <string>
+#include <vector>
 
+namespace {
+struct CaseEntry {
+    const char* name;
+    const char* desc;
+    std::function<int()> run;
+};
+
+int RunDay2FvmAd() {
+    std::cout << "\n=======================================\n";
+    std::cout << ">>> Running Day2: FVM-AD operator tests <<<\n";
+    std::cout << "=======================================\n\n";
     Test_FVM::Run_All_Day2_Tests<3, ADVar<3>>();
-
-    std::cout << "\n>>> Day 2 验收测试执行完毕，准备继续原有流程... <<<\n" << std::endl;
-    // =========================================================
-    // 
-    // =========================================================
-    // 【Chapter1】EDFM裂缝网格快速生成方法
-    // =========================================================
-    
-    //return EDFM_test_2D();                            //全流程测试包含单根裂缝的2D_EDFM四种加速算法的性能                      结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\2D_EDFM\SingleFrac_Test
-     
-    //return EDFM_DFN_test_2D();                        //全流程测试包含DFN的2D_EDFM四种加速算法的性能                           结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\2D_EDFM\DFN_Test
-    
-    //return TwistFracIntersectionTest_3D();            //3D_EDFM中扭曲裂缝相交测试
-
-    //return Improved_EDFM_test_3D();                   //全流程测试3D_Improved_EDFM四种加速算法的性能以及交互多边形生成的准确性  结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\MeshTest\3D_EDFM
-
-    //return RunBenchmark_Step1_Distance_Accuracy();    //测试3D_EDFM中基岩网格单元到裂缝交互单元的距离d的准确性
-    
-    //RunBenchmark_Transmissibility_Static();           //测试 NNC 和 FF 的静态传导率 (Flow & Heat) 是否符合解析解
-    //return 0;
-
-    //return EDFM_DFN_Geomtest_2D();
-    //return Improved_3D_EDFM_MeshTest();
-
-    // =========================================================
-    // 【Chapter2】EDFM-超临界CO2单相渗流换热模拟研究
-    // =========================================================
-    //RunTest_Initialization_And_Viz();                 //测试包含单根裂缝的初始化场的可视化验证                               结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
-    
-    //RunTest_DFN_Initialization_And_Viz();             //测试包含DFN网络的初始化场的可视化验证                                结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\FieldOperator 通过tecplot进行可视化
-
-    //RunTest_Property_Accuracy_Sweep();                //测试物性计算准确性扫描 (One-by-One Verify)                           结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\PropertyTest 通过Property_Accuracy_Sweep_HD.csv来表征
-
-    //RunTest_BoundaryCondition_Export();					 //测试3D_EDFM中边界条件设置的正确性,保持均匀分布                                   结果与可视化脚本置于：\2D-Unstr-Quadrilateral-EDFM\Test\BoundaryConditionSetup    
-    //return 0;
-
-    ////测试梯度算子
-    //     run_Benchmark_2D_EDFM_Grad();
-    //     run_Benchmark_3D_EDFM_Grad();
-    //     // 2. 进阶工况 A: 二次非线性场 (Quadratic)
-    //    // P = x^2 + y^2 + z^2
-    //    // Grad = (2x, 2y, 2z)
-    //     run_Advanced_Accuracy_Test(
-    //         "Case A: Quadratic Field (P = x^2 + y^2 + z^2)",
-    //         [](const Vector& p) { return p.m_x * p.m_x + p.m_y * p.m_y + p.m_z * p.m_z; },
-    //         [](const Vector& p) { return Vector(2.0 * p.m_x, 2.0 * p.m_y, 2.0 * p.m_z); },
-    //         true // expect non-zero error
-    //     );
-
-    //     // 3. 进阶工况 B: 交叉项场 (Cross-term)
-    //     // P = xy + yz
-    //     // Grad = (y, x+z, y)
-    //     // 这也是二次的，但包含耦合项
-    //     run_Advanced_Accuracy_Test(
-    //         "Case B: Mixed Quadratic (P = xy + yz)",
-    //         [](const Vector& p) { return p.m_x * p.m_y + p.m_y * p.m_z; },
-    //         [](const Vector& p) { return Vector(p.m_y, p.m_x + p.m_z, p.m_y); },
-    //         true
-    //     );
-
-    //     // 4. 进阶工况 C: 三角函数场 (Trigonometric)
-    //     // P = sin(x) + cos(y)
-    //     // Grad = (cos(x), -sin(y), 0)
-    //     run_Advanced_Accuracy_Test(
-    //         "Case C: Trigonometric (P = sin(x) + cos(y))",
-    //         [](const Vector& p) { return std::sin(p.m_x) + std::cos(p.m_y); },
-    //         [](const Vector& p) { return Vector(std::cos(p.m_x), -std::sin(p.m_y), 0.0); },
-    //         true
-    //     );
-
-    // return 0;
-
-    //测试DOFmap
-    //RunDOFMapperVerification();
-    //return 0;
-
-	//测试ADVar
-   /* Run_ADVar_Comprehensive_Tests();
-    return 0;*/
-    //return  EDFM_withFracture_Geomtry(); 
-    //return run_IMPES_Iteration_TwoPhase_WellCase();
-    //return SinglePhase_CO2_TH_withWell_reviese();
-    //RunBenchmark_3D_PropTest();
-    //run_fluid_evaluator_test();
-
-    //RunBenchmark_ComplexFractureNetwork();
-    // return 0;
-   
-	//测试2D和3D传导率计算的性能和准确性
-    //try {
-    //    std::cout << "Starting Transmissibility Solvers Benchmarking..." << std::endl;
-
-    //    // 1. 运行 2D 传导率基准测试
-    //    // 默认输出文件名为: Transmissibility_2D_Benchmark.csv
-    //    Benchmark2D::run_TransmissibilityBenchmark_2D();
-
-    //    std::cout << "\n-------------------------------------------\n" << std::endl;
-
-    //    // 2. 运行 3D 传导率基准测试
-    //    // 默认输出文件名为: Transmissibility_3D_Benchmark.csv
-    //    Benchmark3D::run_TransmissibilityBenchmark_3D();
-
-    //    std::cout << "\nAll benchmarks completed successfully!" << std::endl;
-    //}
-    //catch (const std::exception& e) {
-    //    std::cerr << "Test failed with error: " << e.what() << std::endl;
-    //    return 1;
-    //}
-
     return 0;
 }
+
+int RunDay1ArchitectureFreeze() {
+    std::cout << "\n===============================================\n";
+    std::cout << ">>> Running Day1: Architecture/Connection checks <<<\n";
+    std::cout << "=== includes: R4(trans_2d) + R5(trans_3d) ===\n\n";
+
+    Benchmark2D::run_TransmissibilityBenchmark_2D();
+    std::cout << "\n-------------------------------------------\n" << std::endl;
+    Benchmark3D::run_TransmissibilityBenchmark_3D();
+
+    std::cout << "\n[Day1] Completed R4 + R5 sequence.\n";
+    return 0;
+}
+
+int RunDay1ArchitectureFreezeRepro() {
+    std::cout << "\n=========================================================\n";
+    std::cout << ">>> Running Day1 Repro: same-input repeated sequence <<<\n";
+    std::cout << "=== trans_2d x2 + trans_3d x2 (for log reproducibility) ===\n\n";
+
+    Benchmark2D::run_TransmissibilityBenchmark_2D();
+    std::cout << "\n[Day1-Repro] Repeat trans_2d...\n";
+    Benchmark2D::run_TransmissibilityBenchmark_2D();
+
+    std::cout << "\n-------------------------------------------\n" << std::endl;
+
+    Benchmark3D::run_TransmissibilityBenchmark_3D();
+    std::cout << "\n[Day1-Repro] Repeat trans_3d...\n";
+    Benchmark3D::run_TransmissibilityBenchmark_3D();
+
+    std::cout << "\n[Day1-Repro] Completed repeated sequence.\n";
+    return 0;
+}
+
+void PrintUsage(const char* exeName) {
+    std::cout << "Usage:\n";
+    std::cout << "  " << exeName << " --list\n";
+    std::cout << "  " << exeName << " --case=<case_name>\n";
+    std::cout << "  " << exeName << " --case <case_name>\n";
+    std::cout << "  " << exeName << " --help\n";
+}
+
+void PrintCases(const std::vector<CaseEntry>& cases) {
+    std::cout << "Available cases:\n";
+    for (const auto& entry : cases) {
+        std::cout << "  - " << entry.name << " : " << entry.desc << '\n';
+    }
+}
+} // namespace
+
+int main(int argc, char** argv) {
+    const std::vector<CaseEntry> cases = {
+        {"day1_arch_conn", "Day1 explicit gate: run R4(trans_2d) + R5(trans_3d)", []() { return RunDay1ArchitectureFreeze(); }},
+        {"day1_arch_conn_repro", "Day1 reproducibility gate: trans_2d x2 + trans_3d x2", []() { return RunDay1ArchitectureFreezeRepro(); }},
+        {"day2_fvm_ad", "Day2 FVM-AD operator acceptance tests (default)", []() { return RunDay2FvmAd(); }},
+        {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
+        {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
+        {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
+        {"3d_twist_intersection", "3D twisted-fracture intersection test", []() { return TwistFracIntersectionTest_3D(); }},
+        {"3d_edfm_improved", "3D improved EDFM end-to-end test", []() { return Improved_EDFM_test_3D(); }},
+        {"3d_distance_accuracy", "3D matrix-to-fracture distance accuracy benchmark", []() { return RunBenchmark_Step1_Distance_Accuracy(); }},
+        {"3d_nnc_ff_static", "3D static transmissibility check for NNC/FF", []() { RunBenchmark_Transmissibility_Static(); return 0; }},
+        {"3d_mesh_benchmark", "3D EDFM mesh/geometry benchmark suite", []() { return Improved_3D_EDFM_MeshTest(); }},
+        {"init_single_frac", "3D initializer visualization test (single fracture)", []() { RunTest_Initialization_And_Viz(); return 0; }},
+        {"init_dfn", "3D initializer visualization test (DFN)", []() { RunTest_DFN_Initialization_And_Viz(); return 0; }},
+        {"property_sweep", "3D CO2/water property accuracy sweep", []() { RunTest_Property_Accuracy_Sweep(); return 0; }},
+        {"boundary_export", "3D boundary-tag setup/export verification", []() { RunTest_BoundaryCondition_Export(); return 0; }},
+        {"grad_2d", "2D gradient operator benchmark", []() { run_Benchmark_2D_EDFM_Grad(); return 0; }},
+        {"grad_3d", "3D gradient operator benchmark", []() { run_Benchmark_3D_EDFM_Grad(); return 0; }},
+        {"grad_all", "2D + 3D gradient operator benchmarks", []() { run_Benchmark_2D_EDFM_Grad(); run_Benchmark_3D_EDFM_Grad(); return 0; }},
+        {"dof_mapper", "DOF mapper verification", []() { RunDOFMapperVerification(); return 0; }},
+        {"advar", "ADVar comprehensive tests", []() { Run_ADVar_Comprehensive_Tests(); return 0; }},
+        {"prop_init_3d", "3D property+initializer benchmark", []() { RunBenchmark_3D_PropTest(); return 0; }},
+        {"fluid_eval", "AD fluid evaluator tests", []() { run_fluid_evaluator_test(); return 0; }},
+        {"complex_frac_benchmark", "3D complex fracture network benchmark", []() { RunBenchmark_ComplexFractureNetwork(); return 0; }},
+        {"trans_2d", "2D transmissibility benchmark (MM/FI/NNC/FF)", []() { Benchmark2D::run_TransmissibilityBenchmark_2D(); return 0; }},
+        {"trans_3d", "3D transmissibility benchmark (MM/FI/NNC/FF)", []() { Benchmark3D::run_TransmissibilityBenchmark_3D(); return 0; }},
+        {"trans_all", "2D + 3D transmissibility benchmarks", []() { Benchmark2D::run_TransmissibilityBenchmark_2D(); Benchmark3D::run_TransmissibilityBenchmark_3D(); return 0; }},
+    };
+
+    bool showHelp = false;
+    bool showList = false;
+    std::string caseName;
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") {
+            showHelp = true;
+            continue;
+        }
+        if (arg == "--list") {
+            showList = true;
+            continue;
+        }
+        if (arg == "--case") {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --case requires a value.\n";
+                return 2;
+            }
+            caseName = argv[++i];
+            continue;
+        }
+        if (arg.rfind("--case=", 0) == 0) {
+            caseName = arg.substr(7);
+            continue;
+        }
+
+        std::cerr << "Unknown argument: " << arg << '\n';
+        PrintUsage(argv[0]);
+        return 2;
+    }
+
+    if (showHelp) {
+        PrintUsage(argv[0]);
+        std::cout << '\n';
+        PrintCases(cases);
+        return 0;
+    }
+
+    if (showList) {
+        PrintCases(cases);
+        return 0;
+    }
+
+    if (caseName.empty()) {
+        caseName = "day2_fvm_ad";
+        std::cout << "[Info] no --case provided. Using default: " << caseName << '\n';
+    }
+
+    for (const auto& entry : cases) {
+        if (caseName == entry.name) {
+            std::cout << "[Case] " << entry.name << " - " << entry.desc << "\n";
+            try {
+                return entry.run();
+            }
+            catch (const std::exception& e) {
+                std::cerr << "[Error] exception: " << e.what() << '\n';
+                return 1;
+            }
+            catch (...) {
+                std::cerr << "[Error] unknown exception.\n";
+                return 1;
+            }
+        }
+    }
+
+    std::cerr << "Unknown case: " << caseName << "\n\n";
+    PrintCases(cases);
+    return 2;
+}
+
