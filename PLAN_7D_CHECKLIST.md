@@ -89,22 +89,22 @@ Evidence (fill):
 
 ## Day 4 - Well Model and Injection/Production Control (WAG Base)
 
-Status: `[ ]`
+Status: `[x]`
 
 Implementation checklist:
-- [ ] Integrate well terms (BHP/Rate) consistently into grid equations
-- [ ] Verify coupled response with leakoff on/off
-- [ ] Build switchable schedule control skeleton for WAG extension
+- [x] Integrate well terms (BHP/Rate) consistently into grid equations
+- [x] Verify coupled response with leakoff on/off
+- [x] Build switchable schedule control skeleton for WAG extension
 
 Strict acceptance gates:
-- [ ] Single-well pressure response is physically consistent
-- [ ] Leakoff on/off trend is correct and explainable
-- [ ] At least one of R4/R5 PASS (depending on impact scope)
+- [x] Single-well pressure response is physically consistent
+- [x] Leakoff on/off trend is correct and explainable
+- [x] At least one of R4/R5 PASS (depending on impact scope)
 
 Evidence (fill):
-- Commit:
-- Logs:
-- Verdict: PASS / FAIL
+- Commit: d9ddb9e (dirty working tree)
+- Logs: `--case=day4_well_patch`, `--case=day4_well_viz`, `--case=trans_2d`, `--case=trans_3d`
+- Verdict: PASS
 
 ---
 
@@ -177,4 +177,5 @@ Evidence (fill):
 |---|---|---|---|---|---|---|
 | 2026-03-04 | Day 2 | Yongwei | dirty working tree | R1 + grad_all + hydrostatic gate | PASS | Day2 FVM-AD suite all PASS; 2D/3D grad patch tests PASS |
 | 2026-03-04 | Day 3 | Yongwei | dirty working tree | day3_bc_patch + day3_leakoff_switch + day3_viz | PASS | BC patch + Leakoff OFF/ON + two-phase AD + 2D/3D grid-level assembly PASS; VTK export PASS; area-weighted boundary residual pattern observed |
+| 2026-03-05 | Day 4 | Yongwei | d9ddb9e (dirty working tree) | day4_well_patch + day4_well_viz + trans_2d + trans_3d | PASS | 6 Day4 PASS lines present; 2D/3D VTK exported to fixed paths; trans_2d/trans_3d PASS; no Error/Exception/Fatal |
 | YYYY-MM-DD | Day N |  |  | R? / case? | PASS/FAIL |  |

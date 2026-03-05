@@ -165,6 +165,41 @@ namespace FVM_Ops {
         q_g_out = C_L_g * (P_cell_g - P_farfield);
     }
 
+    /**
+     * @brief 定井底流压 (BHP) 井源项算子 (Outflow positive)
+     * @param well_conductance 井指数与流度密度的乘积 (WI * rho * k_r / mu)
+     * @param P_cell 网格中心压力 (ADVar)
+     * @param P_bhp 目标井底流压 (Constant)
+     */
+    template <int N, typename ADVarType>
+    inline ADVarType Op_Well_BHP_Source_AD(double well_conductance, const ADVarType& P_cell, double P_bhp) {
+        return well_conductance * (P_cell - P_bhp);
+    }
+
+    /**
+         * @brief 定流量 (Rate) 井源项算子 (Outflow positive)
+         * @param q_target 目标流量 (采出为正，注入为负)
+         * @note 导数显式置为 0，因为恒定流量对中心网格压力的偏导为零
+         */
+    template <int N, typename ADVarType>
+    inline ADVarType Op_Well_Rate_Source_AD(double q_target) {
+        // [Patch 8] 显式初始化后再赋值
+        ADVarType q_mass;
+        q_mass.val = q_target;
+        for (int i = 0; i < N; ++i) {
+            q_mass.grad(i) = 0.0;
+        }
+        return q_mass;
+    }
+
+    /**
+     * @brief 能量方程井源项算子
+     */
+    template <int N, typename ADVarType>
+    inline ADVarType Op_Well_Energy_Source_AD(const ADVarType& q_mass_w, double h_w, const ADVarType& q_mass_g, double h_g) {
+        return (q_mass_w * h_w) + (q_mass_g * h_g);
+    }
+
 } // namespace FVM_Ops
 
 #endif // FVM_OPS_AD_H

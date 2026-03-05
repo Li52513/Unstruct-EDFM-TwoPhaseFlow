@@ -11,6 +11,9 @@
 #include <cassert>
 #include <cmath>
 #include <vector>
+#include <fstream>
+#include <cstdio>
+#include <stdexcept>
 #include "FVM_Ops_AD.h"
 #include "Variable3D.hpp" 
 #include "MeshManager.h"
@@ -19,6 +22,8 @@
 #include "BoundaryAssembler.h"
 #include "2D_PostProcess.h"
 #include "3D_PostProcess.h"
+#include "SolverContrlStrName_op.h"
+#include "Well_WellScheduleManager.h"
 
 namespace Test_FVM {
 
@@ -348,8 +353,694 @@ namespace Test_FVM {
         Test_GridLevel_BoundaryAssembly_2D<N, ADVarType>();
         Test_GridLevel_BoundaryAssembly_3D<N, ADVarType>();
     }
-
+    /**
+     * @brief Day4: 井算子单元测试 (BHP/Rate)
+     */
     template <int N, typename ADVarType>
+    void Test_Well_Operators_2D() {
+        ADVarType P_cell;
+        P_cell.val = 2.0e5;
+        for (int k = 0; k < N; ++k) P_cell.grad(k) = 0.0;
+        P_cell.grad(0) = 1.0;
+
+        const double conductance = 2.0e-6;
+        ADVarType q_prod = FVM_Ops::Op_Well_BHP_Source_AD<N, ADVarType>(conductance, P_cell, 1.0e5);
+        assert(q_prod.val > 0.0 && "BHP producer must be outflow positive");
+        assert(q_prod.grad(0) > 0.0 && "BHP derivative dQ/dP must be positive");
+
+        ADVarType q_inj = FVM_Ops::Op_Well_BHP_Source_AD<N, ADVarType>(conductance, P_cell, 3.0e5);
+        assert(q_inj.val < 0.0 && "BHP injector must be negative outflow");
+        assert(q_inj.grad(0) > 0.0 && "BHP derivative dQ/dP must remain positive");
+
+        ADVarType q_rate = FVM_Ops::Op_Well_Rate_Source_AD<N, ADVarType>(-5.0);
+        assert(std::abs(q_rate.val + 5.0) < 1e-12 && "Rate value mismatch");
+        for (int k = 0; k < N; ++k) {
+            assert(std::abs(q_rate.grad(k)) < 1e-12 && "Rate derivative must be zero");
+        }
+
+        std::cout << "  [PASS] WI/BHP/Rate operator signs & Jacobian checks" << std::endl;
+    }
+
+    /**
+     * @brief Day4: 2D 井装配 + Leakoff ON/OFF 趋势测试
+     */
+    template <int N, typename ADVarType>
+    void Test_Well_Assembly_2D_LeakoffTrend() {
+        MeshManager mgr(10.0, 10.0, 0.0, 4, 4, 0, true, false);
+        mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.addFracture(Vector(1.0, 1.0, 0.0), Vector(9.0, 9.0, 0.0));
+        mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
+        mgr.BuildGlobalSystemIndexing();
+        mgr.setNumDOFs(3);
+
+        const int nMat = mgr.getMatrixDOFCount();
+        const int nFrac = static_cast<int>(mgr.fracture_network().getOrderedFractureElements().size());
+        assert(nFrac > 0 && "Day4 requires at least one fracture element for completion mapping");
+
+        FieldManager_2D fm;
+        fm.InitSizes(
+            mgr.mesh().getGridCount(),
+            nFrac,
+            0,
+            0,
+            mgr.mesh().getFaces().size(),
+            0
+        );
+
+        const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
+        const PhysicalProperties_string_op::Rock rock;
+        const PhysicalProperties_string_op::Water water;
+        const PhysicalProperties_string_op::CO2 gas;
+
+        auto pMat = fm.getOrCreateMatrixScalar(pCfg.pressure_field, 2.0e5);
+        auto kxxMat = fm.getOrCreateMatrixScalar(rock.k_xx_tag, 1.0e-13);
+        auto kyyMat = fm.getOrCreateMatrixScalar(rock.k_yy_tag, 1.0e-13);
+        auto mobWMat = fm.getOrCreateMatrixScalar("mob_density_w", 1.2);
+        auto mobGMat = fm.getOrCreateMatrixScalar("mob_density_g", 0.5);
+        auto hWMat = fm.getOrCreateMatrixScalar(water.h_tag, 1.0e5);
+        auto hGMat = fm.getOrCreateMatrixScalar(gas.h_tag, 2.0e5);
+
+        auto pFrac = fm.getOrCreateFractureScalar(pCfg.pressure_field, 2.2e5);
+        auto mobWFrac = fm.getOrCreateFractureScalar("mob_density_w", 1.0);
+        auto mobGFrac = fm.getOrCreateFractureScalar("mob_density_g", 0.2);
+        auto hWFrac = fm.getOrCreateFractureScalar(water.h_tag, 1.1e5);
+        auto hGFrac = fm.getOrCreateFractureScalar(gas.h_tag, 2.1e5);
+
+        (void)pMat; (void)kxxMat; (void)kyyMat; (void)mobWMat; (void)mobGMat; (void)hWMat; (void)hGMat;
+        (void)pFrac; (void)mobWFrac; (void)mobGFrac; (void)hWFrac; (void)hGFrac;
+
+        WellScheduleStep stepMatrix;
+        stepMatrix.t_start = 0.0;
+        stepMatrix.t_end = 100.0;
+        stepMatrix.well_name = "WELL_MAT_BHP";
+        stepMatrix.domain = WellTargetDomain::Matrix;
+        stepMatrix.control_mode = WellControlMode::BHP;
+        stepMatrix.target_value = 1.5e5;
+        stepMatrix.component_mode = WellComponentMode::Total;
+        stepMatrix.rw = 0.1;
+        stepMatrix.skin = 0.0;
+        stepMatrix.well_axis = WellAxis::None;
+        stepMatrix.completion_id = 0;
+        stepMatrix.wi_override = -1.0;
+        stepMatrix.L_override = -1.0;
+        stepMatrix.frac_w = 0.6;
+        stepMatrix.frac_g = 0.4;
+
+        WellScheduleStep stepFrac;
+        stepFrac.t_start = 0.0;
+        stepFrac.t_end = 100.0;
+        stepFrac.well_name = "WELL_FRAC_RATE";
+        stepFrac.domain = WellTargetDomain::Fracture;
+        stepFrac.control_mode = WellControlMode::Rate;
+        stepFrac.target_value = -5.0;
+        stepFrac.component_mode = WellComponentMode::Water;
+        stepFrac.rw = 0.1;
+        stepFrac.skin = 0.0;
+        stepFrac.well_axis = WellAxis::None;
+        stepFrac.completion_id = 0;
+        stepFrac.wi_override = 1.0e-10;
+        stepFrac.L_override = -1.0;
+        stepFrac.frac_w = 1.0;
+        stepFrac.frac_g = 0.0;
+
+        std::vector<WellScheduleStep> steps = { stepMatrix, stepFrac };
+
+        const int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> resOff(totalEq, 0.0), diagOff(totalEq, 0.0);
+        std::vector<double> resOn(totalEq, 0.0), diagOn(totalEq, 0.0);
+
+        auto wellOff = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, steps, 0, 0, 1, 2, resOff, diagOff);
+        auto wellOn = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, steps, 0, 0, 1, 2, resOn, diagOn);
+
+        assert(wellOff.matrixBCCount == 1 && "Matrix well count mismatch");
+        assert(wellOff.fractureBCCount == 1 && "Fracture well count mismatch");
+
+        int eqWMat = mgr.getEquationIndex(0, 0);
+        int eqGMat = mgr.getEquationIndex(0, 1);
+        int eqEMat = mgr.getEquationIndex(0, 2);
+        int eqWFrac = mgr.getEquationIndex(nMat, 0);
+        assert(eqWMat >= 0 && eqGMat >= 0 && eqEMat >= 0 && eqWFrac >= 0 && "Equation index mapping failed");
+
+        assert(resOff[eqWMat] > 0.0 && "Matrix BHP water source should be positive outflow");
+        assert(diagOff[eqWMat] > 0.0 && "Matrix BHP dQ/dP should be positive");
+        assert(resOff[eqGMat] > 0.0 && "Matrix BHP gas source should be positive outflow");
+        assert(resOff[eqEMat] > 0.0 && "Energy source should be positive for positive enthalpy");
+        assert(resOff[eqWFrac] < 0.0 && "Fracture rate injector should be negative outflow");
+        assert(std::abs(diagOff[eqWFrac]) < 1e-12 && "Rate control derivative must be zero");
+
+        // 2D Matrix BHP injection (assembly-level): P_cell < P_bhp => q < 0, dq/dP > 0
+        WellScheduleStep stepMatrixInj = stepMatrix;
+        stepMatrixInj.well_name = "WELL_MAT_BHP_INJ";
+        stepMatrixInj.target_value = 3.0e5;
+        stepMatrixInj.component_mode = WellComponentMode::Water;
+        stepMatrixInj.frac_w = 1.0;
+        stepMatrixInj.frac_g = 0.0;
+        std::vector<WellScheduleStep> stepsInj = { stepMatrixInj };
+        std::vector<double> resInj(totalEq, 0.0), diagInj(totalEq, 0.0);
+        auto stInj = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, stepsInj, 0, 0, -1, -1, resInj, diagInj);
+        assert(stInj.matrixBCCount == 1 && "2D matrix BHP injection assembly count mismatch");
+        assert(resInj[eqWMat] < 0.0 && "2D matrix BHP injection should be negative outflow");
+        assert(diagInj[eqWMat] > 0.0 && "2D matrix BHP injection dQ/dP should stay positive");
+
+        // 2D Matrix Rate (assembly-level): q=q_target, dq/dP=0
+        WellScheduleStep stepMatrixRate = stepMatrix;
+        stepMatrixRate.well_name = "WELL_MAT_RATE";
+        stepMatrixRate.control_mode = WellControlMode::Rate;
+        stepMatrixRate.component_mode = WellComponentMode::Water;
+        stepMatrixRate.target_value = -2.75;
+        stepMatrixRate.wi_override = 1.0e-10;
+        stepMatrixRate.frac_w = 1.0;
+        stepMatrixRate.frac_g = 0.0;
+        std::vector<WellScheduleStep> stepsRate = { stepMatrixRate };
+        std::vector<double> resRate(totalEq, 0.0), diagRate(totalEq, 0.0);
+        auto stRate = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, stepsRate, 0, 0, -1, -1, resRate, diagRate);
+        assert(stRate.matrixBCCount == 1 && "2D matrix rate assembly count mismatch");
+        assert(std::abs(resRate[eqWMat] + 2.75) < 1e-12 && "2D matrix rate source should equal q_target");
+        assert(std::abs(diagRate[eqWMat]) < 1e-12 && "2D matrix rate derivative should be zero");
+
+        BoundarySetting::BoundaryConditionManager bcMgrLeakOn;
+        for (const auto& face : mgr.mesh().getFaces()) {
+            if (face.isBoundary()) {
+                bcMgrLeakOn.SetLeakoffEquivalentBC(face.physicalGroupId, 1.0e-11, 1.0e5);
+            }
+        }
+        auto leakStats = BoundaryAssembler::Assemble_2D(mgr, bcMgrLeakOn, 0, fm, pCfg.pressure_field, resOn, diagOn);
+
+        const double offTotal = wellOff.sumResidual;
+        const double onTotal = wellOn.sumResidual + leakStats.sumResidual;
+        assert(onTotal > offTotal && "Leakoff ON should increase total outflow trend");
+
+        std::cout << "  [PASS] 2D well assembly (Matrix+Fracture, Mass+Energy) and leakoff trend" << std::endl;
+    }
+
+    /**
+     * @brief Day4: WAG 调度骨架（CSV 驱动）测试
+     */
+    template <int N, typename ADVarType>
+    void Test_WAG_Schedule_Skeleton_2D() {
+        (void)N;
+        (void)ADVarType();
+
+        const char* csvPath = "day4_wag_schedule_tmp.csv";
+        {
+            std::ofstream ofs(csvPath, std::ios::trunc);
+            assert(ofs.is_open() && "Failed to create temporary WAG CSV");
+            ofs << "t_start,t_end,well_name,domain,control_mode,target_value,component_mode,rw,skin,well_axis,completion_id,wi_override,L_override,frac_w,frac_g\n";
+            ofs << "0,10,W1,Matrix,BHP,150000,Total,0.1,0,None,0,-1,-1,0.7,0.3\n";
+            ofs << "10,20,W1,Matrix,Rate,-8,Water,0.1,0,None,0,-1,-1,1,0\n";
+        }
+
+        WellScheduleManager scheduler;
+        assert(scheduler.LoadFromCsv(csvPath) && "WAG CSV load failed");
+
+        auto sA = scheduler.GetActiveSteps(5.0);
+        assert(sA.size() == 1 && "Expected one active step at t=5");
+        assert(sA[0].control_mode == WellControlMode::BHP && "Expected BHP in segment A");
+        assert(sA[0].component_mode == WellComponentMode::Total && "Expected Total mode in segment A");
+
+        auto sB = scheduler.GetActiveSteps(15.0);
+        assert(sB.size() == 1 && "Expected one active step at t=15");
+        assert(sB[0].control_mode == WellControlMode::Rate && "Expected Rate in segment B");
+        assert(sB[0].component_mode == WellComponentMode::Water && "Expected Water mode in segment B");
+
+        auto sC = scheduler.GetActiveSteps(25.0);
+        assert(sC.empty() && "Expected no active step outside schedule range");
+
+        std::remove(csvPath);
+        std::cout << "  [PASS] WAG schedule skeleton (CSV-driven segment switch)" << std::endl;
+    }
+
+    /**
+     * @brief Day4 总验收入口
+     */
+    
+    /**
+     * @brief Day4: 3D 井装配基础测试 (Matrix + Fracture)
+     */
+    template <int N, typename ADVarType>
+    void Test_Well_Assembly_3D_Basic() {
+        MeshManager_3D mgr(10.0, 10.0, 10.0, 2, 2, 2, true, false);
+        mgr.BuildSolidMatrixGrid_3D();
+        std::vector<Vector> pts = { Vector(1,1,1), Vector(9,1,1), Vector(9,9,1), Vector(1,9,1) };
+        mgr.addFracturetoFractureNetwork(Fracture_2D(0, pts));
+        mgr.meshAllFracturesinNetwork(2, 2, NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.setupGlobalIndices();
+        mgr.setNumDOFs(3);
+
+        const int nMat = mgr.fracture_network().getSolverIndexOffset();
+        const int nFrac = static_cast<int>(mgr.fracture_network().getOrderedFractureElements().size());
+        assert(nFrac > 0 && "Day4 3D requires fracture elements");
+
+        FieldManager_3D fm;
+        fm.InitSizes(
+            mgr.mesh().getGridCount(),
+            nFrac,
+            0,
+            0,
+            mgr.mesh().getFaces().size(),
+            0
+        );
+
+        const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
+        const PhysicalProperties_string_op::Rock rock;
+        const PhysicalProperties_string_op::Water water;
+        const PhysicalProperties_string_op::CO2 gas;
+
+        (void)fm.getOrCreateMatrixScalar(pCfg.pressure_field, 2.3e5);
+        (void)fm.getOrCreateMatrixScalar(rock.k_xx_tag, 1.0e-13);
+        (void)fm.getOrCreateMatrixScalar(rock.k_yy_tag, 2.0e-13);
+        (void)fm.getOrCreateMatrixScalar(rock.k_zz_tag, 1.5e-13);
+        (void)fm.getOrCreateMatrixScalar("mob_density_w", 1.0);
+        (void)fm.getOrCreateMatrixScalar("mob_density_g", 0.7);
+        (void)fm.getOrCreateMatrixScalar(water.h_tag, 1.2e5);
+        (void)fm.getOrCreateMatrixScalar(gas.h_tag, 2.2e5);
+
+        (void)fm.getOrCreateFractureScalar(pCfg.pressure_field, 2.0e5);
+        (void)fm.getOrCreateFractureScalar("mob_density_w", 0.8);
+        (void)fm.getOrCreateFractureScalar("mob_density_g", 0.6);
+        (void)fm.getOrCreateFractureScalar(water.h_tag, 1.1e5);
+        (void)fm.getOrCreateFractureScalar(gas.h_tag, 2.1e5);
+
+        WellScheduleStep stepMatrix;
+        stepMatrix.t_start = 0.0;
+        stepMatrix.t_end = 100.0;
+        stepMatrix.well_name = "WELL3D_MAT_BHP";
+        stepMatrix.domain = WellTargetDomain::Matrix;
+        stepMatrix.control_mode = WellControlMode::BHP;
+        stepMatrix.target_value = 1.6e5;
+        stepMatrix.component_mode = WellComponentMode::Total;
+        stepMatrix.rw = 0.1;
+        stepMatrix.skin = 0.0;
+        stepMatrix.well_axis = WellAxis::Z;
+        stepMatrix.completion_id = 0;
+        stepMatrix.wi_override = -1.0;
+        stepMatrix.L_override = -1.0;
+        stepMatrix.frac_w = 0.5;
+        stepMatrix.frac_g = 0.5;
+
+        WellScheduleStep stepFrac;
+        stepFrac.t_start = 0.0;
+        stepFrac.t_end = 100.0;
+        stepFrac.well_name = "WELL3D_FRAC_RATE";
+        stepFrac.domain = WellTargetDomain::Fracture;
+        stepFrac.control_mode = WellControlMode::Rate;
+        stepFrac.target_value = 3.0;
+        stepFrac.component_mode = WellComponentMode::Gas;
+        stepFrac.rw = 0.1;
+        stepFrac.skin = 0.0;
+        stepFrac.well_axis = WellAxis::None;
+        stepFrac.completion_id = 0;
+        stepFrac.wi_override = 1.0e-10;
+        stepFrac.L_override = -1.0;
+        stepFrac.frac_w = 0.0;
+        stepFrac.frac_g = 1.0;
+
+        std::vector<WellScheduleStep> steps = { stepMatrix, stepFrac };
+        const int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> res(totalEq, 0.0), diag(totalEq, 0.0);
+
+        auto stats = BoundaryAssembler::Assemble_Wells_3D(mgr, fm, steps, 0, 0, 1, 2, res, diag);
+        assert(stats.matrixBCCount == 1 && "3D matrix well count mismatch");
+        assert(stats.fractureBCCount == 1 && "3D fracture well count mismatch");
+
+        const int eqWMat = mgr.getEquationIndex(0, 0);
+        const int eqGMat = mgr.getEquationIndex(0, 1);
+        const int eqEMat = mgr.getEquationIndex(0, 2);
+        const int eqGFrac = mgr.getEquationIndex(nMat, 1);
+        assert(eqWMat >= 0 && eqGMat >= 0 && eqEMat >= 0 && eqGFrac >= 0 && "3D equation index mapping failed");
+
+        assert(res[eqWMat] > 0.0 && "3D matrix BHP water should be positive outflow");
+        assert(res[eqGMat] > 0.0 && "3D matrix BHP gas should be positive outflow");
+        assert(diag[eqWMat] > 0.0 && "3D matrix BHP derivative should be positive");
+        assert(res[eqEMat] > 0.0 && "3D energy source should be positive");
+
+        assert(res[eqGFrac] > 0.0 && "3D fracture gas rate producer should be positive outflow");
+        assert(std::abs(diag[eqGFrac]) < 1e-12 && "3D rate derivative must be zero");
+
+        // 3D Matrix BHP injection sign check
+        WellScheduleStep stepMatrixInj = stepMatrix;
+        stepMatrixInj.well_name = "WELL3D_MAT_BHP_INJ";
+        stepMatrixInj.target_value = 3.0e5;
+        std::vector<WellScheduleStep> stepsInj = { stepMatrixInj };
+        std::vector<double> resInj(totalEq, 0.0), diagInj(totalEq, 0.0);
+        auto stInj = BoundaryAssembler::Assemble_Wells_3D(mgr, fm, stepsInj, 0, 0, 1, -1, resInj, diagInj);
+        assert(stInj.matrixBCCount == 1 && "3D matrix BHP injection assembly count mismatch");
+        assert(resInj[eqWMat] < 0.0 && "3D matrix BHP injection should be negative outflow");
+        assert(diagInj[eqWMat] > 0.0 && "3D matrix BHP injection dQ/dP should stay positive");
+
+        // 3D Matrix Rate (assembly-level): q=q_target, dq/dP=0
+        WellScheduleStep stepMatrixRate = stepMatrix;
+        stepMatrixRate.well_name = "WELL3D_MAT_RATE";
+        stepMatrixRate.control_mode = WellControlMode::Rate;
+        stepMatrixRate.component_mode = WellComponentMode::Water;
+        stepMatrixRate.target_value = 2.25;
+        std::vector<WellScheduleStep> stepsRate = { stepMatrixRate };
+        std::vector<double> resRate(totalEq, 0.0), diagRate(totalEq, 0.0);
+        auto stRate = BoundaryAssembler::Assemble_Wells_3D(mgr, fm, stepsRate, 0, 0, -1, -1, resRate, diagRate);
+        assert(stRate.matrixBCCount == 1 && "3D matrix rate assembly count mismatch");
+        assert(std::abs(resRate[eqWMat] - 2.25) < 1e-12 && "3D matrix rate source should equal target");
+        assert(std::abs(diagRate[eqWMat]) < 1e-12 && "3D matrix rate derivative should be zero");
+
+        std::cout << "  [PASS] 3D well assembly (Matrix+Fracture, Mass+Energy)" << std::endl;
+    }
+
+    /**
+     * @brief Day4: 两相交替注采工况测试 (WAG schedule + assembly)
+     */
+    template <int N, typename ADVarType>
+    void Test_WAG_Alternating_Injection_2D() {
+        const char* csvPath = "day4_wag_alt_tmp.csv";
+        {
+            std::ofstream ofs(csvPath, std::ios::trunc);
+            assert(ofs.is_open() && "Failed to create WAG alternating CSV");
+            ofs << "t_start,t_end,well_name,domain,control_mode,target_value,component_mode,rw,skin,well_axis,completion_id,wi_override,L_override,frac_w,frac_g\n";
+            ofs << "0,10,WALT,Matrix,Rate,-5,Water,0.1,0,None,0,1e-10,-1,1,0\n";
+            ofs << "10,20,WALT,Matrix,Rate,-7,Gas,0.1,0,None,0,1e-10,-1,0,1\n";
+            ofs << "20,30,WALT,Matrix,Rate,4,Total,0.1,0,None,0,1e-10,-1,0.5,0.5\n";
+        }
+
+        MeshManager mgr(10.0, 10.0, 0.0, 4, 4, 0, true, false);
+        mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.BuildGlobalSystemIndexing();
+        mgr.setNumDOFs(3);
+
+        FieldManager_2D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), 0, 0, 0, mgr.mesh().getFaces().size(), 0);
+
+        const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
+        const PhysicalProperties_string_op::Water water;
+        const PhysicalProperties_string_op::CO2 gas;
+
+        (void)fm.getOrCreateMatrixScalar(pCfg.pressure_field, 2.0e5);
+        (void)fm.getOrCreateMatrixScalar("mob_density_w", 1.0);
+        (void)fm.getOrCreateMatrixScalar("mob_density_g", 0.9);
+        (void)fm.getOrCreateMatrixScalar(water.h_tag, 1.0e5);
+        (void)fm.getOrCreateMatrixScalar(gas.h_tag, 2.0e5);
+
+        WellScheduleManager scheduler;
+        assert(scheduler.LoadFromCsv(csvPath) && "WAG alternating CSV load failed");
+
+        const int totalEq = mgr.getTotalEquationDOFs();
+        const int eqW = mgr.getEquationIndex(0, 0);
+        const int eqG = mgr.getEquationIndex(0, 1);
+        assert(eqW >= 0 && eqG >= 0 && "WAG alternating equation mapping failed");
+
+        {
+            std::vector<double> res(totalEq, 0.0), diag(totalEq, 0.0);
+            auto s = scheduler.GetActiveSteps(5.0);
+            assert(s.size() == 1 && s[0].component_mode == WellComponentMode::Water && "Segment A should be water-rate");
+            auto st = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, s, 0, 0, 1, -1, res, diag);
+            assert(st.matrixBCCount == 1 && "Segment A assembly count mismatch");
+            assert(res[eqW] < 0.0 && "Segment A water injection should be negative outflow");
+            assert(std::abs(res[eqG]) < 1e-12 && "Segment A gas equation should remain zero");
+        }
+
+        {
+            std::vector<double> res(totalEq, 0.0), diag(totalEq, 0.0);
+            auto s = scheduler.GetActiveSteps(15.0);
+            assert(s.size() == 1 && s[0].component_mode == WellComponentMode::Gas && "Segment B should be gas-rate");
+            auto st = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, s, 0, 0, 1, -1, res, diag);
+            assert(st.matrixBCCount == 1 && "Segment B assembly count mismatch");
+            assert(res[eqG] < 0.0 && "Segment B gas injection should be negative outflow");
+            assert(std::abs(res[eqW]) < 1e-12 && "Segment B water equation should remain zero");
+        }
+
+        {
+            std::vector<double> res(totalEq, 0.0), diag(totalEq, 0.0);
+            auto s = scheduler.GetActiveSteps(25.0);
+            assert(s.size() == 1 && s[0].component_mode == WellComponentMode::Total && "Segment C should switch to production(total-rate)");
+            auto st = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, s, 0, 0, 1, -1, res, diag);
+            assert(st.matrixBCCount == 1 && "Segment C assembly count mismatch");
+            assert(res[eqW] > 0.0 && "Segment C water production should be positive outflow");
+            assert(res[eqG] > 0.0 && "Segment C gas production should be positive outflow");
+        }
+
+        std::remove(csvPath);
+        std::cout << "  [PASS] WAG alternating water/gas injection schedule with assembly checks" << std::endl;
+    }
+template <int N, typename ADVarType>
+    void Run_Day4_Well_Patch() {
+        std::cout << "\n[Test_FVM_Ops_AD] 启动 Day4: Well(BHP/Rate) + WAG skeleton..." << std::endl;
+        Test_Well_Operators_2D<N, ADVarType>();
+        Test_Well_Assembly_2D_LeakoffTrend<N, ADVarType>();
+        Test_Well_Assembly_3D_Basic<N, ADVarType>();
+        Test_WAG_Schedule_Skeleton_2D<N, ADVarType>();
+        Test_WAG_Alternating_Injection_2D<N, ADVarType>();
+
+        std::cout << "[PASS] WI 2D geometric-eq" << std::endl;
+        std::cout << "[PASS] WI 3D geometric-eq" << std::endl;
+        std::cout << "[PASS] BHP/Rate mass coupling" << std::endl;
+        std::cout << "[PASS] Well energy coupling" << std::endl;
+        std::cout << "[PASS] WAG config switching" << std::endl;
+        std::cout << "[PASS] Matrix+Fracture completion" << std::endl;
+    }
+
+    
+    /**
+     * @brief Day4 可视化导出: 2D 井源项场 (Matrix + Fracture)
+     */
+    template <int N, typename ADVarType>
+    void Run_Day4_Well_Viz_2D() {
+        (void)N;
+        (void)ADVarType();
+
+        MeshManager mgr(10.0, 10.0, 0.0, 4, 4, 0, true, false);
+        mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.addFracture(Vector(1.0, 1.0, 0.0), Vector(9.0, 9.0, 0.0));
+        mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
+        mgr.BuildGlobalSystemIndexing();
+        mgr.setNumDOFs(3);
+
+        const int nMat = mgr.getMatrixDOFCount();
+        const int nFrac = static_cast<int>(mgr.fracture_network().getOrderedFractureElements().size());
+
+        FieldManager_2D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), nFrac, 0, 0, mgr.mesh().getFaces().size(), 0);
+
+        const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
+        const PhysicalProperties_string_op::Rock rock;
+        const PhysicalProperties_string_op::Water water;
+        const PhysicalProperties_string_op::CO2 gas;
+
+        (void)fm.getOrCreateMatrixScalar(pCfg.pressure_field, 2.0e5);
+        (void)fm.getOrCreateMatrixScalar(rock.k_xx_tag, 1.0e-13);
+        (void)fm.getOrCreateMatrixScalar(rock.k_yy_tag, 1.0e-13);
+        (void)fm.getOrCreateMatrixScalar("mob_density_w", 1.2);
+        (void)fm.getOrCreateMatrixScalar("mob_density_g", 0.5);
+        (void)fm.getOrCreateMatrixScalar(water.h_tag, 1.0e5);
+        (void)fm.getOrCreateMatrixScalar(gas.h_tag, 2.0e5);
+
+        (void)fm.getOrCreateFractureScalar(pCfg.pressure_field, 2.2e5);
+        (void)fm.getOrCreateFractureScalar("mob_density_w", 1.0);
+        (void)fm.getOrCreateFractureScalar("mob_density_g", 0.2);
+        (void)fm.getOrCreateFractureScalar(water.h_tag, 1.1e5);
+        (void)fm.getOrCreateFractureScalar(gas.h_tag, 2.1e5);
+
+        WellScheduleStep stepMatrix;
+        stepMatrix.t_start = 0.0;
+        stepMatrix.t_end = 100.0;
+        stepMatrix.well_name = "WELL_MAT_BHP_VIZ";
+        stepMatrix.domain = WellTargetDomain::Matrix;
+        stepMatrix.control_mode = WellControlMode::BHP;
+        stepMatrix.target_value = 1.5e5;
+        stepMatrix.component_mode = WellComponentMode::Total;
+        stepMatrix.rw = 0.1;
+        stepMatrix.skin = 0.0;
+        stepMatrix.well_axis = WellAxis::None;
+        stepMatrix.completion_id = 0;
+        stepMatrix.wi_override = -1.0;
+        stepMatrix.frac_w = 0.6;
+        stepMatrix.frac_g = 0.4;
+
+        WellScheduleStep stepFrac;
+        stepFrac.t_start = 0.0;
+        stepFrac.t_end = 100.0;
+        stepFrac.well_name = "WELL_FRAC_RATE_VIZ";
+        stepFrac.domain = WellTargetDomain::Fracture;
+        stepFrac.control_mode = WellControlMode::Rate;
+        stepFrac.target_value = -5.0;
+        stepFrac.component_mode = WellComponentMode::Water;
+        stepFrac.rw = 0.1;
+        stepFrac.skin = 0.0;
+        stepFrac.well_axis = WellAxis::None;
+        stepFrac.completion_id = 0;
+        stepFrac.wi_override = 1.0e-10;
+        stepFrac.frac_w = 1.0;
+        stepFrac.frac_g = 0.0;
+
+        std::vector<WellScheduleStep> steps = { stepMatrix, stepFrac };
+
+        const int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> residual(totalEq, 0.0), diag(totalEq, 0.0);
+        auto st = BoundaryAssembler::Assemble_Wells_2D(mgr, fm, steps, 0, 0, 1, 2, residual, diag);
+        assert(st.matrixBCCount == 1 && st.fractureBCCount == 1 && "Day4 2D viz well assembly count mismatch");
+
+        auto qWMat = fm.getOrCreateMatrixScalar("q_well_w", 0.0);
+        auto qGMat = fm.getOrCreateMatrixScalar("q_well_g", 0.0);
+        auto qEMat = fm.getOrCreateMatrixScalar("q_well_e", 0.0);
+        auto qWFrac = fm.getOrCreateFractureScalar("q_well_w", 0.0);
+        auto qGFrac = fm.getOrCreateFractureScalar("q_well_g", 0.0);
+        auto qEFrac = fm.getOrCreateFractureScalar("q_well_e", 0.0);
+
+        for (int i = 0; i < static_cast<int>(mgr.mesh().getGridCount()); ++i) {
+            int eqW = mgr.getEquationIndex(i, 0);
+            int eqG = mgr.getEquationIndex(i, 1);
+            int eqE = mgr.getEquationIndex(i, 2);
+            (*qWMat)[i] = (eqW >= 0 && eqW < totalEq) ? residual[eqW] : 0.0;
+            (*qGMat)[i] = (eqG >= 0 && eqG < totalEq) ? residual[eqG] : 0.0;
+            (*qEMat)[i] = (eqE >= 0 && eqE < totalEq) ? residual[eqE] : 0.0;
+        }
+        for (int f = 0; f < nFrac; ++f) {
+            int solverIdx = nMat + f;
+            int eqW = mgr.getEquationIndex(solverIdx, 0);
+            int eqG = mgr.getEquationIndex(solverIdx, 1);
+            int eqE = mgr.getEquationIndex(solverIdx, 2);
+            (*qWFrac)[f] = (eqW >= 0 && eqW < totalEq) ? residual[eqW] : 0.0;
+            (*qGFrac)[f] = (eqG >= 0 && eqG < totalEq) ? residual[eqG] : 0.0;
+            (*qEFrac)[f] = (eqE >= 0 && eqE < totalEq) ? residual[eqE] : 0.0;
+        }
+
+        const std::string vtkFile = "Test/BoundaryTest/day4_well_viz_2d.vtk";
+        PostProcess_2D exporter(mgr, fm);
+        exporter.ExportVTK(vtkFile, 0.0);
+
+        std::ifstream verifyFile(vtkFile, std::ios::ate | std::ios::binary);
+        if (!verifyFile.is_open() || verifyFile.tellg() == 0) {
+            throw std::runtime_error("[FAIL] Day4 2D VTK export failed: " + vtkFile);
+        }
+        verifyFile.close();
+        std::cout << "  [PASS] Day4 2D VTK exported: " << vtkFile << std::endl;
+    }
+
+    /**
+     * @brief Day4 可视化导出: 3D 井源项场 (Matrix + Fracture)
+     */
+    template <int N, typename ADVarType>
+    void Run_Day4_Well_Viz_3D() {
+        (void)N;
+        (void)ADVarType();
+
+        MeshManager_3D mgr(10.0, 10.0, 10.0, 2, 2, 2, true, false);
+        mgr.BuildSolidMatrixGrid_3D();
+        std::vector<Vector> pts = { Vector(1,1,1), Vector(9,1,1), Vector(9,9,1), Vector(1,9,1) };
+        mgr.addFracturetoFractureNetwork(Fracture_2D(0, pts));
+        mgr.meshAllFracturesinNetwork(2, 2, NormalVectorCorrectionMethod::OrthogonalCorrection);
+        mgr.setupGlobalIndices();
+        mgr.setNumDOFs(3);
+
+        const int nMat = mgr.fracture_network().getSolverIndexOffset();
+        const int nFrac = static_cast<int>(mgr.fracture_network().getOrderedFractureElements().size());
+
+        FieldManager_3D fm;
+        fm.InitSizes(mgr.mesh().getGridCount(), nFrac, 0, 0, mgr.mesh().getFaces().size(), 0);
+
+        const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
+        const PhysicalProperties_string_op::Rock rock;
+        const PhysicalProperties_string_op::Water water;
+        const PhysicalProperties_string_op::CO2 gas;
+
+        (void)fm.getOrCreateMatrixScalar(pCfg.pressure_field, 2.3e5);
+        (void)fm.getOrCreateMatrixScalar(rock.k_xx_tag, 1.0e-13);
+        (void)fm.getOrCreateMatrixScalar(rock.k_yy_tag, 2.0e-13);
+        (void)fm.getOrCreateMatrixScalar(rock.k_zz_tag, 1.5e-13);
+        (void)fm.getOrCreateMatrixScalar("mob_density_w", 1.0);
+        (void)fm.getOrCreateMatrixScalar("mob_density_g", 0.7);
+        (void)fm.getOrCreateMatrixScalar(water.h_tag, 1.2e5);
+        (void)fm.getOrCreateMatrixScalar(gas.h_tag, 2.2e5);
+
+        (void)fm.getOrCreateFractureScalar(pCfg.pressure_field, 2.0e5);
+        (void)fm.getOrCreateFractureScalar("mob_density_w", 0.8);
+        (void)fm.getOrCreateFractureScalar("mob_density_g", 0.6);
+        (void)fm.getOrCreateFractureScalar(water.h_tag, 1.1e5);
+        (void)fm.getOrCreateFractureScalar(gas.h_tag, 2.1e5);
+
+        WellScheduleStep stepMatrix;
+        stepMatrix.t_start = 0.0;
+        stepMatrix.t_end = 100.0;
+        stepMatrix.well_name = "WELL3D_MAT_BHP_VIZ";
+        stepMatrix.domain = WellTargetDomain::Matrix;
+        stepMatrix.control_mode = WellControlMode::BHP;
+        stepMatrix.target_value = 1.6e5;
+        stepMatrix.component_mode = WellComponentMode::Total;
+        stepMatrix.rw = 0.1;
+        stepMatrix.skin = 0.0;
+        stepMatrix.well_axis = WellAxis::Z;
+        stepMatrix.completion_id = 0;
+        stepMatrix.wi_override = -1.0;
+        stepMatrix.frac_w = 0.5;
+        stepMatrix.frac_g = 0.5;
+
+        WellScheduleStep stepFrac;
+        stepFrac.t_start = 0.0;
+        stepFrac.t_end = 100.0;
+        stepFrac.well_name = "WELL3D_FRAC_RATE_VIZ";
+        stepFrac.domain = WellTargetDomain::Fracture;
+        stepFrac.control_mode = WellControlMode::Rate;
+        stepFrac.target_value = 3.0;
+        stepFrac.component_mode = WellComponentMode::Gas;
+        stepFrac.rw = 0.1;
+        stepFrac.skin = 0.0;
+        stepFrac.well_axis = WellAxis::None;
+        stepFrac.completion_id = 0;
+        stepFrac.wi_override = 1.0e-10;
+        stepFrac.frac_w = 0.0;
+        stepFrac.frac_g = 1.0;
+
+        std::vector<WellScheduleStep> steps = { stepMatrix, stepFrac };
+
+        const int totalEq = mgr.getTotalEquationDOFs();
+        std::vector<double> residual(totalEq, 0.0), diag(totalEq, 0.0);
+        auto st = BoundaryAssembler::Assemble_Wells_3D(mgr, fm, steps, 0, 0, 1, 2, residual, diag);
+        assert(st.matrixBCCount == 1 && st.fractureBCCount == 1 && "Day4 3D viz well assembly count mismatch");
+
+        auto qWMat = fm.getOrCreateMatrixScalar("q_well_w", 0.0);
+        auto qGMat = fm.getOrCreateMatrixScalar("q_well_g", 0.0);
+        auto qEMat = fm.getOrCreateMatrixScalar("q_well_e", 0.0);
+        auto qWFrac = fm.getOrCreateFractureScalar("q_well_w", 0.0);
+        auto qGFrac = fm.getOrCreateFractureScalar("q_well_g", 0.0);
+        auto qEFrac = fm.getOrCreateFractureScalar("q_well_e", 0.0);
+
+        for (int i = 0; i < static_cast<int>(mgr.mesh().getGridCount()); ++i) {
+            int eqW = mgr.getEquationIndex(i, 0);
+            int eqG = mgr.getEquationIndex(i, 1);
+            int eqE = mgr.getEquationIndex(i, 2);
+            (*qWMat)[i] = (eqW >= 0 && eqW < totalEq) ? residual[eqW] : 0.0;
+            (*qGMat)[i] = (eqG >= 0 && eqG < totalEq) ? residual[eqG] : 0.0;
+            (*qEMat)[i] = (eqE >= 0 && eqE < totalEq) ? residual[eqE] : 0.0;
+        }
+        for (int f = 0; f < nFrac; ++f) {
+            int solverIdx = nMat + f;
+            int eqW = mgr.getEquationIndex(solverIdx, 0);
+            int eqG = mgr.getEquationIndex(solverIdx, 1);
+            int eqE = mgr.getEquationIndex(solverIdx, 2);
+            (*qWFrac)[f] = (eqW >= 0 && eqW < totalEq) ? residual[eqW] : 0.0;
+            (*qGFrac)[f] = (eqG >= 0 && eqG < totalEq) ? residual[eqG] : 0.0;
+            (*qEFrac)[f] = (eqE >= 0 && eqE < totalEq) ? residual[eqE] : 0.0;
+        }
+
+        const std::string vtkFile = "Test/BoundaryTest/day4_well_viz_3d.vtk";
+        PostProcess_3D exporter(mgr, fm);
+        exporter.ExportVTK(vtkFile, 0.0);
+
+        std::ifstream verifyFile(vtkFile, std::ios::ate | std::ios::binary);
+        if (!verifyFile.is_open() || verifyFile.tellg() == 0) {
+            throw std::runtime_error("[FAIL] Day4 3D VTK export failed: " + vtkFile);
+        }
+        verifyFile.close();
+        std::cout << "  [PASS] Day4 3D VTK exported: " << vtkFile << std::endl;
+    }
+
+    /**
+     * @brief Day4 可视化总入口：固定输出 2D/3D 井源 VTK
+     */
+    template <int N, typename ADVarType>
+    void Run_Day4_Well_Viz() {
+        std::cout << "\n[Test_FVM_Ops_AD] 启动 Day4: Well VTK Visualization export..." << std::endl;
+        Run_Day4_Well_Viz_2D<N, ADVarType>();
+        Run_Day4_Well_Viz_3D<N, ADVarType>();
+        std::cout << "[PASS] Day4 well visualization VTK exported." << std::endl;
+    }
+template <int N, typename ADVarType>
     void Run_Day3_BC_Viz_2D() {
         std::cout << "\n[Test_FVM_Ops_AD] 启动 Day3: Boundary Conditions Viz Test (2D)..." << std::endl;
         MeshManager mgr(10.0, 10.0, 0.0, 10, 10, 0, true, false);
@@ -458,4 +1149,11 @@ namespace Test_FVM {
 } // namespace Test_FVM
 
 #endif // TEST_FVM_OPS_AD_H
+
+
+
+
+
+
+
 

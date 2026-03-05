@@ -4,9 +4,9 @@
 
 | Item | Value |
 |---|---|
-| Last Updated | 2026-03-04 (Asia/Shanghai, Day3 boundary/leakoff + postprocess capability sync) |
+| Last Updated | 2026-03-05 (Asia/Shanghai, Day4 accepted incl. visualization: 2D/3D geometric-WI wells + mass/energy coupling + CSV-WAG switching + Matrix/Fracture completion + fixed-path VTK export) |
 | Git Branch | `main` |
-| Git Commit | `d9ddb9e (dirty working tree)` |
+| Git Commit | `d9ddb9e (dirty working tree, Day4 patch+viz acceptance logs recorded; docs synced)` |
 | Owner / Maintainer | Yongwei (请按实际维护人更新) |
 | Project Root | `2D-Unstr-Quadrilateral-EDFM` |
 | Current Entry Mode | `main.cpp` 已支持参数化 dispatcher（`--case=...` / `--list` / `--help`） |
@@ -140,9 +140,9 @@
 ### 3.5 后处理与可视化导出
 
 - `PostProcess_2D`（`2D_PostProcess.h/.cpp`）
-  - 当前能力：`ExportTecplot(...)`，输出 2D 基岩 + 1D 裂缝 Zone（BLOCK, cell-centered）
+  - 当前能力：`ExportTecplot(...)` + `ExportVTK(...)`，输出 2D 基岩 + 1D 裂缝
   - 支持 `SyncADFieldToScalar<N>(...)`，将 ADVar 场降维到标量场后再导出
-  - 当前缺口：尚未提供 `ExportVTK(...)`（ParaView 直连能力待补齐）
+  - Day4 可视化验收已使用固定路径导出：`Test/BoundaryTest/day4_well_viz_2d.vtk`
 - `PostProcess_3D`（`3D_PostProcess.h/.cpp`）
   - 当前能力：`ExportTecplot(...)` + `ExportVTK(...)`
   - `ExportVTK(...)` 采用 `UNSTRUCTURED_GRID`，输出基岩+裂缝混合网格、`CELL_TYPES` 与 `DomainID`
@@ -162,6 +162,9 @@
 - Day1 显式验收入口：
   - `--case=day1_arch_conn`：串行执行 R4(`trans_2d`) + R5(`trans_3d`)
   - `--case=day1_arch_conn_repro`：执行 `trans_2d x2 + trans_3d x2` 用于可复现性检查
+- Day4 显式验收入口：
+  - `--case=day4_well_patch`：执行 Well(BHP/Rate) 算子、2D 井装配（Matrix+Fracture, Mass+Energy）与 CSV 驱动 WAG 切换骨架测试
+  - `--case=day4_well_viz`：固定路径导出 Day4 2D/3D 井源 VTK（`Test/BoundaryTest/day4_well_viz_2d.vtk`, `Test/BoundaryTest/day4_well_viz_3d.vtk`）
 - 结论：`main.cpp` 已从“注释开关板”升级为可脚本化的 case dispatcher。
 
 ### 4.2 典型调用链（3D 几何+耦合）
@@ -297,6 +300,8 @@ msbuild .\2D-Unstr-Quadrilateral-EDFM.sln /p:Configuration=Debug /p:Platform=x64
 ### 8.1 已完成
 
 - Day3 已新增 `BoundaryAssembler` 生产级边界/漏失装配入口，修复 Robin/Dirichlet 的除零风险与装配向量边界检查，并补齐两相 Leakoff AD 断言与 Day3 显式回归判据。
+- Day4 井控链路已通过验收：`--case=day4_well_patch` 输出 6 条 Day4 关键 PASS 行（WI 2D/3D、BHP/Rate 质量耦合、能量耦合、WAG 切换、Matrix+Fracture 完井），且 `--case=trans_2d`、`--case=trans_3d` 均 PASS。
+- Day4 可视化链路已通过验收：`--case=day4_well_viz` 成功导出 `Test/BoundaryTest/day4_well_viz_2d.vtk` 与 `Test/BoundaryTest/day4_well_viz_3d.vtk`，日志含 2D/3D 导出 PASS 行且无 Error/Exception/Fatal。
 - 章节一对应的 2D/3D EDFM 几何嵌入、候选筛选、交互重构、拓扑导出与一致性检查链条已成型。
 - 静态传导率四类机制（MM/FI/NNC/FF）在 2D/3D 均有对应实现与基准导出。
 - FIM 拓扑连接聚合链（Builder + ConnectionManager）可用于守恒检查与连接净化。
@@ -306,7 +311,7 @@ msbuild .\2D-Unstr-Quadrilateral-EDFM.sln /p:Configuration=Debug /p:Platform=x64
 
 - 单相/两相热流耦合从“模块验证”向“统一时间推进求解入口”收敛。
 - 章节三的 IMPES/FIM 工程化主流程（强重力分异/滤失/交替注采）仍需系统串联与回归测试矩阵。
-- 2D 后处理仍缺少 VTK 导出接口；需与 3D 后处理对齐后，再将可视化校验纳入 Day3/Day4 常规回归。
+- Day5-Day7 需要在现有 `day4_well_viz` 基础上扩展更多物理场（如相饱和度/温度演化）的时序可视化验收脚本。
 
 ### 8.3 待开展
 

@@ -101,6 +101,8 @@ int main(int argc, char** argv) {
         {"day3_bc_patch", "Day3 explicit gate: Boundary condition operators & AD verification", []() { Test_FVM::Run_Day3_BC_Patch<3, ADVar<3>>(); return 0; }},
         {"day3_leakoff_switch", "Day3 explicit gate: Leakoff switch, AD ops & Grid-Level Assembly", []() { Test_FVM::Run_Day3_Leakoff_Switch<3, ADVar<3>>(); return 0; }},
         {"day3_viz", "Day3 explicit gate: Output VTK files for Boundary/Leakoff Assembly", []() { Test_FVM::Run_Day3_BC_Viz_2D<3, ADVar<3>>(); Test_FVM::Run_Day3_Leakoff_Viz_3D<3, ADVar<3>>(); return 0; }},
+        {"day4_well_patch", "Day4 explicit gate: Well(BHP/Rate) + WAG schedule skeleton + matrix/fracture completion path", []() { Test_FVM::Run_Day4_Well_Patch<3, ADVar<3>>(); return 0; }},
+        {"day4_well_viz", "Day4 visualization gate: export fixed-path 2D/3D well-source VTK files", []() { Test_FVM::Run_Day4_Well_Viz<3, ADVar<3>>(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},

@@ -53,6 +53,14 @@ It must cover:
 | Day3 Leakoff Switch | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day3_leakoff_switch` | Verify single/two-phase Leakoff operators and grid-level 2D/3D assembly path | Contains `[PASS] Leakoff OFF=0 PASS`, `[PASS] Leakoff ON>0 PASS`, `[PASS] 两相 w/g sink 与导数 PASS`, `[PASS] 2D 网格装配与多块(P/T)分流行写入 PASS`, and `[PASS] 3D 网格装配与分流行写入 PASS` |
 
 ---
+## 2.3 Day4 Explicit Dispatcher Case (Mandatory for Well-Control Edits)
+
+| Case | Command | Purpose | Pass Criteria |
+|---|---|---|---|
+| Day4 Well Patch | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day4_well_patch` | Verify 2D/3D well assembly paths, matrix+fracture completion, mass+energy coupling, and CSV-driven WAG schedule (including alternating water/gas injection/production) | Contains `[PASS] WI 2D geometric-eq`, `[PASS] WI 3D geometric-eq`, `[PASS] BHP/Rate mass coupling`, `[PASS] Well energy coupling`, `[PASS] WAG config switching`, and `[PASS] Matrix+Fracture completion` |
+| Day4 Well Viz | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day4_well_viz` | Export fixed-path Day4 2D/3D well-source VTK for ParaView acceptance | Contains `[PASS] Day4 2D VTK exported`, `[PASS] Day4 3D VTK exported`, and `[PASS] Day4 well visualization VTK exported`; outputs `Test/BoundaryTest/day4_well_viz_2d.vtk` and `Test/BoundaryTest/day4_well_viz_3d.vtk` |
+
+---
 ## 3. Optional Extended Regression
 
 - `--case=3d_distance_accuracy` for geometry distance accuracy
@@ -61,6 +69,8 @@ It must cover:
 - `--case=grad_all` for 2D/3D gradient operator checks
 - `--case=day1_arch_conn` for one-shot Day1 gate
 - `--case=day1_arch_conn_repro` for one-shot Day1 reproducibility check
+- `--case=day4_well_patch` for Day4 well-control framework gate
+- `--case=day4_well_viz` for Day4 well-source VTK visualization gate
 
 ---
 
@@ -69,6 +79,7 @@ It must cover:
 - Before merge to `main`: run at least `R1-R5`
 - After geometry/topology edits: `R2-R5` mandatory
 - After AD/FVM operator edits: `R1` mandatory, `day3_bc_patch` + `day3_leakoff_switch` mandatory when boundary/leakoff logic changes, `grad_all` recommended
+- After well-control edits: `day4_well_patch` + `day4_well_viz` + at least one transmissibility gate (`R4` or `R5`) mandatory
 
 ---
 

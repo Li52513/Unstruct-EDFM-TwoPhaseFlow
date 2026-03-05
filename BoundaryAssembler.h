@@ -13,6 +13,7 @@
 #include "BoundaryConditionManager.h"
 #include "2D_FieldManager.h"
 #include "3D_FieldManager.h"
+#include "Well_WellControlTypes.h"
 
 struct BoundaryAssemblyStats {
     int matrixBCCount = 0;
@@ -52,6 +53,36 @@ public:
         int dofOffset,
         FieldManager_3D& fm,
         const std::string& fieldName,
+        std::vector<double>& residual,
+        std::vector<double>& jacobianDiag
+    );
+
+    /**
+         * @brief 2D 井控与源汇项装配主路径
+         */
+    static BoundaryAssemblyStats Assemble_Wells_2D(
+        MeshManager& mgr,
+        FieldManager_2D& fm,
+        const std::vector<WellScheduleStep>& active_steps,
+        int dofOffset_P,
+        int dofOffset_W,
+        int dofOffset_G,
+        int dofOffset_E,
+        std::vector<double>& residual,
+        std::vector<double>& jacobianDiag
+    );
+
+    /**
+     * @brief 3D 井控与源汇项装配主路径
+     */
+    static BoundaryAssemblyStats Assemble_Wells_3D(
+        MeshManager_3D& mgr,
+        FieldManager_3D& fm,
+        const std::vector<WellScheduleStep>& active_steps,
+        int dofOffset_P,
+        int dofOffset_W,
+        int dofOffset_G,
+        int dofOffset_E,
         std::vector<double>& residual,
         std::vector<double>& jacobianDiag
     );
