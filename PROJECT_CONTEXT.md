@@ -4,9 +4,9 @@
 
 | Item | Value |
 |---|---|
-| Last Updated | 2026-03-05 (Asia/Shanghai, Day4 accepted incl. visualization: 2D/3D geometric-WI wells + mass/energy coupling + CSV-WAG switching + Matrix/Fracture completion + fixed-path VTK export) |
+| Last Updated | 2026-03-07 (Asia/Shanghai, Day5 accepted; Day6/Day7 acceptance templates expanded with transient + VTK + ParaView + WAG matrix) |
 | Git Branch | `main` |
-| Git Commit | `d9ddb9e (dirty working tree, Day4 patch+viz acceptance logs recorded; docs synced)` |
+| Git Commit | `d9ddb9e (dirty working tree, Day5 accepted + Day6/Day7 checklist/docs synced)` |
 | Owner / Maintainer | Yongwei (请按实际维护人更新) |
 | Project Root | `2D-Unstr-Quadrilateral-EDFM` |
 | Current Entry Mode | `main.cpp` 已支持参数化 dispatcher（`--case=...` / `--list` / `--help`） |
@@ -165,6 +165,26 @@
 - Day4 显式验收入口：
   - `--case=day4_well_patch`：执行 Well(BHP/Rate) 算子、2D 井装配（Matrix+Fracture, Mass+Energy）与 CSV 驱动 WAG 切换骨架测试
   - `--case=day4_well_viz`：固定路径导出 Day4 2D/3D 井源 VTK（`Test/BoundaryTest/day4_well_viz_2d.vtk`, `Test/BoundaryTest/day4_well_viz_3d.vtk`）
+- Day5 显式验收入口：
+  - `--case=day5_block_matrix_robust`：块稀疏矩阵基础设施鲁棒性门禁
+  - `--case=day5_global_jac_2d`：2D 全局组装 + FD vs AD Jacobian 门禁
+  - `--case=day5_global_jac_3d`：3D 全局组装 + FD vs AD Jacobian 门禁
+- Day6 验收模板入口（待实现）：
+  - `--case=day6_transient_2d_sp_injprod`
+  - `--case=day6_transient_2d_tp_injprod`
+  - `--case=day6_transient_2d_tp_multiwell`
+  - `--case=day6_transient_3d_sp_injprod`
+  - `--case=day6_transient_3d_tp_injprod`
+  - `--case=day6_transient_3d_tp_multiwell`
+  - 要求：每个 case 支持 PostProcess VTK 导出并完成 ParaView 可视化验收
+- Day7 验收模板入口（待实现）：
+  - `--case=day7_closedloop_2d_sp_baseline`
+  - `--case=day7_closedloop_2d_tp_wag_singlewell`
+  - `--case=day7_closedloop_2d_tp_wag_multiwell`
+  - `--case=day7_closedloop_3d_sp_baseline`
+  - `--case=day7_closedloop_3d_tp_wag_singlewell`
+  - `--case=day7_closedloop_3d_tp_wag_multiwell`
+  - 要求：输出 WAG 阶段日志、论文指标时间序列、VTK 快照并完成 ParaView 验收
 - 结论：`main.cpp` 已从“注释开关板”升级为可脚本化的 case dispatcher。
 
 ### 4.2 典型调用链（3D 几何+耦合）

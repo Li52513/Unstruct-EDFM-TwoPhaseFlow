@@ -1,0 +1,92 @@
+/**
+ * @file FIM_GlobalAssembler.h
+ * @brief 全隐式求解器全局组装器 (Global Assembler for FIM)
+ * @details 负责将 AD 物理算子的局部计算结果 (Accumulation, Flux, Source)
+ * 高效、安全地装配入 FIM_BlockSparseMatrix。已开启严格的尺寸断言与通量一致性检查。
+ */
+
+#pragma once
+#include "FIM_BlockSparseMatrix.h"
+#include <vector>
+#include <stdexcept>
+#include <cmath>
+#include <algorithm>
+
+template <int N, typename ADVarType>
+class FIM_GlobalAssembler {
+public:
+    /**
+     * @brief 组装积累项 (Accumulation)
+     * @details 约定：残差 R_i += Accumulation_i
+     */
+    static void AssembleAccumulation(int block_idx,
+        const std::vector<ADVarType>& accum_eqs,
+        FIM_BlockSparseMatrix<N>& global_mat)
+    {
+        if (static_cast<int>(accum_eqs.size()) != N) {
+            throw std::invalid_argument("AssembleAccumulation: accum_eqs size mismatch.");
+        }
+
+        for (int eq = 0; eq < N; ++eq) {
+            global_mat.AddResidual(block_idx, eq, accum_eqs[eq].val);
+            for (int var = 0; var < N; ++var) {
+                global_mat.AddDiagJacobian(block_idx, eq, var, accum_eqs[eq].grad(var));
+            }
+        }
+    }
+
+    /**
+     * @brief 组装通量项 (Flux: MM / FI / NNC / FF)
+     * @details 约定：通量定义为 i 流向 j。R_i += Flux_ij, R_j -= Flux_ij
+     */
+    static void AssembleFlux(int block_i, int block_j,
+        const std::vector<ADVarType>& flux_wrt_i,
+        const std::vector<ADVarType>& flux_wrt_j,
+        FIM_BlockSparseMatrix<N>& global_mat)
+    {
+        if (static_cast<int>(flux_wrt_i.size()) != N || static_cast<int>(flux_wrt_j.size()) != N) {
+            throw std::invalid_argument("AssembleFlux: flux vector size mismatch.");
+        }
+
+        for (int eq = 0; eq < N; ++eq) {
+            const double f_i = flux_wrt_i[eq].val;
+            const double f_j = flux_wrt_j[eq].val;
+            const double abs_tol = 1e-12;
+            const double rel_tol = 1e-8;
+            if (std::abs(f_i - f_j) > abs_tol + rel_tol * std::max(std::abs(f_i), std::abs(f_j))) {
+                throw std::runtime_error("AssembleFlux: inconsistent flux values between seeds.");
+            }
+
+            global_mat.AddResidual(block_i, eq, f_i);
+            global_mat.AddResidual(block_j, eq, -f_i);
+
+            for (int var = 0; var < N; ++var) {
+                global_mat.AddDiagJacobian(block_i, eq, var, flux_wrt_i[eq].grad(var));
+                global_mat.AddOffDiagJacobian(block_i, block_j, eq, var, flux_wrt_j[eq].grad(var));
+
+                global_mat.AddOffDiagJacobian(block_j, block_i, eq, var, -flux_wrt_i[eq].grad(var));
+                global_mat.AddDiagJacobian(block_j, eq, var, -flux_wrt_j[eq].grad(var));
+            }
+        }
+    }
+
+    /**
+     * @brief 组装源汇项 (Source: Well / Boundary / Leakoff)
+     * @details 约定：源项定义为注入为正。R_i -= Source_i
+     */
+    static void AssembleSource(int block_idx,
+        const std::vector<ADVarType>& source_wrt_i,
+        FIM_BlockSparseMatrix<N>& global_mat)
+    {
+        if (static_cast<int>(source_wrt_i.size()) != N) {
+            throw std::invalid_argument("AssembleSource: source vector size mismatch.");
+        }
+
+        for (int eq = 0; eq < N; ++eq) {
+            global_mat.AddResidual(block_idx, eq, -source_wrt_i[eq].val);
+            for (int var = 0; var < N; ++var) {
+                global_mat.AddDiagJacobian(block_idx, eq, var, -source_wrt_i[eq].grad(var));
+            }
+        }
+    }
+};

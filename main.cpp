@@ -22,6 +22,7 @@
 #include "test_Transmissibility_2D.h"
 #include "test_Transmissibility_3D.h"
 #include "Test_FVM_Ops_AD.h"
+#include "Test_Day5_GlobalAssembly_Jacobian.h"
 #include "ADVar.hpp"
 
 #include <exception>
@@ -103,6 +104,9 @@ int main(int argc, char** argv) {
         {"day3_viz", "Day3 explicit gate: Output VTK files for Boundary/Leakoff Assembly", []() { Test_FVM::Run_Day3_BC_Viz_2D<3, ADVar<3>>(); Test_FVM::Run_Day3_Leakoff_Viz_3D<3, ADVar<3>>(); return 0; }},
         {"day4_well_patch", "Day4 explicit gate: Well(BHP/Rate) + WAG schedule skeleton + matrix/fracture completion path", []() { Test_FVM::Run_Day4_Well_Patch<3, ADVar<3>>(); return 0; }},
         {"day4_well_viz", "Day4 visualization gate: export fixed-path 2D/3D well-source VTK files", []() { Test_FVM::Run_Day4_Well_Viz<3, ADVar<3>>(); return 0; }},
+        {"day5_block_matrix_robust", "Day5 infra gate: FIM block sparse matrix robustness test", []() { Test_Day5::Test_FIM_BlockSparseMatrix_Robustness(); return 0; }},
+        { "day5_global_jac_2d","Day5 core gate: 2D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_2D(); return 0; }},
+        { "day5_global_jac_3d","Day5 core gate: 3D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_3D(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
