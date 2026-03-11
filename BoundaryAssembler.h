@@ -1,13 +1,13 @@
 /**
  * @file BoundaryAssembler.h
- * @brief 边界条件与漏失项装配门面 (Day 3 Production Entry)
- * @details 负责遍历基岩网格的物理边界，调用 AD 算子核计算通量/漏失残差，并将其累加至全局残差向量和 Jacobian 对角线对应的方程块中。
+ * @brief Boundary and well assembly facade
  */
 #ifndef BOUNDARY_ASSEMBLER_H
 #define BOUNDARY_ASSEMBLER_H
 
 #include <vector>
 #include <string>
+#include <array>
 #include "MeshManager.h"
 #include "3D_MeshManager.h"
 #include "BoundaryConditionManager.h"
@@ -24,16 +24,6 @@ struct BoundaryAssemblyStats {
 
 class BoundaryAssembler {
 public:
-    /**
-     * @brief 2D 边界与漏失主路径装配入口 (支持指定 DOF 偏移)
-     * @param mgr 2D 网格管理器
-     * @param bcMgr 边界条件管理器
-     * @param dofOffset 当前场对应的方程行偏移 (如 Pressure=0, Temperature=1)
-     * @param fm 场管理器
-     * @param fieldName 需要读取的主变量场名
-     * @param residual 全局残差向量
-     * @param jacobianDiag 全局 Jacobian 主对角线向量
-     */
     static BoundaryAssemblyStats Assemble_2D(
         MeshManager& mgr,
         const BoundarySetting::BoundaryConditionManager& bcMgr,
@@ -44,9 +34,6 @@ public:
         std::vector<double>& jacobianDiag
     );
 
-    /**
-     * @brief 3D 边界与漏失主路径装配入口 (支持指定 DOF 偏移)
-     */
     static BoundaryAssemblyStats Assemble_3D(
         MeshManager_3D& mgr,
         const BoundarySetting::BoundaryConditionManager& bcMgr,
@@ -57,9 +44,6 @@ public:
         std::vector<double>& jacobianDiag
     );
 
-    /**
-         * @brief 2D 井控与源汇项装配主路径
-         */
     static BoundaryAssemblyStats Assemble_Wells_2D(
         MeshManager& mgr,
         FieldManager_2D& fm,
@@ -72,9 +56,18 @@ public:
         std::vector<double>& jacobianDiag
     );
 
-    /**
-     * @brief 3D 井控与源汇项装配主路径
-     */
+    static BoundaryAssemblyStats Assemble_Wells_2D_FullJac(
+        MeshManager& mgr,
+        FieldManager_2D& fm,
+        const std::vector<WellScheduleStep>& active_steps,
+        int dofOffset_P,
+        int dofOffset_W,
+        int dofOffset_G,
+        int dofOffset_E,
+        std::vector<double>& residual,
+        std::vector<std::array<double, 3>>& jacobianFull
+    );
+
     static BoundaryAssemblyStats Assemble_Wells_3D(
         MeshManager_3D& mgr,
         FieldManager_3D& fm,
@@ -85,6 +78,18 @@ public:
         int dofOffset_E,
         std::vector<double>& residual,
         std::vector<double>& jacobianDiag
+    );
+
+    static BoundaryAssemblyStats Assemble_Wells_3D_FullJac(
+        MeshManager_3D& mgr,
+        FieldManager_3D& fm,
+        const std::vector<WellScheduleStep>& active_steps,
+        int dofOffset_P,
+        int dofOffset_W,
+        int dofOffset_G,
+        int dofOffset_E,
+        std::vector<double>& residual,
+        std::vector<std::array<double, 3>>& jacobianFull
     );
 };
 

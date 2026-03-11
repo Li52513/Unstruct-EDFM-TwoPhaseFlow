@@ -23,6 +23,7 @@
 #include "test_Transmissibility_3D.h"
 #include "Test_FVM_Ops_AD.h"
 #include "Test_Day5_GlobalAssembly_Jacobian.h"
+#include "Test_Day6_TransientSolver.h"
 #include "ADVar.hpp"
 
 #include <exception>
@@ -107,6 +108,12 @@ int main(int argc, char** argv) {
         {"day5_block_matrix_robust", "Day5 infra gate: FIM block sparse matrix robustness test", []() { Test_Day5::Test_FIM_BlockSparseMatrix_Robustness(); return 0; }},
         { "day5_global_jac_2d","Day5 core gate: 2D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_2D(); return 0; }},
         { "day5_global_jac_3d","Day5 core gate: 3D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_3D(); return 0; }},
+        {"day6_transient_2d_sp_injprod", "Day6: 2D single-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_SP_InjProd(); return 0; }},
+        {"day6_transient_2d_tp_injprod", "Day6: 2D two-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_TP_InjProd(); return 0; }},
+        {"day6_transient_2d_tp_multiwell", "Day6: 2D multi-well interference transient + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_TP_Multiwell(); return 0; }},
+        {"day6_transient_3d_sp_injprod", "Day6: 3D single-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_SP_InjProd(); return 0; }},
+        {"day6_transient_3d_tp_injprod", "Day6: 3D two-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_TP_InjProd(); return 0; }},
+        {"day6_transient_3d_tp_multiwell", "Day6: 3D multi-well interference transient + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_TP_Multiwell(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},

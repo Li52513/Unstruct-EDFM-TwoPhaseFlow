@@ -1,4 +1,4 @@
-Ôªø/**
+/**
  * @file BoundaryAssembler.cpp
  * @brief Boundary and leakoff assembly facade implementation
  */
@@ -7,13 +7,16 @@
 #include "Well_WellControlTypes.h"
 #include "SolverContrlStrName_op.h"
 #include "ADVar.hpp"
+#include "AD_FluidEvaluator.h"
+#include "CapRelPerm_HD_AD.h"
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <algorithm>
 
 namespace {
     constexpr double kBoundaryCoeffEps = 1.0e-14;
-    constexpr double kEps = 1.0e-12; // [Patch 2] ÂàÜÊØç‰øùÊä§ÊûÅÂ∞èÂÄº
+    constexpr double kEps = 1.0e-12; // [Patch 2] ∑÷ƒ∏±£ª§º´–°÷µ
 
     struct WellFieldTags {
         std::string pressure;
@@ -26,11 +29,15 @@ namespace {
         std::string lambda_g_mob;
         std::string h_w;
         std::string h_g;
+        std::string temperature;
+        std::string saturation;
     };
 
     inline WellFieldTags BuildWellFieldTags() {
         WellFieldTags tags;
         const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
+        const auto tCfg = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
+        const auto sCfg = PhysicalProperties_string_op::SaturationEquation_String::FIM();
         const PhysicalProperties_string_op::Rock rock;
         const PhysicalProperties_string_op::Water water;
         const PhysicalProperties_string_op::CO2 gas;
@@ -44,10 +51,12 @@ namespace {
         tags.lambda_g_mob = gas.lambda_g_tag;
         tags.h_w = water.h_tag;
         tags.h_g = gas.h_tag;
+        tags.temperature = tCfg.temperatue_field;
+        tags.saturation = sCfg.saturation;
         return tags;
     }
 
-    // [Patch 1] Êñ∞Â¢û Helper Âå∫
+    // [Patch 1] –¬‘ˆ Helper «¯
     inline bool isValidEqIdx(int eqIdx, const std::vector<double>& residual, const std::vector<double>& jacobianDiag) {
         return eqIdx >= 0 && eqIdx < static_cast<int>(residual.size()) && eqIdx < static_cast<int>(jacobianDiag.size());
     }
@@ -413,7 +422,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
                 residual[eqIdx_W] += q_mass_w.val;
                 jacobianDiag[eqIdx_W] += q_mass_w.grad(dofOffset_P);
                 stats.sumResidual += q_mass_w.val;
-                stats.sumJacobianDiag += q_mass_w.grad(dofOffset_P); // [Patch 2] ÂÆåÊï¥ÁªüËÆ°
+                stats.sumJacobianDiag += q_mass_w.grad(dofOffset_P); // [Patch 2] ÕÍ’˚Õ≥º∆
             }
         }
         if (dofOffset_G >= 0) {
@@ -444,7 +453,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
     return stats;
 }
 
-// [Patch 3 & 9] 3D ‰∫ïË£ÖÈÖç
+// [Patch 3 & 9] 3D æÆ◊∞≈‰
 BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
     MeshManager_3D& mgr, FieldManager_3D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
@@ -461,7 +470,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
     }
 
     const auto& mesh = mgr.mesh();
-    int nMat = get3DMatrixOffset(mgr); // [Patch 3] ‰øÆÂ§ç 3D Matrix Offset
+    int nMat = get3DMatrixOffset(mgr); // [Patch 3] –ﬁ∏¥ 3D Matrix Offset
     const WellFieldTags tags = BuildWellFieldTags();
 
     for (const auto& step : active_steps) {
@@ -538,7 +547,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
             double L = step.L_override;
             WellAxis axis = step.well_axis;
 
-            // [Patch 3] None ËΩ¥Âêë‰øùÊä§
+            // [Patch 3] None ÷·œÚ±£ª§
             if (L < 0.0 && axis == WellAxis::None) {
                 std::cerr << "[Assemble_Wells_3D] Warning: well_axis=None with L_override<0. Defaulting to Z-axis.\n";
                 axis = WellAxis::Z;
@@ -644,5 +653,319 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
         if (step.domain == WellTargetDomain::Matrix) stats.matrixBCCount++;
         else stats.fractureBCCount++;
     }
+    return stats;
+}
+
+namespace {
+    inline ADVar<3> MakeConstAD3(double v) {
+        ADVar<3> x;
+        x.val = v;
+        for (int k = 0; k < 3; ++k) x.grad(k) = 0.0;
+        return x;
+    }
+
+    inline void AddMissingGrad_SW_T(
+        int eqIdx,
+        const ADVar<3>& q,
+        std::vector<std::array<double, 3>>& jacobianFull,
+        const std::vector<double>& residualRef)
+    {
+        if (eqIdx < 0 || eqIdx >= static_cast<int>(residualRef.size()) || eqIdx >= static_cast<int>(jacobianFull.size())) {
+            return;
+        }
+        jacobianFull[eqIdx][1] += q.grad(1);
+        jacobianFull[eqIdx][2] += q.grad(2);
+    }
+}
+
+BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
+    MeshManager& mgr, FieldManager_2D& fm, const std::vector<WellScheduleStep>& active_steps,
+    int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
+    std::vector<double>& residual, std::vector<std::array<double, 3>>& jacobianFull)
+{
+    BoundaryAssemblyStats stats;
+    if (residual.size() != jacobianFull.size() || dofOffset_P < 0 || dofOffset_P >= 3) {
+        std::cerr << "[Assemble_Wells_2D_FullJac] Error: Invalid vector size or P-offset.\n";
+        return stats;
+    }
+    if ((dofOffset_W >= 3) || (dofOffset_G >= 3) || (dofOffset_E >= 3)) {
+        std::cerr << "[Assemble_Wells_2D_FullJac] Error: One or more equation offsets exceed ADVar<3> bounds.\n";
+        return stats;
+    }
+
+    std::vector<double> jacobianDiagP(residual.size(), 0.0);
+    stats = BoundaryAssembler::Assemble_Wells_2D(
+        mgr, fm, active_steps, dofOffset_P, dofOffset_W, dofOffset_G, dofOffset_E, residual, jacobianDiagP);
+
+    for (size_t i = 0; i < jacobianFull.size(); ++i) {
+        jacobianFull[i][0] += jacobianDiagP[i];
+    }
+
+    const auto& mesh = mgr.mesh();
+    const int nMat = mgr.getMatrixDOFCount();
+    const WellFieldTags tags = BuildWellFieldTags();
+
+    for (const auto& step : active_steps) {
+        int solverIdx = -1, localIdx = -1;
+        ResolveIndex(step.completion_id, step.domain, nMat, solverIdx, localIdx);
+
+        std::shared_ptr<volScalarField> pField_P, pField_T, pField_Sw;
+        std::shared_ptr<volScalarField> pField_Kxx, pField_Kyy;
+
+        if (step.domain == WellTargetDomain::Matrix) {
+            if (localIdx < 0 || localIdx >= static_cast<int>(mesh.getCells().size())) continue;
+            pField_P = fm.getMatrixScalar(tags.pressure);
+            pField_T = fm.getMatrixScalar(tags.temperature);
+            pField_Sw = fm.getMatrixScalar(tags.saturation);
+            pField_Kxx = fm.getMatrixScalar(tags.k_xx);
+            pField_Kyy = fm.getMatrixScalar(tags.k_yy);
+        }
+        else {
+            pField_P = fm.getFractureScalar(tags.pressure);
+            pField_T = fm.getFractureScalar(tags.temperature);
+            pField_Sw = fm.getFractureScalar(tags.saturation);
+        }
+
+        if (!isValidLocalIdx(localIdx, pField_P)) continue;
+
+        double WI = step.wi_override;
+        if (WI < 0.0) {
+            if (step.domain == WellTargetDomain::Fracture) continue;
+
+            const double V = mesh.getCells()[localIdx].volume;
+            const double kxx = safeGetFieldValue(pField_Kxx, localIdx, 1e-13);
+            const double kyy = safeGetFieldValue(pField_Kyy, localIdx, 1e-13);
+            const double k_eff = std::sqrt(kxx * kyy);
+            const double r_eq = std::sqrt(V / 3.141592653589793);
+            if (V <= kEps || step.rw <= 0.0 || r_eq <= step.rw || k_eff <= 0.0) continue;
+
+            const double denom = std::log(r_eq / step.rw) + step.skin;
+            if (denom <= kEps) continue;
+            WI = (2.0 * 3.141592653589793 * k_eff * 1.0) / denom;
+        }
+
+        ADVar<3> P_cell = MakeConstAD3(pField_P->data[localIdx]);
+        P_cell.grad(0) = 1.0;
+
+        ADVar<3> T_cell = MakeConstAD3(safeGetFieldValue(pField_T, localIdx, 300.0));
+        T_cell.grad(2) = 1.0;
+
+        const bool has_sw = isValidLocalIdx(localIdx, pField_Sw);
+        ADVar<3> Sw_cell = MakeConstAD3(has_sw ? pField_Sw->data[localIdx] : 1.0);
+        if (has_sw) Sw_cell.grad(1) = 1.0;
+
+        auto propsW = AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_cell);
+        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
+
+        ADVar<3> krw = MakeConstAD3(1.0);
+        ADVar<3> krg = MakeConstAD3(0.0);
+        if (has_sw) {
+            CapRelPerm::VGParams vg; vg.alpha = 1e-5; vg.n = 2.0; vg.Swr = 0.0; vg.Sgr = 0.0;
+            CapRelPerm::RelPermParams rp; rp.L = 0.5;
+            CapRelPerm::kr_Mualem_vG<3>(Sw_cell, vg, rp, krw, krg);
+        }
+
+        ADVar<3> mob_w = (propsW.rho * krw) / propsW.mu;
+        ADVar<3> mob_g = (propsG.rho * krg) / propsG.mu;
+
+        ADVar<3> q_mass_w = MakeConstAD3(0.0);
+        ADVar<3> q_mass_g = MakeConstAD3(0.0);
+
+        if (step.control_mode == WellControlMode::BHP) {
+            if (step.component_mode == WellComponentMode::Water || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_w : 1.0;
+                q_mass_w = MakeConstAD3(WI * frac) * mob_w * (P_cell - MakeConstAD3(step.target_value));
+            }
+            if (step.component_mode == WellComponentMode::Gas || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_g : 1.0;
+                q_mass_g = MakeConstAD3(WI * frac) * mob_g * (P_cell - MakeConstAD3(step.target_value));
+            }
+        }
+        else if (step.control_mode == WellControlMode::Rate) {
+            if (step.component_mode == WellComponentMode::Water || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_w : 1.0;
+                q_mass_w = MakeConstAD3(step.target_value * frac);
+            }
+            if (step.component_mode == WellComponentMode::Gas || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_g : 1.0;
+                q_mass_g = MakeConstAD3(step.target_value * frac);
+            }
+        }
+
+        ADVar<3> q_energy = (q_mass_w * propsW.h) + (q_mass_g * propsG.h);
+
+        if (dofOffset_W >= 0) {
+            const int eqIdx_W = mgr.getEquationIndex(solverIdx, dofOffset_W);
+            AddMissingGrad_SW_T(eqIdx_W, q_mass_w, jacobianFull, residual);
+        }
+        if (dofOffset_G >= 0) {
+            const int eqIdx_G = mgr.getEquationIndex(solverIdx, dofOffset_G);
+            AddMissingGrad_SW_T(eqIdx_G, q_mass_g, jacobianFull, residual);
+        }
+        if (dofOffset_E >= 0) {
+            const int eqIdx_E = mgr.getEquationIndex(solverIdx, dofOffset_E);
+            AddMissingGrad_SW_T(eqIdx_E, q_energy, jacobianFull, residual);
+        }
+    }
+
+    return stats;
+}
+
+BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
+    MeshManager_3D& mgr, FieldManager_3D& fm, const std::vector<WellScheduleStep>& active_steps,
+    int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
+    std::vector<double>& residual, std::vector<std::array<double, 3>>& jacobianFull)
+{
+    BoundaryAssemblyStats stats;
+    if (residual.size() != jacobianFull.size() || dofOffset_P < 0 || dofOffset_P >= 3) {
+        std::cerr << "[Assemble_Wells_3D_FullJac] Error: Invalid vector size or P-offset.\n";
+        return stats;
+    }
+    if ((dofOffset_W >= 3) || (dofOffset_G >= 3) || (dofOffset_E >= 3)) {
+        std::cerr << "[Assemble_Wells_3D_FullJac] Error: One or more equation offsets exceed ADVar<3> bounds.\n";
+        return stats;
+    }
+
+    std::vector<double> jacobianDiagP(residual.size(), 0.0);
+    stats = BoundaryAssembler::Assemble_Wells_3D(
+        mgr, fm, active_steps, dofOffset_P, dofOffset_W, dofOffset_G, dofOffset_E, residual, jacobianDiagP);
+
+    for (size_t i = 0; i < jacobianFull.size(); ++i) {
+        jacobianFull[i][0] += jacobianDiagP[i];
+    }
+
+    const auto& mesh = mgr.mesh();
+    const int nMat = get3DMatrixOffset(mgr);
+    const WellFieldTags tags = BuildWellFieldTags();
+
+    for (const auto& step : active_steps) {
+        int solverIdx = -1, localIdx = -1;
+        ResolveIndex(step.completion_id, step.domain, nMat, solverIdx, localIdx);
+
+        std::shared_ptr<volScalarField> pField_P, pField_T, pField_Sw;
+        std::shared_ptr<volScalarField> pField_Kxx, pField_Kyy, pField_Kzz;
+
+        if (step.domain == WellTargetDomain::Matrix) {
+            if (localIdx < 0 || localIdx >= static_cast<int>(mesh.getCells().size())) continue;
+            pField_P = fm.getMatrixScalar(tags.pressure);
+            pField_T = fm.getMatrixScalar(tags.temperature);
+            pField_Sw = fm.getMatrixScalar(tags.saturation);
+            pField_Kxx = fm.getMatrixScalar(tags.k_xx);
+            pField_Kyy = fm.getMatrixScalar(tags.k_yy);
+            pField_Kzz = fm.getMatrixScalar(tags.k_zz);
+        }
+        else {
+            pField_P = fm.getFractureScalar(tags.pressure);
+            pField_T = fm.getFractureScalar(tags.temperature);
+            pField_Sw = fm.getFractureScalar(tags.saturation);
+        }
+
+        if (!isValidLocalIdx(localIdx, pField_P)) continue;
+
+        double WI = step.wi_override;
+        if (WI < 0.0) {
+            if (step.domain == WellTargetDomain::Fracture) continue;
+
+            const auto& cell = mesh.getCells()[localIdx];
+            const double V = cell.volume;
+
+            double L = step.L_override;
+            WellAxis axis = step.well_axis;
+            if (L < 0.0 && axis == WellAxis::None) axis = WellAxis::Z;
+
+            if (L < 0.0) {
+                double min_ax = 1e20, max_ax = -1e20;
+                for (int nodeID : cell.CellNodeIDs) {
+                    const auto& pt = mesh.getNodesMap().at(nodeID).coord;
+                    const double val = (axis == WellAxis::X) ? pt.m_x : (axis == WellAxis::Y) ? pt.m_y : pt.m_z;
+                    if (val < min_ax) min_ax = val;
+                    if (val > max_ax) max_ax = val;
+                }
+                L = max_ax - min_ax;
+            }
+
+            if (V <= kEps || step.rw <= 0.0 || L <= kEps) continue;
+
+            const double r_eq = std::sqrt(V / (3.141592653589793 * L));
+            const double kxx = safeGetFieldValue(pField_Kxx, localIdx, 1e-13);
+            const double kyy = safeGetFieldValue(pField_Kyy, localIdx, 1e-13);
+            const double kzz = safeGetFieldValue(pField_Kzz, localIdx, 1e-13);
+
+            double k_plane = 1e-13;
+            if (axis == WellAxis::X) k_plane = std::sqrt(kyy * kzz);
+            else if (axis == WellAxis::Y) k_plane = std::sqrt(kxx * kzz);
+            else k_plane = std::sqrt(kxx * kyy);
+
+            if (r_eq <= step.rw || k_plane <= 0.0) continue;
+
+            const double denom = std::log(r_eq / step.rw) + step.skin;
+            if (denom <= kEps) continue;
+            WI = (2.0 * 3.141592653589793 * k_plane * L) / denom;
+        }
+
+        ADVar<3> P_cell = MakeConstAD3(pField_P->data[localIdx]);
+        P_cell.grad(0) = 1.0;
+
+        ADVar<3> T_cell = MakeConstAD3(safeGetFieldValue(pField_T, localIdx, 300.0));
+        T_cell.grad(2) = 1.0;
+
+        const bool has_sw = isValidLocalIdx(localIdx, pField_Sw);
+        ADVar<3> Sw_cell = MakeConstAD3(has_sw ? pField_Sw->data[localIdx] : 1.0);
+        if (has_sw) Sw_cell.grad(1) = 1.0;
+
+        auto propsW = AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_cell);
+        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
+
+        ADVar<3> krw = MakeConstAD3(1.0);
+        ADVar<3> krg = MakeConstAD3(0.0);
+        if (has_sw) {
+            CapRelPerm::VGParams vg; vg.alpha = 1e-5; vg.n = 2.0; vg.Swr = 0.0; vg.Sgr = 0.0;
+            CapRelPerm::RelPermParams rp; rp.L = 0.5;
+            CapRelPerm::kr_Mualem_vG<3>(Sw_cell, vg, rp, krw, krg);
+        }
+
+        ADVar<3> mob_w = (propsW.rho * krw) / propsW.mu;
+        ADVar<3> mob_g = (propsG.rho * krg) / propsG.mu;
+
+        ADVar<3> q_mass_w = MakeConstAD3(0.0);
+        ADVar<3> q_mass_g = MakeConstAD3(0.0);
+
+        if (step.control_mode == WellControlMode::BHP) {
+            if (step.component_mode == WellComponentMode::Water || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_w : 1.0;
+                q_mass_w = MakeConstAD3(WI * frac) * mob_w * (P_cell - MakeConstAD3(step.target_value));
+            }
+            if (step.component_mode == WellComponentMode::Gas || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_g : 1.0;
+                q_mass_g = MakeConstAD3(WI * frac) * mob_g * (P_cell - MakeConstAD3(step.target_value));
+            }
+        }
+        else if (step.control_mode == WellControlMode::Rate) {
+            if (step.component_mode == WellComponentMode::Water || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_w : 1.0;
+                q_mass_w = MakeConstAD3(step.target_value * frac);
+            }
+            if (step.component_mode == WellComponentMode::Gas || step.component_mode == WellComponentMode::Total) {
+                const double frac = (step.component_mode == WellComponentMode::Total) ? step.frac_g : 1.0;
+                q_mass_g = MakeConstAD3(step.target_value * frac);
+            }
+        }
+
+        ADVar<3> q_energy = (q_mass_w * propsW.h) + (q_mass_g * propsG.h);
+
+        if (dofOffset_W >= 0) {
+            const int eqIdx_W = mgr.getEquationIndex(solverIdx, dofOffset_W);
+            AddMissingGrad_SW_T(eqIdx_W, q_mass_w, jacobianFull, residual);
+        }
+        if (dofOffset_G >= 0) {
+            const int eqIdx_G = mgr.getEquationIndex(solverIdx, dofOffset_G);
+            AddMissingGrad_SW_T(eqIdx_G, q_mass_g, jacobianFull, residual);
+        }
+        if (dofOffset_E >= 0) {
+            const int eqIdx_E = mgr.getEquationIndex(solverIdx, dofOffset_E);
+            AddMissingGrad_SW_T(eqIdx_E, q_energy, jacobianFull, residual);
+        }
+    }
+
     return stats;
 }

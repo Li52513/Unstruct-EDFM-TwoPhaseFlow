@@ -4,9 +4,9 @@
 
 | Item | Value |
 |---|---|
-| Last Updated | 2026-03-07 (Asia/Shanghai, Day5 accepted; Day6/Day7 acceptance templates expanded with transient + VTK + ParaView + WAG matrix) |
+| Last Updated | 2026-03-10 (Asia/Shanghai, Day6 static implementation aligned: dispatcher/cases/log-guards/VTK pipeline + plan-consistency fixes) |
 | Git Branch | `main` |
-| Git Commit | `d9ddb9e (dirty working tree, Day5 accepted + Day6/Day7 checklist/docs synced)` |
+| Git Commit | `dirty working tree (2026-03-10, Day6 static deviations fixed; dynamic gates pending manual run)` |
 | Owner / Maintainer | Yongwei (请按实际维护人更新) |
 | Project Root | `2D-Unstr-Quadrilateral-EDFM` |
 | Current Entry Mode | `main.cpp` 已支持参数化 dispatcher（`--case=...` / `--list` / `--help`） |
@@ -169,7 +169,7 @@
   - `--case=day5_block_matrix_robust`：块稀疏矩阵基础设施鲁棒性门禁
   - `--case=day5_global_jac_2d`：2D 全局组装 + FD vs AD Jacobian 门禁
   - `--case=day5_global_jac_3d`：3D 全局组装 + FD vs AD Jacobian 门禁
-- Day6 验收模板入口（待实现）：
+- Day6 验收入口（已实现，待执行动态验收）：
   - `--case=day6_transient_2d_sp_injprod`
   - `--case=day6_transient_2d_tp_injprod`
   - `--case=day6_transient_2d_tp_multiwell`
