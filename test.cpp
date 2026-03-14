@@ -1,8 +1,3 @@
-/**
- * @file FIM_TransientEngine.hpp
- * @brief ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½Ê½(FIM)Ë²Ì¬ï¿½Æ½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (ï¿½ß¶È·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½)
- */
-
 #pragma once
 
 #include "MeshManager.h"
@@ -35,14 +30,11 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
-#include <chrono>
 #include <cmath>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -55,66 +47,65 @@
 #define MKDIR(path) mkdir(path, 0777)
 #endif
 
-namespace FIM_Engine {
-
+    namespace FIM_Engine {
 
     /**
-     * @brief V3 ï¿½ï¿½Ï¼ï¿½ï¿½ï¿½Ã¶ï¿½ï¿?
+     * @brief V3 Õï¶Ï¼¶±ðÃ¶¾Ù
      */
     enum class DiagLevel { Off, Summary, Hotspot, Forensic };
 
     /**
      * @struct EqContrib
-     * @brief ï¿½ï¿½ï¿½Ì¹ï¿½ï¿½×²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¶ï¿½ï¿½Ø¶ï¿½ï¿½ï¿½ï¿½Ì²Ð²ï¿½ï¿?Jacobian ï¿½Ô½ï¿½ï¿½ßµÄ¹ï¿½ï¿½ï¿½
+     * @brief ·½³Ì¹±Ï×²ð½âÈÝÆ÷£¬¶ÀÁ¢¼ÇÂ¼¸÷¸öÎïÀí¹ý³Ì¶ÔÌØ¶¨·½³Ì²Ð²îºÍ Jacobian ¶Ô½ÇÏßµÄ¹±Ï×
      */
     struct EqContrib {
         double R_acc = 0.0, R_flux = 0.0, R_well = 0.0, R_bc = 0.0;
         double D_acc = 0.0, D_flux = 0.0, D_well = 0.0, D_bc = 0.0;
 
-        /** @brief ï¿½ï¿½ï¿½Ãµï¿½Ç°ï¿½ï¿½ï¿½ÌµÄ¹ï¿½ï¿½×¼ï¿½Â¼ */
+        /** @brief ÖØÖÃµ±Ç°·½³ÌµÄ¹±Ï×¼ÇÂ¼ */
         void reset() {
             R_acc = R_flux = R_well = R_bc = 0.0;
             D_acc = D_flux = D_well = D_bc = 0.0;
         }
 
-        /** @brief ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ï¿½Ìµï¿½ï¿½Ü²Ð²ï¿½Öµ */
+        /** @brief »ñÈ¡µ±Ç°·½³ÌµÄ×Ü²Ð²îÖµ */
         double R_total() const { return R_acc + R_flux + R_well + R_bc; }
 
-        /** @brief ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ï¿½Ìµï¿½ Jacobian ï¿½ï¿½ï¿½Ô½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ */
+        /** @brief »ñÈ¡µ±Ç°·½³ÌµÄ Jacobian Ö÷¶Ô½ÇÏß×ÜÖµ */
         double D_total() const { return D_acc + D_flux + D_well + D_bc; }
     };
 
     // =====================================================================
-    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ (ï¿½ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½Äºï¿½ï¿½ï¿?
+    // Çó½âÆ÷Óë³õÊ¼Ìõ¼þÄ£¿é (ºËÐÄÊý¾Ý½á¹¹)
     // =====================================================================
 
     enum class SolverRoute { FIM, IMPES };
     enum class LinearSolverType { SparseLU, BiCGSTAB };
 
-    /** @brief ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?*/
+    /** @brief Ë²Ì¬Çó½â³õÊ¼Ìõ¼þ */
     struct InitialConditions {
-        double P_init = 2.0e5;   ///< ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½Ñ¹ï¿½ï¿½ (Pa)
-        double T_init = 300.0;   ///< ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Â¶ï¿½ (K)
-        double Sw_init = 0.2;    ///< ï¿½ï¿½Ê¼ï¿½ï¿½Ë®ï¿½ï¿½ï¿½Í¶ï¿½ (-)
+        double P_init = 2.0e5;   ///< ³õÊ¼µØ²ãÑ¹Á¦ (Pa)
+        double T_init = 300.0;   ///< ³õÊ¼µØ²ãÎÂ¶È (K)
+        double Sw_init = 0.2;    ///< ³õÊ¼º¬Ë®±¥ºÍ¶È (-)
     };
 
-    /** @brief Ë²Ì¬Å£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½Æ²ï¿½ï¿½ï¿?*/
+    /** @brief Ë²Ì¬È«ÒþÊ½Çó½âÆ÷¿ØÖÆ²ÎÊý */
     struct TransientSolverParams {
-        int max_steps = 50;                     ///< Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ½ï¿½ï¿½ï¿½ï¿½ï¿?
+        int max_steps = 50;                     ///< Ä£Äâ×î´óÍÆ½ø²½Êý
 
-        // Ê±ï¿½ä²½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-        double dt_init = 1.0;                   ///< [ï¿½Þ¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½] ï¿½ï¿½Ê¼Ê±ï¿½ä²½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½1.0sï¿½ï¿½Ó¦ï¿½ï¿½×¢Ë®Ë²ï¿½ï¿½Ë®ï¿½ï¿½Ð§Ó¦
-        double dt_min = 1e-4;                   ///< ï¿½ï¿½Ð¡ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ä²½ï¿½ï¿½ (s)
-        double dt_max = 86400.0;                ///< ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ä²½ï¿½ï¿?(s)
+        // Ê±¼ä²½³¤¿ØÖÆ
+        double dt_init = 1.0;                   ///< ³õÊ¼Ê±¼ä²½³¤£¨½¨Òé0.05~1.0s£¬Ó¦¶ÔË²Ì¬³å»÷Ð§Ó¦£©
+        double dt_min = 1e-4;                   ///< ×îÐ¡ÔÊÐíÊ±¼ä²½³¤ (s)
+        double dt_max = 86400.0;                ///< ×î´óÔÊÐíÊ±¼ä²½³¤ (s)
 
-        // ï¿½ï¿½ï¿½ï¿½ï¿½Ô¿ï¿½ï¿½ï¿½
-        int max_newton_iter = 8;                ///< Day6 ï¿½Æ»ï¿½Òªï¿½ï¿½Ã¿ï¿½ï¿½ï¿½ï¿½ï¿?8 ï¿½Î·ï¿½ï¿½ï¿½ï¿½Ôµï¿½ï¿½ï¿½
-        double abs_res_tol = 1e-6;              ///< Day6 ï¿½Æ»ï¿½Òªï¿½ó£º¾ï¿½ï¿½Ô²Ð²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+        // ·ÇÏßÐÔ¿ØÖÆ
+        int max_newton_iter = 8;                ///< Day6 ¼Æ»®ÒªÇóÃ¿²½×î´ó 8~15 ´Î·ÇÏßÐÔµü´ú
+        double abs_res_tol = 1e-6;              ///< ¾ø¶Ô²Ð²îÊÕÁ²ÈÝ²î£¨½¨Òé²»ÓÃ×ö×îÖÕÅÐ¶¨£©
 
-        // ï¿½ï¿½Í£ï¿½ï¿½(Stagnation)ï¿½ï¿½ï¿½Æ»ï¿½ï¿½ï¿½
-        double stagnation_growth_tol = 0.995;   ///< Í£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-        double stagnation_abs_res_tol = 1.0e6;  ///< Í£ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð²ï¿½ (ï¿½ï¿½ï¿½à½¨ï¿½ï¿½ 1e4, ï¿½ï¿½ï¿½à½¨ï¿½ï¿½ 1e6)
-        double stagnation_min_drop = 2.0e-3;    ///< ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡ï¿½ï¿½Ô²Ð²ï¿½ï¿½Â½ï¿½ï¿½ï¿½
+        // Í£ÖÍ(Stagnation)Óë»ØÍË¿ØÖÆ
+        double stagnation_growth_tol = 0.995;   ///< Í£ÖÍÅÐ¶¨ÈÝÈÌ¶È
+        double stagnation_abs_res_tol = 1.0e6;  ///< Í£ÖÍÊ±ÔÊÐíµÄ×î´ó¾ø¶Ô²Ð²î (µ¥Ïà½¨Òé 1e4, Á½Ïà½¨Òé 1e6)
+        double stagnation_min_drop = 2.0e-3;    ///< Í£ÖÍÊ±ÒªÇóµÄ×îÐ¡Ïà¶Ô²Ð²îÏÂ½µÁ¿
         double best_iter_growth_trigger = 1.5;  ///< Trigger best-iterate takeover when current residual grows beyond this factor vs in-step best.
         int best_iter_guard_min_iter = 3;       ///< Minimum Newton iterations before enabling best-iterate takeover.
         bool enable_best_iter_guard = false;    ///< Disable best-iterate takeover by default for strict acceptance.
@@ -131,45 +122,6 @@ namespace FIM_Engine {
         int armijo_max_backtracks = 8;          ///< Max backtracking count per Newton step.
         double armijo_beta = 0.5;               ///< Backtracking shrink factor in (0,1).
         double armijo_c1 = 1.0e-4;              ///< Armijo sufficient decrease coefficient.
-        bool enable_nonmonotone_line_search = true; ///< GLL-style nonmonotone line search acceptance.
-        int nonmonotone_window = 5;                ///< Residual window size for nonmonotone reference.
-        bool enable_ls_trace = true;               ///< Print line-search trace for step-1 and failed attempts.
-        bool enable_ls_base_check = true;          ///< Check residual baseline consistency before Armijo acceptance.
-        double ls_base_mismatch_tol = 0.25;       ///< Warn when |probe/base-1| exceeds this ratio.
-        bool enable_controlled_accept_iter1 = true; ///< Allow one guarded accept when iter-1 repeatedly fails Armijo.
-        int controlled_accept_min_armijo_reject = 6; ///< Minimum Armijo rejects before controlled accept can trigger.
-        double controlled_accept_relax = 2.05;    ///< Accept if best_trial_res <= ref * relax.
-        double controlled_accept_max_rel_update = 0.20; ///< Max rel update allowed for controlled accept (<=0 disables check).
-        int controlled_accept_max_per_step = 1;   ///< Max controlled-accept uses per time step.
-
-        // rollback-aware nonlinear stabilization
-        int ls_fail_rescue_threshold = 2;          ///< Trigger PTC rescue after this many iter-1 line-search failures in the same step.
-        int ls_fail_rescue_max = 1;                ///< Max rescue retries before allowing dt rollback.
-        double ptc_rescue_boost = 5.0;            ///< Multiplicative boost for PTC weight during rescue retry.
-
-        // Pseudo-transient continuation (PTC) diagonal stabilization: J <- J + lambda * M
-        bool enable_ptc = false;                   ///< Enable pseudo-transient diagonal regularization.
-        double ptc_lambda_init = 1.0;             ///< Initial PTC weight.
-        double ptc_lambda_decay = 0.5;            ///< Per-Newton decay factor in [0,1].
-        double ptc_lambda_min = 0.0;              ///< Minimum PTC weight.
-
-        // Well-control continuation ramp during startup steps
-        bool enable_control_ramp = false;         ///< Enable staged loading for well controls.
-        int control_ramp_steps = 5;               ///< Number of startup time steps for ramp.
-        double control_ramp_min = 0.2;            ///< Initial ramp factor in (0,1].
-        bool control_ramp_apply_rate = true;      ///< Apply ramp to rate-controlled wells.
-        bool control_ramp_apply_bhp = true;       ///< Apply ramp to BHP-controlled wells.
-        bool enable_ramp_dt_protection = true;    ///< Prevent over-shrinking dt during ramp stage.
-        double ramp_dt_min_scale = 0.98;          ///< Minimum dt scaling factor allowed during ramp stage.
-
-        // rel_res_update dt policy (parameterized; replaces hard-coded thresholds).
-        int dt_relres_iter_grow_hi = 8;           ///< Grow dt when iter_used <= this threshold.
-        int dt_relres_iter_neutral_hi = 14;       ///< Keep dt neutral when iter_used <= this threshold.
-        int dt_relres_iter_soft_shrink_hi = 20;   ///< Soft-shrink dt when iter_used <= this threshold.
-        double dt_relres_grow_factor = 1.08;      ///< Growth factor in rel_res_update mode.
-        double dt_relres_neutral_factor = 1.00;   ///< Neutral factor in rel_res_update mode.
-        double dt_relres_soft_shrink_factor = 0.98; ///< Soft-shrink factor in rel_res_update mode.
-        double dt_relres_hard_shrink_factor = 0.92; ///< Hard-shrink factor in rel_res_update mode.
 
         // ÐÐËõ·Å£¨×óËõ·Å£©: ÒÔ |diag_acc| Óë |diag(A)| µÄÌØÕ÷Á¿Îª»ù×¼
         bool enable_row_scaling = true;         ///< Enable row scaling before linear solve.
@@ -177,42 +129,37 @@ namespace FIM_Engine {
         double row_scale_min = 1.0e-12;         ///< Min allowed row scale factor.
         double row_scale_max = 1.0e+12;         ///< Max allowed row scale factor.
 
-        // ×´Ì¬ï¿½Ø¶ï¿½ï¿½ë»¤ï¿½ï¿½(Limiter & Damping)
-        double max_dP = 1.0e4;                  ///< [ï¿½Õ½ï¿½Ø¶ï¿½] Å£ï¿½Ù²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¹ï¿½ï¿½ï¿½ä»¯ï¿½ï¿½(Pa)
-        double max_dT = 2.0;                    ///< [ï¿½Õ½ï¿½Ø¶ï¿½] Å£ï¿½Ù²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â¶È±ä»¯ï¿½ï¿½(K)
-        double max_dSw = 0.05;                  ///< Å£ï¿½Ù²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä±ï¿½ï¿½Í¶È±ä»¯ï¿½ï¿½(-)
+        // ×´Ì¬½Ø¶ÏÓë±£»¤(Limiter & Damping)
+        double max_dP = 1.0e4;                  ///< [·À·¢É¢] Å£¶Ù²½×î´óÔÊÐíÑ¹Á¦±ä»¯Á¿(Pa)
+        double max_dT = 2.0;                    ///< [·À·¢É¢] Å£¶Ù²½×î´óÔÊÐíÎÂ¶È±ä»¯Á¿(K)
+        double max_dSw = 0.05;                  ///< Å£¶Ù²½×î´óÔÊÐí±¥ºÍ¶È±ä»¯Á¿(-)
         double min_alpha = 1.0e-8;              ///< line-search/damping lower bound; avoid forced large update at stiff states
-        bool enable_alpha_safe_two_phase = true; ///< Appleyard-style Sw safety alpha for two-phase trial updates.
-        double sw_safe_eps = 1.0e-8;             ///< Sw safety epsilon used by alpha-safe limiter.
-        double sw_alpha_shrink = 0.98;           ///< Safety shrink for computed Sw-safe alpha.
         bool clamp_state_to_eos_bounds = false; ///< hard-clip P/T into EOS table bounds; disabled by default to avoid edge pinning
-        bool enforce_eos_domain = false;        ///< strict EOS domain check: fail step when near_bound/fallback is detected
 
-        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
-        LinearSolverType lin_solver = LinearSolverType::SparseLU; ///< [Ä¬ï¿½ï¿½SparseLU] ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È²ï¿½Ì¬ÏµÍ³ï¿½ï¿½ï¿½ï¿?
-        double bicgstab_droptol = 1e-2;                           ///< ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?BiCGSTAB Ê±Ê¹ï¿½Ãµï¿½ ILUT ï¿½Ý²ï¿½
-        double well_source_sign = 1.0;                           ///< Well sign for outflow-positive well operators in residual: R += Q_out.
-        Vector gravity_vector = Vector(0.0, 0.0, -9.81);     ///< body-force direction/magnitude used in potential calculation
+        // ÏßÐÔÇó½âÆ÷ÅäÖÃ
+        LinearSolverType lin_solver = LinearSolverType::SparseLU; ///< [Ä¬ÈÏSparseLU] Ó¦¶Ô¸ß¶È·Ç¶Ô³Æ²¡Ì¬ÏµÍ³µÄÇó½âÆ÷
+        double bicgstab_droptol = 1e-2;                           ///< Ê¹ÓÃ BiCGSTAB Ê±Ê¹ÓÃµÄ ILUT ½Ø¶ÏÈÝ²î
+        double well_source_sign = 1.0;                            ///< Well sign for outflow-positive well operators in residual: R += Q_out.
 
         // ==========================================================
-        // V3 ï¿½ï¿½É¢ï¿½ï¿½Î»ï¿½ï¿½ï¿½ÏµÍ³×¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?(Ä¬ï¿½Ï¿ï¿½ï¿½ï¿½ Summary Ä£Ê½)
+        // V3 ·¢É¢¶¨Î»Õï¶ÏÏµÍ³×¨ÊôÅäÖÃ (Ä¬ÈÏ¿ªÆô Summary Ä£Ê½)
         // ==========================================================
-        DiagLevel diag_level = DiagLevel::Summary;   ///< ï¿½ï¿½Ï¼ï¿½ï¿½ï¿?
-        int diag_print_every_iter = 1;               ///< Summary ï¿½ï¿½×¤ï¿½ï¿½ï¿½ï¿½Äµï¿½ï¿½ï¿½ï¿½ï¿½Æµï¿½ï¿?
-        double diag_blowup_factor = 5.0;             ///< ï¿½Ð²î±¬Õ¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ (res_new > res_old * factor)
-        int diag_hot_repeat_iters = 3;               ///< ï¿½ï¿½ï¿½ï¿½Í¬Ò» Hotspot ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÚµÄ´ï¿½ï¿½ï¿½
-        double diag_hot_res_change_tol = 1e-2;       ///< Hotspot ï¿½Ð²ï¿½ä»¯Í£ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½Ì¶ï¿?
-        int diag_clamp_trigger = 20;                 ///< Limiter ï¿½ï¿½ï¿½ï¿½ï¿½ç±©ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿?
-        int diag_max_hot_conn = 5;                   ///< ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿?Top-K ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
-        int diag_max_clamp_dump = 10;                ///< ï¿½Â¹Ê¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ãµ¹ï¿½ï¿?Limiter ï¿½Â¼ï¿½ï¿½ï¿½Ï¸ï¿½ï¿½
-        double diag_flux_spike_factor = 10.0;        ///< È«ï¿½ï¿½Í¨ï¿½ï¿½ï¿½ï¿½å±¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö?
-        double diag_eos_near_bound_ratio = 0.02;     ///< ÏµÍ³ï¿½ï¿½Ô½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ïµ½ï¿½Ë±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?EOS È«ï¿½Ö¾ï¿½ï¿½ï¿½
-        bool diag_incident_once_per_step = true;     ///< ï¿½ï¿½Ö¹Ë¢ï¿½ï¿½ï¿½ï¿½Í¬Ò»Ê±ï¿½ä²½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Â¹Ê¿ï¿½ï¿½ï¿?(JSON)
+        DiagLevel diag_level = DiagLevel::Summary;   ///< Õï¶Ï¼¶±ð
+        int diag_print_every_iter = 1;               ///< Summary ³£×¤Êä³öµÄµü´ú²½Æµ´Î
+        double diag_blowup_factor = 5.0;             ///< ²Ð²î±¬Õ¨´¥·¢ãÐÖµ (res_new > res_old * factor)
+        int diag_hot_repeat_iters = 3;               ///< Á¬ÐøÍ¬Ò» Hotspot ¿¨ËÀ´¥·¢ÉîÍÚµÄ´ÎÊý
+        double diag_hot_res_change_tol = 1e-2;       ///< Hotspot ²Ð²î±ä»¯Í£ÖÍÅÐ¶¨ÈÝÈÌ¶È
+        int diag_clamp_trigger = 20;                 ///< Limiter ´¥·¢·ç±©¾¯¸æµÄãÐÖµ´ÎÊý
+        int diag_max_hot_conn = 5;                   ///< ´¥·¢ÉîÍÚÊ±Êä³öµÄ Top-K ÍØÆËÁ¬½ÓÊý
+        int diag_max_clamp_dump = 10;                ///< ÊÂ¹Ê¿ìÕÕÖÐ×î¶àÇãµ¹µÄ Limiter ÊÂ¼þÃ÷Ï¸Êý
+        double diag_flux_spike_factor = 10.0;        ///< È«¾ÖÍ¨Á¿¼â·å±¶Êý±¨¾¯ãÐÖµ
+        double diag_eos_near_bound_ratio = 0.02;     ///< ÏµÍ³ÖÐÔ½½çÍø¸ñ´ïµ½´Ë±ÈÀý´¥·¢ EOS È«¾Ö¾¯¸æ
+        bool diag_incident_once_per_step = true;     ///< ·ÀÖ¹Ë¢ÆÁ£¬Í¬Ò»Ê±¼ä²½×î¶àÉú³ÉÒ»´ÎÊÂ¹Ê¿ìÕÕ (JSON)
     };
 
     // =====================================================================
-// SFINAE Ä£ï¿½ï¿½ï¿½Æµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú±ï¿½ï¿½ï¿½ï¿½Ú°ï¿½È«ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿?(ï¿½Ç·ï¿½ï¿½ï¿½ iterations() ï¿½Ó¿ï¿½)
-// =====================================================================
+    // SFINAE Ä£°åÍÆµ¼£ºÓÃÓÚÔÚ±àÒëÆÚ°²È«ÅÐ¶ÏÇó½âÆ÷ÊÇ·ñÎªµü´ú·¨ (ÊÇ·ñÓÐ iterations() ½Ó¿Ú)
+    // =====================================================================
     template <typename T, typename = void>
     struct is_iterative_solver : std::false_type {};
 
@@ -220,7 +167,7 @@ namespace FIM_Engine {
     struct is_iterative_solver<T, std::void_t<decltype(std::declval<T>().iterations())>> : std::true_type {};
 
     // =====================================================================
-    // V3 ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½3D ï¿½ï¿½ï¿½ï¿½ï¿½ë½»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¤ï¿½ï¿½ï¿½ (Pre-check)
+    // V3 ²¹¶¡£º3D ÍØÆËÓë½»»¥¶ÔÆô¶¯Ô¤¼ì²é (Pre-check)
     // =====================================================================
     template<typename MeshMgrType>
     inline void Run3DDiagnosticPrecheck(MeshMgrType& mgr, const std::vector<Connection>& conns, const TransientSolverParams& params) {
@@ -230,7 +177,7 @@ namespace FIM_Engine {
             std::cout << "\n=========================================================\n"
                 << "[PRE3D-DIAG] V3 Diagnostic Pre-check Starting...\n";
 
-            // 1. Ð£ï¿½ï¿½ InteractionPairs (ï¿½ï¿½ï¿½ï¿½-ï¿½Ñ·ì½»ï¿½ï¿½ï¿½ï¿½)
+            // 1. Ð£Ñé InteractionPairs (»ùÑÒ-ÁÑ·ì½»»¥¶Ô)
             int invalid_idx = 0, invalid_area = 0, invalid_dist = 0;
             const auto& pairs = mgr.getInteractionPairs();
             for (const auto& p : pairs) {
@@ -243,7 +190,7 @@ namespace FIM_Engine {
                 << "               Area <= eps  : " << invalid_area << "\n"
                 << "               Dist <= eps  : " << invalid_dist << "\n";
 
-            // 2. Ð£ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (Connections)
+            // 2. Ð£ÑéÈ«¾ÖÍØÆËÁ¬½Ó (Connections)
             int mm = 0, mf = 0, ff = 0, fi = 0;
             int neg_t_flow = 0, zero_t_flow = 0;
             int neg_t_heat = 0, zero_t_heat = 0;
@@ -270,10 +217,10 @@ namespace FIM_Engine {
 
 
     /**
-     * @brief Day6 ï¿½ï¿½Ñ¡ï¿½â²¿Ä£ï¿½ï¿½×¢ï¿½ï¿½: ï¿½ï¿½ï¿½Ô³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Ò?ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½ß½ï¿½ï¿½ï¿½ï¿½ï¿?
+     * @brief Day6 ¿ÉÑ¡Íâ²¿Ä£¿é×¢Èë: ×Ô¶¨Òå³õÊ¼»¯Æ÷Óë±ß½çÌõ¼þÉèÖÃ
      * @details
-     * - property_initializer: ï¿½Ú´ï¿½ï¿½ï¿½Ïµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö®Ç°Ö´ï¿½Ð£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê½×¢ï¿½ï¿½ï¿½ï¿½ï¿?ï¿½Ñ·ï¿½ï¿½ï¿½ï¿½ï¿½
-     * - pressure_bc / saturation_bc / temperature_bc: ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½Ì±ï¿½ï¿½ï¿½ï¿½Ä±ß½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
+     * - property_initializer: ÔÚ¾ØÕóÏµÍ³½¨Á¢Ö®Ç°Ö´ÐÐ£¬ÓÃÓÚº¯ÊýÊ½×¢Èë»ùÑÒÓëÁÑ·ìÎïÐÔ
+     * - pressure_bc / saturation_bc / temperature_bc: ¶ÔÓ¦³¡±äÁ¿µÄ±ß½çÌõ¼þÉèÖÃ
      */
     inline const char* ConnectionTypeLabel(ConnectionType type) {
         switch (type) {
@@ -285,55 +232,27 @@ namespace FIM_Engine {
         }
     }
 
-    enum class SinglePhaseFluidModel {
-        Water,
-        CO2
-    };
-
     template <typename MeshMgrType, typename FieldMgrType>
     struct TransientOptionalModules {
         std::function<void(MeshMgrType&, FieldMgrType&)> property_initializer;
         const BoundarySetting::BoundaryConditionManager* pressure_bc = nullptr;
         const BoundarySetting::BoundaryConditionManager* saturation_bc = nullptr;
         const BoundarySetting::BoundaryConditionManager* temperature_bc = nullptr;
-
-        SinglePhaseFluidModel single_phase_fluid = SinglePhaseFluidModel::Water;
-        CapRelPerm::VGParams vg_params = CapRelPerm::VGParams();
-        CapRelPerm::RelPermParams rp_params = CapRelPerm::RelPermParams();
-        std::function<void(const MeshMgrType&, const std::vector<Vector>&, int, std::vector<double>&, std::vector<double>&, std::vector<double>*)> state_initializer;
     };
 
     // =====================================================================
-    // Traits ï¿½ï¿½ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    // Traits ¸¨Öú·½·¨ÌáÈ¡Æ÷
     // =====================================================================
 
     inline int MatrixBlockCount(const MeshManager& mgr) { return mgr.getMatrixDOFCount(); }
     inline int MatrixBlockCount(const MeshManager_3D& mgr) { return mgr.fracture_network().getSolverIndexOffset(); }
-
-    template<int N>
-    inline AD_Fluid::ADFluidProperties<N> EvalPrimaryFluid(
-        SinglePhaseFluidModel model,
-        const ADVar<N>& P,
-        const ADVar<N>& T)
-    {
-        if (model == SinglePhaseFluidModel::CO2) {
-            return AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
-        }
-        return AD_Fluid::Evaluator::evaluateWater<N>(P, T);
-    }
 
     inline void MakePath(const std::string& caseName) {
         MKDIR("Test"); MKDIR("Test/Transient"); MKDIR("Test/Transient/Day6"); MKDIR(("Test/Transient/Day6/" + caseName).c_str());
     }
 
     template <typename FieldMgrType, typename MeshMgrType, int N>
-    inline void SyncStateToFieldManager(
-        const FIM_StateMap<N>& state,
-        FieldMgrType& fm,
-        const MeshMgrType& mgr,
-        SinglePhaseFluidModel sp_model = SinglePhaseFluidModel::Water,
-        const CapRelPerm::VGParams& vg_params = CapRelPerm::VGParams(),
-        const CapRelPerm::RelPermParams& rp_params = CapRelPerm::RelPermParams()) {
+    inline void SyncStateToFieldManager(const FIM_StateMap<N>& state, FieldMgrType& fm, const MeshMgrType& mgr) {
         int nMat = MatrixBlockCount(mgr);
         int nTotal = mgr.getTotalDOFCount();
 
@@ -379,7 +298,7 @@ namespace FIM_Engine {
             double p = state.P[i];
             double t = state.T[i];
             ADVar<N> P_ad(p), T_ad(t);
-            auto propsW = EvalPrimaryFluid<N>(sp_model, P_ad, T_ad);
+            auto propsW = AD_Fluid::Evaluator::evaluateWater<N>(P_ad, T_ad);
 
             double sw = (N == 3) ? state.Sw[i] : 1.0;
             double rho_w = propsW.rho.val;
@@ -387,13 +306,11 @@ namespace FIM_Engine {
             double krw = 1.0, krg = 0.0;
 
             if constexpr (N == 3) {
-                propsW = AD_Fluid::Evaluator::evaluateWater<N>(P_ad, T_ad);
+                CapRelPerm::VGParams vg; vg.alpha = 1e-5; vg.n = 2.0; vg.Swr = 0.0; vg.Sgr = 0.0;
+                CapRelPerm::RelPermParams rp; rp.L = 0.5;
                 ADVar<N> krw_ad, krg_ad;
-                CapRelPerm::kr_Mualem_vG<N>(ADVar<N>(sw), vg_params, rp_params, krw_ad, krg_ad);
-                krw = krw_ad.val;
-                krg = krg_ad.val;
-                rho_w = propsW.rho.val;
-                mu_w = propsW.mu.val;
+                CapRelPerm::kr_Mualem_vG<N>(ADVar<N>(sw), vg, rp, krw_ad, krg_ad);
+                krw = krw_ad.val; krg = krg_ad.val;
             }
 
             double lambda_w_mob = krw / std::max(mu_w, 1e-18);
@@ -463,23 +380,6 @@ namespace FIM_Engine {
             std::cout << "[Init] External property module injected.\n";
         }
 
-        const SinglePhaseFluidModel sp_model = (N == 2) ? modules.single_phase_fluid : SinglePhaseFluidModel::Water;
-        const bool sp_use_co2 = (N == 2) && (sp_model == SinglePhaseFluidModel::CO2);
-        if constexpr (N == 2) {
-            for (const auto& w : wells) {
-                if (sp_use_co2 && w.component_mode == WellComponentMode::Water) {
-                    std::cout << "[WellModeWarn] Single-phase CO2 case uses Water component mode for well '" << w.well_name
-                              << "'. Recommend WellComponentMode::Gas for explicit phase semantics.\n";
-                }
-                if (!sp_use_co2 && w.component_mode == WellComponentMode::Gas) {
-                    std::cout << "[WellModeWarn] Single-phase Water case uses Gas component mode for well '" << w.well_name
-                              << "'. Recommend WellComponentMode::Water for explicit phase semantics.\n";
-                }
-            }
-        }
-        const auto& vg_cfg = modules.vg_params;
-        const auto& rp_cfg = modules.rp_params;
-
         const int totalBlocks = mgr.getTotalDOFCount();
         const int totalEq = mgr.getTotalEquationDOFs();
         FIM_StateMap<N> state;
@@ -492,7 +392,7 @@ namespace FIM_Engine {
         const int saturationDof = (N == 3) ? 1 : -1;
         const int temperatureDof = (N == 3) ? 2 : 1;
 
-        // ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½
+        // ³õÊ¼Ìõ¼þ×¢Èë
         for (int i = 0; i < totalBlocks; ++i) {
             state.P[i] = ic.P_init;
             state.T[i] = ic.T_init;
@@ -536,12 +436,7 @@ namespace FIM_Engine {
                 blockCenters[nMat + static_cast<int>(i)] = orderedFrac[i] ? orderedFrac[i]->centroid : Vector(0.0, 0.0, 0.0);
             }
         }
-        if (modules.state_initializer) {
-            modules.state_initializer(mgr, blockCenters, nMat, state.P, state.T, (N == 3) ? &state.Sw : nullptr);
-            std::cout << "[Init] External state initializer injected.\n";
-        }
-
-        const Vector gravityVec = params.gravity_vector;
+        const Vector gravityVec(0.0, 0.0, -9.81);
 
         FIM_ConnectionManager connMgr;
         if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
@@ -598,13 +493,6 @@ namespace FIM_Engine {
             if (!(t_floor < t_ceil)) { t_floor = 273.15; t_ceil = std::numeric_limits<double>::max(); }
         }
 
-        const int step_cache_size = std::max(2, params.max_steps + 2);
-        std::vector<std::vector<double>> line_search_hist_cache(step_cache_size);
-        std::vector<int> ls_fail_iter1_cache(step_cache_size, 0);
-        std::vector<int> ptc_rescue_used_cache(step_cache_size, 0);
-        std::vector<double> ptc_rescue_boost_cache(step_cache_size, 1.0);
-        std::vector<int> controlled_accept_used_cache(step_cache_size, 0);
-
         for (int step = 1; step <= params.max_steps; ++step) {
             bool converged = false;
             FIM_StateMap<N> old_state = state;
@@ -617,7 +505,7 @@ namespace FIM_Engine {
             double best_res = std::numeric_limits<double>::infinity();
             int best_iter = -1;
 
-            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½V3 ï¿½ï¿½ï¿?- ï¿½Â¹Ê¿ï¿½ï¿½Õ·ï¿½Ë¢ï¿½ï¿½ï¿½ï¿½
+            // ¡¾ÐÂÔö¡¿£ºV3 Õï¶Ï - ÊÂ¹Ê¿ìÕÕ·ÀË¢ÆÁËø
             bool incident_dumped_this_step = false;
             int prev_hot_idx = -1;
             double prev_hot_res = -1.0;
@@ -625,7 +513,7 @@ namespace FIM_Engine {
             double prev_max_mass_flux = 0.0;
             double prev_max_heat_flux = 0.0;
 
-            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½V3 ï¿½ï¿½ï¿?- ï¿½ï¿½ Step 1 ï¿½ï¿½ï¿½ï¿½ 3D Ô¤ï¿½ï¿½ï¿?
+            // ¡¾ÐÂÔö¡¿£ºV3 Õï¶Ï - ÔÚ Step 1 ´¥·¢ 3D Ô¤¼ì²é
             if (step == 1) {
                 Run3DDiagnosticPrecheck(mgr, connMgr.GetConnections(), params);
             }
@@ -633,102 +521,19 @@ namespace FIM_Engine {
             // Dual convergence uses previous accepted relative update.
             double last_rel_update = std::numeric_limits<double>::infinity();
 
-            std::vector<double>& line_search_hist = line_search_hist_cache[step];
-            if (line_search_hist.capacity() < static_cast<size_t>(std::max(2, params.max_newton_iter + 1))) {
-                line_search_hist.reserve(std::max(2, params.max_newton_iter + 1));
-            }
-
-            std::vector<WellScheduleStep> active_wells = wells;
-            double control_ramp = 1.0;
-            double linear_solve_ms_sum = 0.0;
-            int linear_solve_calls = 0;
-            // Reuse SparseLU symbolic analysis inside one time step when matrix sparsity pattern is unchanged.
-            Eigen::SparseLU<Eigen::SparseMatrix<double>> sparse_lu_solver;
-            bool sparse_lu_pattern_ready = false;
-            bool sparse_lu_initialized = false;
-            int sparse_lu_rows = -1;
-            int sparse_lu_cols = -1;
-            Eigen::Index sparse_lu_nnz = -1;
-            std::uint64_t sparse_lu_pattern_hash = 0;
-            auto hash_sparse_pattern = [](const Eigen::SparseMatrix<double>& mat) -> std::uint64_t {
-                constexpr std::uint64_t kOffset = 1469598103934665603ull;
-                constexpr std::uint64_t kPrime = 1099511628211ull;
-                std::uint64_t h = kOffset;
-                const int* outer = mat.outerIndexPtr();
-                const int* inner = mat.innerIndexPtr();
-                for (int i = 0; i <= mat.outerSize(); ++i) {
-                    h ^= static_cast<std::uint64_t>(static_cast<unsigned int>(outer[i]));
-                    h *= kPrime;
-                }
-                const Eigen::Index nnz = mat.nonZeros();
-                for (Eigen::Index k = 0; k < nnz; ++k) {
-                    h ^= static_cast<std::uint64_t>(static_cast<unsigned int>(inner[k]));
-                    h *= kPrime;
-                }
-                return h;
-            };
-            if (params.enable_control_ramp) {
-                const int ramp_steps = std::max(1, params.control_ramp_steps);
-                const double r0 = std::max(1.0e-6, std::min(1.0, params.control_ramp_min));
-                if (step <= ramp_steps && ramp_steps > 1) {
-                    const double s = static_cast<double>(step - 1) / static_cast<double>(ramp_steps - 1);
-                    control_ramp = r0 + (1.0 - r0) * s;
-                }
-                else if (step <= ramp_steps) {
-                    control_ramp = r0;
-                }
-                control_ramp = std::max(1.0e-6, std::min(1.0, control_ramp));
-
-                if (control_ramp < 1.0 - 1.0e-12) {
-                    int nMat = 0;
-                    if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                        nMat = mgr.getMatrixDOFCount();
-                    }
-                    else {
-                        nMat = mgr.fracture_network().getSolverIndexOffset();
-                    }
-
-                    for (auto& w : active_wells) {
-                        int bidx = -1;
-                        if (w.domain == WellTargetDomain::Matrix) {
-                            bidx = w.completion_id;
-                        }
-                        else if (w.domain == WellTargetDomain::Fracture) {
-                            bidx = nMat + w.completion_id;
-                        }
-
-                        const double p_anchor = (bidx >= 0 && bidx < static_cast<int>(state.P.size())) ? state.P[bidx] : ic.P_init;
-                        const double t_anchor = (bidx >= 0 && bidx < static_cast<int>(state.T.size())) ? state.T[bidx] : ic.T_init;
-
-                        if (w.control_mode == WellControlMode::Rate && params.control_ramp_apply_rate) {
-                            w.target_value *= control_ramp;
-                        }
-                        else if (w.control_mode == WellControlMode::BHP && params.control_ramp_apply_bhp) {
-                            w.target_value = p_anchor + control_ramp * (w.target_value - p_anchor);
-                        }
-
-                        if (w.injection_temperature > 0.0) {
-                            w.injection_temperature = t_anchor + control_ramp * (w.injection_temperature - t_anchor);
-                        }
-                    }
-                    std::cout << "    [CTRL-RAMP] step=" << step << " factor=" << control_ramp << "\n";
-                }
-            }
-
             // Residual probe used by Armijo line search.
-            auto compute_residual_inf_for_state = [&](const FIM_StateMap<N>& eval_state, double probe_ptc_lambda = 0.0) -> double {
+            auto compute_residual_inf_for_state = [&](const FIM_StateMap<N>& eval_state) -> double {
                 FIM_BlockSparseMatrix<N> probe_mat(totalBlocks);
                 probe_mat.SetZero();
-                std::vector<double> probe_diag_acc(totalEq, 0.0);
 
                 // 1) accumulation
                 for (int bi = 0; bi < totalBlocks; ++bi) {
                     const double phi = 0.2, c_pr = 1000.0, rho_r = 2600.0;
                     ADVar<N> P(eval_state.P[bi]); P.grad(0) = 1.0;
                     ADVar<N> T(eval_state.T[bi]); T.grad((N == 2) ? 1 : 2) = 1.0;
-                    auto pW = EvalPrimaryFluid<N>(sp_model, P, T);
+                    auto pW = AD_Fluid::Evaluator::evaluateWater<N>(P, T);
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
-                    auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
+                    auto pW_old = AD_Fluid::Evaluator::evaluateWater<N>(P_old, T_old);
 
                     std::vector<ADVar<N>> acc_eqs(N);
                     if constexpr (N == 2) {
@@ -753,12 +558,6 @@ namespace FIM_Engine {
                         acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi + e_rock_old)) * (vols[bi] / dt);
                     }
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleAccumulation(bi, acc_eqs, probe_mat);
-                    for (int eq = 0; eq < N; ++eq) {
-                        const int g_eq = mgr.getEquationIndex(bi, eq);
-                        if (g_eq >= 0 && g_eq < totalEq) {
-                            probe_diag_acc[g_eq] += acc_eqs[eq].grad[eq];
-                        }
-                    }
                 }
 
                 // 2) flux
@@ -772,8 +571,8 @@ namespace FIM_Engine {
                         if constexpr (N == 2) {
                             if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
                             else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            auto pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
-                            auto pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
+                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i);
+                            auto pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
                             ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> mob_i = pW_i.rho / pW_i.mu, mob_j = pW_j.rho / pW_j.mu;
@@ -788,8 +587,8 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
                             auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(P_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(P_j, T_j);
-                            const auto& vg = vg_cfg;
-                            const auto& rp = rp_cfg;
+                            CapRelPerm::VGParams vg; vg.alpha = 1e-5; vg.n = 2.0; vg.Swr = 0.0; vg.Sgr = 0.0;
+                            CapRelPerm::RelPermParams rp; rp.L = 0.5;
                             ADVar<N> krw_i, krg_i, krw_j, krg_j;
                             CapRelPerm::kr_Mualem_vG<N>(Sw_i, vg, rp, krw_i, krg_i);
                             CapRelPerm::kr_Mualem_vG<N>(Sw_j, vg, rp, krw_j, krg_j);
@@ -808,24 +607,21 @@ namespace FIM_Engine {
                             F[2] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], F[1], up_h_w, up_h_g);
                         }
                         return F;
-                    };
+                        };
                     auto f_wrt_i = evalFlux(true);
                     auto f_wrt_j = evalFlux(false);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, probe_mat);
                 }
 
                 // 3) well source
-                SyncStateToFieldManager(eval_state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                SyncStateToFieldManager(eval_state, fm, mgr);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
-                const int well_dof_w = (N == 3) ? 0 : (sp_use_co2 ? -1 : 0);
-                const int well_dof_g = (N == 3) ? 1 : (sp_use_co2 ? 0 : -1);
-                const int well_dof_e = (N == 3) ? 2 : 1;
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, wells, 0, 0, (N == 3) ? 1 : -1, (N == 3) ? 2 : 1, w_res, w_jac3);
                 }
                 else {
-                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, wells, 0, 0, (N == 3) ? 1 : -1, (N == 3) ? 2 : 1, w_res, w_jac3);
                 }
                 const double kWellSourceSignProbe = params.well_source_sign;
                 for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -858,7 +654,7 @@ namespace FIM_Engine {
                         if (std::abs(r_bc) <= 1e-16) continue;
                         probe_mat.AddResidual(bi, dofOffset, r_bc);
                     }
-                };
+                    };
                 assembleBoundaryFieldProbe(modules.pressure_bc, pressureDof, pEqCfg.pressure_field);
                 if constexpr (N == 3) {
                     assembleBoundaryFieldProbe(modules.saturation_bc, saturationDof, sEqCfg.saturation);
@@ -876,28 +672,25 @@ namespace FIM_Engine {
                 const Eigen::SparseMatrix<double> A_probe = probe_mat.ExportEigenSparseMatrix();
                 double max_probe_scaled = 0.0;
                 for (int r = 0; r < b_probe.size(); ++r) {
-                    const double diag_acc_abs = (r >= 0 && r < static_cast<int>(probe_diag_acc.size())) ? std::abs(probe_diag_acc[r]) : 0.0;
                     const double diag_abs = std::abs(A_probe.coeff(r, r));
-                    const double diag_eff = diag_abs + std::max(0.0, probe_ptc_lambda) * std::max(diag_acc_abs, params.row_scale_floor);
-                    const double denom = std::max({ diag_acc_abs, diag_eff, params.row_scale_floor });
+                    const double denom = std::max(diag_abs, params.row_scale_floor);
                     const double scaled = std::abs(b_probe[r]) / std::max(denom, 1.0e-30);
                     if (scaled > max_probe_scaled) {
                         max_probe_scaled = scaled;
                     }
                 }
                 return max_probe_scaled;
-            };
+                };
 
             for (int iter = 0; iter < params.max_newton_iter; ++iter) {
                 iter_used++;
                 global_mat.SetZero();
 
-                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½V3 ï¿½ï¿½ï¿?- ï¿½ï¿½ï¿½Ì¹ï¿½ï¿½×»ï¿½ï¿½ï¿½ï¿½ï¿½
-                // ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É¶ï¿½ï¿½ï¿½ï¿½ï¿?(ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ * Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä·ï¿½ï¿½ï¿½ï¿½ï¿?N)
+                // ¡¾ÐÂÔö¡¿£ºV3 Õï¶Ï - ·½³Ì¹±Ï×»º´æÇø
+                // ·ÖÅä´óÐ¡ÎªËùÓÐ×ÔÓÉ¶È×ÜÊý (×ÜÍø¸ñÊý * Ã¿¸öÍø¸ñµÄ·½³ÌÊý N)
                 std::vector<EqContrib> eq_contribs(totalEq);
 
                 // [V3] Diagnostics counters for summary and incident triggers
-                const bool track_eos_domain = params.enforce_eos_domain || (params.diag_level != DiagLevel::Off);
                 int eos_fallback_water = 0;
                 int eos_fallback_co2 = 0;
                 int eos_near_bound_count = 0;
@@ -910,15 +703,15 @@ namespace FIM_Engine {
                 ConnectionType hot_mass_type = ConnectionType::Matrix_Matrix;
                 ConnectionType hot_heat_type = ConnectionType::Matrix_Matrix;
 
-                // ï¿½ï¿½×°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+                // ×é×°»ýÀÛÏî
                 for (int bi = 0; bi < totalBlocks; ++bi) {
                     const double phi = 0.2, c_pr = 1000.0, rho_r = 2600.0;
                     ADVar<N> P(state.P[bi]); P.grad(0) = 1.0;
                     ADVar<N> T(state.T[bi]); T.grad((N == 2) ? 1 : 2) = 1.0;
-                    auto pW = EvalPrimaryFluid<N>(sp_model, P, T);
+                    auto pW = AD_Fluid::Evaluator::evaluateWater<N>(P, T);
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
-                    auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
-                    if (track_eos_domain) {
+                    auto pW_old = AD_Fluid::Evaluator::evaluateWater<N>(P_old, T_old);
+                    if (params.diag_level != DiagLevel::Off) {
                         ++eos_total_samples;
                         if (pW.isFallback) ++eos_fallback_water;
                         if (pW.near_bound) ++eos_near_bound_count;
@@ -939,7 +732,7 @@ namespace FIM_Engine {
 
                         auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
                         auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(P_old, T_old);
-                        if (track_eos_domain) {
+                        if (params.diag_level != DiagLevel::Off) {
                             ++eos_total_samples;
                             if (pG.isFallback) ++eos_fallback_co2;
                             if (pG.near_bound) ++eos_near_bound_count;
@@ -965,7 +758,7 @@ namespace FIM_Engine {
                     }
                 }
 
-                // ï¿½ï¿½×°Í¨ï¿½ï¿½ï¿½ï¿½
+                // ×é×°Í¨Á¿Ïî
                 for (const auto& conn : connMgr.GetConnections()) {
                     int i = conn.nodeI, j = conn.nodeJ;
                     auto evalFlux = [&](bool wrt_i) -> std::vector<ADVar<N>> {
@@ -976,8 +769,8 @@ namespace FIM_Engine {
                         if constexpr (N == 2) {
                             if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
                             else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            auto pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
-                            auto pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
+                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i);
+                            auto pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
                             ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> mob_i = pW_i.rho / pW_i.mu, mob_j = pW_j.rho / pW_j.mu;
@@ -992,8 +785,9 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
                             auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(P_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(P_j, T_j);
-                            const auto& vg = vg_cfg;
-                            const auto& rp = rp_cfg;
+
+                            CapRelPerm::VGParams vg; vg.alpha = 1e-5; vg.n = 2.0; vg.Swr = 0.0; vg.Sgr = 0.0;
+                            CapRelPerm::RelPermParams rp; rp.L = 0.5;
                             ADVar<N> krw_i, krg_i, krw_j, krg_j;
                             CapRelPerm::kr_Mualem_vG<N>(Sw_i, vg, rp, krw_i, krg_i);
                             CapRelPerm::kr_Mualem_vG<N>(Sw_j, vg, rp, krw_j, krg_j);
@@ -1023,11 +817,11 @@ namespace FIM_Engine {
                     const double abs_mass_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[0].val);
                         else return std::max(std::abs(f_wrt_i[0].val), std::abs(f_wrt_i[1].val));
-                    }();
+                        }();
                     const double abs_heat_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[1].val);
                         else return std::abs(f_wrt_i[2].val);
-                    }();
+                        }();
 
                     if (abs_mass_flux > max_mass_flux) {
                         max_mass_flux = abs_mass_flux;
@@ -1042,8 +836,7 @@ namespace FIM_Engine {
                         hot_heat_type = conn.type;
                     }
 
-                    // =========================================================
-                    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½V3 ï¿½ï¿½ï¿?- ï¿½ï¿½Â¼ Flux ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
+                    // ¡¾ÐÂÔö¡¿£ºV3 Õï¶Ï - ¼ÇÂ¼ Flux ÎïÀí¹±Ï×
                     if (params.diag_level != DiagLevel::Off) {
                         for (int eq = 0; eq < N; ++eq) {
                             int g_eq_i = mgr.getEquationIndex(i, eq);
@@ -1053,27 +846,23 @@ namespace FIM_Engine {
                                 eq_contribs[g_eq_i].D_flux += f_wrt_i[eq].grad[eq];
                             }
                             if (g_eq_j >= 0 && g_eq_j < eq_contribs.size()) {
-                                eq_contribs[g_eq_j].R_flux -= f_wrt_j[eq].val;      // ï¿½Úµï¿½ j ï¿½ï¿½ï¿½ï¿½ -F
-                                eq_contribs[g_eq_j].D_flux -= f_wrt_j[eq].grad[eq]; // ï¿½Ô½ï¿½ï¿½ßµï¿½ï¿½ï¿½Í¬ï¿½ï¿½È¡ï¿½ï¿½
+                                eq_contribs[g_eq_j].R_flux -= f_wrt_j[eq].val;      // ½Úµã j ½ÓÊÕ -F
+                                eq_contribs[g_eq_j].D_flux -= f_wrt_j[eq].grad[eq]; // ¶Ô½ÇÏßµ¼ÊýÍ¬ÀíÈ¡¸º
                             }
                         }
                     }
-                    // =========================================================
                 }
 
-                // ï¿½ï¿½×°ï¿½ï¿½Ô´ï¿½î£¨È« Jacobian: d/dP, d/dSw, d/dTï¿½ï¿½
-                SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                // ×é×°¾®Ô´Ïî£¨È« Jacobian: d/dP, d/dSw, d/dT£©
+                SyncStateToFieldManager(state, fm, mgr);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
-                const int well_dof_w = (N == 3) ? 0 : (sp_use_co2 ? -1 : 0);
-                const int well_dof_g = (N == 3) ? 1 : (sp_use_co2 ? 0 : -1);
-                const int well_dof_e = (N == 3) ? 2 : 1;
 
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, wells, 0, 0, (N == 3) ? 1 : -1, (N == 3) ? 2 : 1, w_res, w_jac3);
                 }
                 else {
-                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, wells, 0, 0, (N == 3) ? 1 : -1, (N == 3) ? 2 : 1, w_res, w_jac3);
                 }
 
                 double max_abs_well_dsw = 0.0;
@@ -1114,8 +903,8 @@ namespace FIM_Engine {
                             global_mat.AddDiagJacobian(bi, eq, 1, dRdSw);
                             global_mat.AddDiagJacobian(bi, eq, 2, dRdT);
                         }
-                        // =========================================================
-                        // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½V3 ï¿½ï¿½ï¿?- ï¿½ï¿½Â¼ Well ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
+
+                        // ¡¾ÐÂÔö¡¿£ºV3 Õï¶Ï - ¼ÇÂ¼ Well ÎïÀí¹±Ï×
                         if (params.diag_level != DiagLevel::Off && g_eq >= 0 && g_eq < eq_contribs.size()) {
                             eq_contribs[g_eq].R_well += rWell;
                             if (eq == 0) eq_contribs[g_eq].D_well += dRdP;
@@ -1125,7 +914,6 @@ namespace FIM_Engine {
                                 else if (eq == 2) eq_contribs[g_eq].D_well += dRdT;
                             }
                         }
-                        // =========================================================
                     }
                 }
 
@@ -1136,7 +924,8 @@ namespace FIM_Engine {
                 else {
                     std::cout << "    [WellJac] max|dR/dT|=" << std::scientific << max_abs_well_dt << "\n";
                 }
-                // ï¿½ï¿½×°ï¿½â²¿ï¿½ß½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ (Dirichlet / Neumann / Robin)
+
+                // ×é×°Íâ²¿±ß½çÌõ¼þÄ£¿é (Dirichlet / Neumann / Robin)
                 auto assembleBoundaryField = [&](const BoundarySetting::BoundaryConditionManager* bcMgr,
                     int dofOffset,
                     const std::string& fieldName,
@@ -1167,13 +956,11 @@ namespace FIM_Engine {
                             global_mat.AddDiagJacobian(bi, dofOffset, dofOffset, d_bc);
                             ++appliedEq;
 
-                            // =========================================================
-                            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½V3 ï¿½ï¿½ï¿?- ï¿½ï¿½Â¼ BC ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
+                            // ¡¾ÐÂÔö¡¿£ºV3 Õï¶Ï - ¼ÇÂ¼ BC ÎïÀí¹±Ï×
                             if (params.diag_level != DiagLevel::Off && eqIdx >= 0 && eqIdx < eq_contribs.size()) {
                                 eq_contribs[eqIdx].R_bc += r_bc;
                                 eq_contribs[eqIdx].D_bc += d_bc;
                             }
-                            // =========================================================
                         }
                         if (params.diag_level != DiagLevel::Off) {
                             std::cout << "    [BC-SUM] field=" << fieldLabel
@@ -1204,23 +991,7 @@ namespace FIM_Engine {
                 auto A = global_mat.ExportEigenSparseMatrix();
                 auto b = global_mat.ExportEigenResidual();
 
-                double ptc_lambda_iter = 0.0;
-                if (params.enable_ptc) {
-                    const double decay = std::max(0.0, std::min(1.0, params.ptc_lambda_decay));
-                    const double base_ptc = std::max(params.ptc_lambda_min,
-                        params.ptc_lambda_init * std::pow(decay, static_cast<double>(iter)));
-                    const double rescue_boost = std::max(1.0, ptc_rescue_boost_cache[step]);
-                    ptc_lambda_iter = base_ptc * rescue_boost;
-                    if (ptc_lambda_iter > 0.0) {
-                        for (int r = 0; r < totalEq; ++r) {
-                            const double diag_acc_abs = (r >= 0 && r < static_cast<int>(eq_contribs.size())) ? std::abs(eq_contribs[r].D_acc) : 0.0;
-                            const double m_ptc = std::max(diag_acc_abs, params.row_scale_floor);
-                            A.coeffRef(r, r) += ptc_lambda_iter * m_ptc;
-                        }
-                    }
-                }
-
-                // ï¿½ï¿½Î»ï¿½ï¿½ï¿½Ð²ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?ï¿½ï¿½ï¿½Ì£ï¿½ï¿½ï¿½ï¿½Úµï¿½ï¿½Ô·ï¿½É¢Ô´
+                // ¶¨Î»×î´ó²Ð²î¶ÔÓ¦µÄ·½³ÌÓëÍø¸ñ£¬ÓÃÓÚ¶¨µãÉîÍÚ·¢É¢Ô´
                 int max_idx = 0;
                 double max_res = b.cwiseAbs().maxCoeff(&max_idx);
                 double max_res_scaled = max_res;
@@ -1247,20 +1018,11 @@ namespace FIM_Engine {
                 }
 
                 std::cout << "    [NL] step=" << step << " iter=" << iter_used
-                    << " dt=" << std::scientific << dt << " ramp=" << control_ramp << " ptc=" << ptc_lambda_iter << " res_inf=" << max_res
+                    << " dt=" << std::scientific << dt << " res_inf=" << max_res
                     << " res_scaled=" << max_res_scaled
                     << " (at DOF=" << max_idx << ")\n";
 
                 if (!std::isfinite(conv_res)) { fail_reason = "residual_nan_inf"; break; }
-                if (params.enforce_eos_domain &&
-                    (eos_fallback_water > 0 || eos_fallback_co2 > 0 || eos_near_bound_count > 0)) {
-                    fail_reason = "eos_domain_violation";
-                    std::cout << "    [EOS-STRICT] fallback_w=" << eos_fallback_water
-                        << " fallback_g=" << eos_fallback_co2
-                        << " near_bound=" << eos_near_bound_count << "/" << eos_total_samples
-                        << " -> reject step\n";
-                    break;
-                }
                 if (conv_res < params.abs_res_tol) {
                     converged = true; converge_mode = "abs_res";
                     std::cout << "    [NL-CONVERGED] step=" << step << " mode=" << converge_mode << " res_scaled=" << conv_res << "\n";
@@ -1281,8 +1043,8 @@ namespace FIM_Engine {
                     const double best_growth = best_res / std::max(res_iter1, 1e-30);
                     const double best_drop = 1.0 - best_growth;
                     const bool best_quality_ok = (best_res <= params.stagnation_abs_res_tol) &&
-                                                 (best_res < res_iter1) &&
-                                                 (best_drop >= params.stagnation_min_drop);
+                        (best_res < res_iter1) &&
+                        (best_drop >= params.stagnation_min_drop);
                     if (best_quality_ok && grow_from_best > params.best_iter_growth_trigger) {
                         state = best_state;
                         step_final_residual = best_res;
@@ -1304,8 +1066,8 @@ namespace FIM_Engine {
                     const double best_growth = (res_iter1 > 0.0) ? (best_res / std::max(res_iter1, 1e-30)) : 1.0;
                     const double best_drop = 1.0 - best_growth;
                     const bool best_quality_ok = (best_res <= params.stagnation_abs_res_tol) &&
-                                                 (best_res < res_iter1) &&
-                                                 (best_drop >= params.stagnation_min_drop);
+                        (best_res < res_iter1) &&
+                        (best_drop >= params.stagnation_min_drop);
                     const bool accept_best = (grow_from_best > 2.0) && best_quality_ok;
                     if (accept_best) {
                         state = best_state;
@@ -1359,15 +1121,7 @@ namespace FIM_Engine {
                     break;
                 }
 
-                if (params.enable_nonmonotone_line_search) {
-                    line_search_hist.push_back(conv_res);
-                    const size_t keep = static_cast<size_t>(std::max(1, params.nonmonotone_window));
-                    if (line_search_hist.size() > keep) {
-                        line_search_hist.erase(line_search_hist.begin(), line_search_hist.begin() + (line_search_hist.size() - keep));
-                    }
-                }
-
-                // [ï¿½Þ¸ï¿½] ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
+                // [ÐÞ¸Ä] ²ÎÊýÇý¶¯µÄÂ³°ôÏßÐÔÇó½âÆ÷ÉèÖÃ
                 Eigen::VectorXd dx;
                 bool compute_ok = false;
                 bool solve_ok = false;
@@ -1392,50 +1146,19 @@ namespace FIM_Engine {
                     row_scaling_applied = true;
                 }
 
-                const auto linear_t0 = std::chrono::steady_clock::now();
                 if (params.lin_solver == LinearSolverType::SparseLU) {
-                    const std::uint64_t pattern_hash = hash_sparse_pattern(A_solve);
-                    const bool shape_changed =
-                        (!sparse_lu_pattern_ready) ||
-                        (sparse_lu_rows != A_solve.rows()) ||
-                        (sparse_lu_cols != A_solve.cols()) ||
-                        (sparse_lu_nnz != A_solve.nonZeros()) ||
-                        (sparse_lu_pattern_hash != pattern_hash);
-                    const bool pattern_reused = sparse_lu_initialized && !shape_changed;
-
-                    if (!sparse_lu_initialized || shape_changed) {
-                        // First use (or changed sparsity): full compute to guarantee initialized decomposition.
-                        sparse_lu_solver.compute(A_solve);
-                        compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                        sparse_lu_pattern_ready = compute_ok;
-                        sparse_lu_initialized = compute_ok;
-                    }
-                    else {
-                        // Same sparsity pattern: numeric refactorization only.
-                        sparse_lu_solver.factorize(A_solve);
-                        compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                        if (!compute_ok) {
-                            sparse_lu_solver.compute(A_solve);
-                            compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                            sparse_lu_pattern_ready = compute_ok;
-                            sparse_lu_initialized = compute_ok;
-                        }
-                    }
-
+                    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+                    solver.compute(A_solve);
+                    compute_ok = (solver.info() == Eigen::Success);
                     if (compute_ok) {
-                        sparse_lu_rows = A_solve.rows();
-                        sparse_lu_cols = A_solve.cols();
-                        sparse_lu_nnz = A_solve.nonZeros();
-                        sparse_lu_pattern_hash = pattern_hash;
-                        dx = sparse_lu_solver.solve(-b_solve);
-                        solve_ok = (sparse_lu_solver.info() == Eigen::Success);
+                        dx = solver.solve(-b_solve);
+                        solve_ok = (solver.info() == Eigen::Success);
                     }
                     solver_log = "solver=SparseLU compute_ok=" + std::string(compute_ok ? "true" : "false") +
                         " solve_ok=" + std::string(solve_ok ? "true" : "false") +
                         " nnzA=" + std::to_string(A_solve.nonZeros()) +
                         " scaled=" + std::string(row_scaling_applied ? "true" : "false") +
-                        " pattern_reused=" + std::string(pattern_reused ? "true" : "false") +
-                        " info=" + std::to_string(sparse_lu_solver.info());
+                        " info=" + std::to_string(solver.info());
                 }
                 else {
                     Eigen::BiCGSTAB<Eigen::SparseMatrix<double>, Eigen::IncompleteLUT<double>> solver;
@@ -1455,9 +1178,6 @@ namespace FIM_Engine {
                         " scaled=" + std::string(row_scaling_applied ? "true" : "false") +
                         " info=" + std::to_string(solver.info());
                 }
-                const auto linear_t1 = std::chrono::steady_clock::now();
-                linear_solve_ms_sum += std::chrono::duration<double, std::milli>(linear_t1 - linear_t0).count();
-                linear_solve_calls++;
 
                 if (params.diag_level != DiagLevel::Off) {
                     const int printEvery = std::max(1, params.diag_print_every_iter);
@@ -1558,8 +1278,11 @@ namespace FIM_Engine {
                                     Sw_ad.grad[0] = 0.0;
                                     Sw_ad.grad[1] = 1.0;
                                     Sw_ad.grad[2] = 0.0;
-                            const auto& vg = vg_cfg;
-                            const auto& rp = rp_cfg;
+
+                                    CapRelPerm::VGParams vg;
+                                    vg.alpha = 1e-5; vg.n = 2.0; vg.Swr = 0.0; vg.Sgr = 0.0;
+                                    CapRelPerm::RelPermParams rp;
+                                    rp.L = 0.5;
 
                                     ADVar<3> krw, krg;
                                     CapRelPerm::kr_Mualem_vG<3>(Sw_ad, vg, rp, krw, krg);
@@ -1610,7 +1333,7 @@ namespace FIM_Engine {
                 if (!solve_ok) { fail_reason = "linear_solve_fail"; break; }
                 if (!dx.allFinite()) { fail_reason = "dx_nan_inf"; break; }
 
-                // [ï¿½Þ¸ï¿½] ï¿½ï¿½ï¿½Ã²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½Ø¶ï¿½ï¿½ë»¤ï¿½ï¿½(Damping)
+                // [ÐÞ¸Ä] Ó¦ÓÃ»ùÓÚÊ±¼ä²½³¤¸ÐÖªµÄ×´Ì¬½Ø¶ÏÓë±£»¤(Damping)
                 bool state_valid = true;
                 double alpha = 1.0;
                 // Time-step-aware damping:
@@ -1633,30 +1356,6 @@ namespace FIM_Engine {
                         alpha = std::min(alpha, max_dSw_eff / (std::abs(dx[eqSw]) + 1e-14));
                     }
                 }
-                if (!state_valid) break;
-
-                if constexpr (N == 3) {
-                    if (params.enable_alpha_safe_two_phase) {
-                        const double sw_eps = std::max(1.0e-12, std::min(1.0e-2, params.sw_safe_eps));
-                        const double sw_upper = 1.0 - sw_eps;
-                        const double shrink = std::max(0.5, std::min(1.0, params.sw_alpha_shrink));
-                        for (int bi = 0; bi < totalBlocks; ++bi) {
-                            const int eqSw = mgr.getEquationIndex(bi, 1);
-                            if (eqSw < 0 || eqSw >= dx.size()) { state_valid = false; fail_reason = "invalid_eq_index"; break; }
-                            const double sw0 = state.Sw[bi];
-                            const double dsw = dx[eqSw];
-                            if (dsw > 0.0) {
-                                const double amax = (sw_upper - sw0) / (dsw + 1.0e-30);
-                                if (std::isfinite(amax)) alpha = std::min(alpha, shrink * amax);
-                            }
-                            else if (dsw < 0.0) {
-                                const double amax = (sw0 - sw_eps) / (-dsw + 1.0e-30);
-                                if (std::isfinite(amax)) alpha = std::min(alpha, shrink * amax);
-                            }
-                        }
-                    }
-                }
-
                 if (!state_valid) break;
                 alpha = std::min(1.0, alpha);
                 if (!std::isfinite(alpha) || alpha < params.min_alpha) {
@@ -1719,231 +1418,41 @@ namespace FIM_Engine {
                 double accepted_rel_update = std::numeric_limits<double>::infinity();
                 bool update_accepted = false;
 
-                double conv_res_for_line_search = conv_res;
-                double conv_res_probe = std::numeric_limits<double>::quiet_NaN();
-                if (params.enable_armijo_line_search && params.enable_ls_base_check) {
-                    conv_res_probe = compute_residual_inf_for_state(state_before_update, ptc_lambda_iter);
-                    if (std::isfinite(conv_res_probe) && conv_res_probe > 0.0) {
-                        conv_res_for_line_search = conv_res_probe;
-                        const double mismatch = std::abs(conv_res_probe - conv_res) / std::max(std::abs(conv_res), 1.0e-30);
-                        if (mismatch > params.ls_base_mismatch_tol) {
-                            std::cout << "    [LS-BASE-CHECK] step=" << step
-                                << " iter=" << iter_used
-                                << " conv_res=" << conv_res
-                                << " probe_res=" << conv_res_probe
-                                << " mismatch=" << mismatch
-                                << " use_ref=" << conv_res_for_line_search << "\n";
-                        }
-                    }
-                }
-
                 if (params.enable_armijo_line_search) {
                     const int max_bt = std::max(1, params.armijo_max_backtracks);
                     const double bt_beta = std::max(0.1, std::min(0.95, params.armijo_beta));
                     const double c1 = std::max(1.0e-8, std::min(1.0e-2, params.armijo_c1));
 
-                    int ls_trials = 0;
-                    int ls_reject_state_invalid = 0;
-                    int ls_reject_nan_inf = 0;
-                    int ls_reject_armijo = 0;
-                    int ls_reject_alpha_floor = 0;
-                    std::string ls_last_reason = "none";
-                    std::vector<std::string> ls_trace_lines;
-                    ls_trace_lines.reserve(static_cast<size_t>(max_bt + 1));
-
-                    auto line_search_ref_value = [&]() {
-                        double ref = conv_res_for_line_search;
-                        if (params.enable_nonmonotone_line_search && !line_search_hist.empty()) {
-                            ref = std::max(ref, *std::max_element(line_search_hist.begin(), line_search_hist.end()));
-                        }
-                        return ref;
-                    };
-
-                    const bool ls_trace_live = params.enable_ls_trace && (step == 1);
-
                     double alpha_try = alpha;
-                    double best_trial_res = std::numeric_limits<double>::infinity();
-                    double best_trial_alpha = alpha;
-                    int best_trial_limiter = 0;
-                    double best_trial_rel_update = std::numeric_limits<double>::infinity();
-                    FIM_StateMap<N> best_trial_state = state_before_update;
-                    bool best_trial_valid = false;
-
                     for (int bt = 0; bt < max_bt; ++bt) {
-                        ++ls_trials;
-                        const double line_search_ref = line_search_ref_value();
-                        const double armijo_rhs = std::max(0.0, line_search_ref - c1 * alpha_try * conv_res_for_line_search);
-
                         FIM_StateMap<N> trial_state = state_before_update;
                         int trial_limiter = 0;
                         double trial_rel_update = std::numeric_limits<double>::infinity();
-                        double trial_res = std::numeric_limits<double>::quiet_NaN();
-
                         if (!apply_trial_update(state_before_update, alpha_try, trial_state, trial_limiter, trial_rel_update)) {
-                            ++ls_reject_state_invalid;
-                            ls_last_reason = "state_invalid";
-                        }
-                        else {
-                            trial_res = compute_residual_inf_for_state(trial_state, ptc_lambda_iter);
-                            if (!std::isfinite(trial_res)) {
-                                ++ls_reject_nan_inf;
-                                ls_last_reason = "trial_res_nan_inf";
-                            }
-                            else {
-                                if (trial_res < best_trial_res) {
-                                    best_trial_res = trial_res;
-                                    best_trial_alpha = alpha_try;
-                                    best_trial_limiter = trial_limiter;
-                                    best_trial_rel_update = trial_rel_update;
-                                    best_trial_state = trial_state;
-                                    best_trial_valid = true;
-                                }
-
-                                if (trial_res <= armijo_rhs) {
-                                    state = std::move(trial_state);
-                                    accepted_alpha = alpha_try;
-                                    accepted_limiter_added = trial_limiter;
-                                    accepted_rel_update = trial_rel_update;
-                                    update_accepted = true;
-                                    ls_last_reason = "accepted";
-                                }
-                                else {
-                                    ++ls_reject_armijo;
-                                    ls_last_reason = "armijo_not_satisfied";
-                                }
-                            }
+                            alpha_try *= bt_beta;
+                            if (alpha_try < params.min_alpha) break;
+                            continue;
                         }
 
-                        if (params.enable_ls_trace) {
-                            std::ostringstream oss;
-                            oss << "    [LS-TRACE] step=" << step
-                                << " iter=" << iter_used
-                                << " bt=" << (bt + 1)
-                                << " alpha_try=" << alpha_try
-                                << " trial_res=" << trial_res
-                                << " armijo_rhs=" << armijo_rhs
-                                << " ref_res=" << line_search_ref
-                                << " limiter_count=" << trial_limiter
-                                << " reject_reason=" << ls_last_reason;
-                            ls_trace_lines.push_back(oss.str());
-                            if (ls_trace_live) {
-                                std::cout << oss.str() << "\n";
-                            }
-                        }
-
-                        if (update_accepted) {
+                        const double trial_res = compute_residual_inf_for_state(trial_state);
+                        const double armijo_rhs = (1.0 - c1 * alpha_try) * conv_res;
+                        if (std::isfinite(trial_res) && trial_res <= armijo_rhs) {
+                            state = std::move(trial_state);
+                            accepted_alpha = alpha_try;
+                            accepted_limiter_added = trial_limiter;
+                            accepted_rel_update = trial_rel_update;
+                            update_accepted = true;
                             break;
                         }
 
                         alpha_try *= bt_beta;
-                        if (alpha_try < params.min_alpha) {
-                            ++ls_reject_alpha_floor;
-                            ls_last_reason = "alpha_too_small";
-                            if (params.enable_ls_trace) {
-                                std::ostringstream oss;
-                                oss << "    [LS-TRACE] step=" << step
-                                    << " iter=" << iter_used
-                                    << " bt=" << (bt + 1)
-                                    << " alpha_try=" << alpha_try
-                                    << " trial_res=" << std::numeric_limits<double>::quiet_NaN()
-                                    << " armijo_rhs=" << armijo_rhs
-                                    << " ref_res=" << line_search_ref
-                                    << " limiter_count=" << trial_limiter
-                                    << " reject_reason=" << ls_last_reason;
-                                ls_trace_lines.push_back(oss.str());
-                                if (ls_trace_live) {
-                                    std::cout << oss.str() << "\n";
-                                }
-                            }
-                            break;
-                        }
+                        if (alpha_try < params.min_alpha) break;
                     }
 
                     if (!update_accepted) {
-                        const double line_search_ref = line_search_ref_value();
-                        const double fallback_relax = 1.10; // allow mild non-monotone acceptance to escape hard rejects
-                        if (best_trial_valid && std::isfinite(best_trial_res) && best_trial_res <= line_search_ref * fallback_relax) {
-                            state = std::move(best_trial_state);
-                            accepted_alpha = best_trial_alpha;
-                            accepted_limiter_added = best_trial_limiter;
-                            accepted_rel_update = best_trial_rel_update;
-                            update_accepted = true;
-                            if (params.diag_level != DiagLevel::Off) {
-                                std::cout << "    [LS-FALLBACK] step=" << step
-                                    << " iter=" << iter_used
-                                    << " best_trial_res=" << best_trial_res
-                                    << " ref=" << line_search_ref
-                                    << " alpha=" << accepted_alpha << "\n";
-                            }
-                        }
-
-                        if (!update_accepted) {
-                            const bool allow_controlled_accept =
-                                params.enable_controlled_accept_iter1 &&
-                                (iter_used == 1) &&
-                                (ls_reject_armijo >= std::max(1, params.controlled_accept_min_armijo_reject)) &&
-                                (ls_reject_nan_inf == 0) &&
-                                (ls_reject_state_invalid == 0) &&
-                                best_trial_valid && std::isfinite(best_trial_res) &&
-                                (controlled_accept_used_cache[step] < std::max(0, params.controlled_accept_max_per_step));
-
-                            if (allow_controlled_accept) {
-                                const double relax = std::max(1.0, params.controlled_accept_relax);
-                                const double rel_update_cap = params.controlled_accept_max_rel_update;
-                                const bool res_ok = (best_trial_res <= line_search_ref * relax);
-                                const bool upd_ok = (rel_update_cap <= 0.0) ||
-                                    (std::isfinite(best_trial_rel_update) && best_trial_rel_update <= rel_update_cap);
-                                if (res_ok && upd_ok) {
-                                    state = std::move(best_trial_state);
-                                    accepted_alpha = best_trial_alpha;
-                                    accepted_limiter_added = best_trial_limiter;
-                                    accepted_rel_update = best_trial_rel_update;
-                                    update_accepted = true;
-                                    controlled_accept_used_cache[step] += 1;
-                                    std::cout << "    [LS-CONTROLLED-ACCEPT] step=" << step
-                                        << " iter=" << iter_used
-                                        << " best_trial_res=" << best_trial_res
-                                        << " ref=" << line_search_ref
-                                        << " relax=" << relax
-                                        << " alpha=" << accepted_alpha
-                                        << " rel_update=" << accepted_rel_update
-                                        << " used=" << controlled_accept_used_cache[step] << "\n";
-                                }
-                            }
-                        }
-
-                        if (!update_accepted) {
-                            if (params.enable_ls_trace && !ls_trace_live) {
-                                for (const auto& ln : ls_trace_lines) {
-                                    std::cout << ln << "\n";
-                                }
-                            }
-                            std::cout << "    [LS-FAIL] step=" << step
-                                << " iter=" << iter_used
-                                << " trials=" << ls_trials
-                                << " reject_state_invalid=" << ls_reject_state_invalid
-                                << " reject_nan_inf=" << ls_reject_nan_inf
-                                << " reject_armijo=" << ls_reject_armijo
-                                << " reject_alpha_floor=" << ls_reject_alpha_floor
-                                << " best_trial_res=" << best_trial_res
-                                << " ref=" << line_search_ref
-                                << " last_reason=" << ls_last_reason << "\n";
-
-                            state = state_before_update;
-                            if (ls_reject_nan_inf > 0) {
-                                fail_reason = "line_search_fail_nan_inf";
-                            }
-                            else if (ls_reject_state_invalid > 0 && ls_reject_armijo == 0) {
-                                fail_reason = "line_search_fail_state_invalid";
-                            }
-                            else if (ls_reject_alpha_floor > 0) {
-                                fail_reason = "line_search_fail_alpha_floor";
-                            }
-                            else {
-                                fail_reason = "line_search_fail_armijo";
-                            }
-                            break;
-                        }
+                        state = state_before_update;
+                        fail_reason = "line_search_fail";
+                        break;
                     }
                 }
                 else {
@@ -1974,51 +1483,15 @@ namespace FIM_Engine {
             if (!converged && fail_reason.empty()) fail_reason = "nonlinear_max_iter";
 
             if (!converged) {
-                const bool ls_fail = (fail_reason.rfind("line_search_fail", 0) == 0);
-                if (ls_fail && iter_used <= 1) {
-                    ls_fail_iter1_cache[step] += 1;
-                }
-                else {
-                    ls_fail_iter1_cache[step] = 0;
-                }
-
-                bool rescue_applied = false;
-                const int rescue_threshold = std::max(1, params.ls_fail_rescue_threshold);
-                const int rescue_max = std::max(0, params.ls_fail_rescue_max);
-                const double rescue_boost_factor = std::max(1.0, params.ptc_rescue_boost);
-                if (params.enable_ptc && ls_fail && iter_used <= 1 &&
-                    ls_fail_iter1_cache[step] >= rescue_threshold &&
-                    ptc_rescue_used_cache[step] < rescue_max &&
-                    rescue_boost_factor > 1.0) {
-                    ptc_rescue_used_cache[step] += 1;
-                    ptc_rescue_boost_cache[step] = std::max(1.0, ptc_rescue_boost_cache[step]) * rescue_boost_factor;
-                    state = old_state;
-                    step--;
-                    rescue_applied = true;
-                    std::cout << "    [PTC-RESCUE] step=" << (step + 1)
-                        << " iter=" << iter_used
-                        << " ls_fail_iter1_count=" << ls_fail_iter1_cache[step + 1]
-                        << " boost=" << ptc_rescue_boost_cache[step + 1]
-                        << " reason=" << fail_reason
-                        << " action=retry_without_dt_cut\n";
-                }
-
-                if (!rescue_applied) {
-                    total_rollbacks++;
-                    dt = std::max(dt * 0.5, params.dt_min);
-                    state = old_state;
-                    step--;
-                    std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
-                    if (dt <= params.dt_min && total_rollbacks > 20) throw std::runtime_error("[FAIL] dt reached lower bound with repeated rollback.");
-                    if (total_rollbacks > 80) throw std::runtime_error("[FAIL] Max rollbacks exceeded.");
-                }
+                total_rollbacks++;
+                dt = std::max(dt * 0.5, params.dt_min);
+                state = old_state;
+                step--;
+                std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
+                if (dt <= params.dt_min && total_rollbacks > 20) throw std::runtime_error("[FAIL] dt reached lower bound with repeated rollback.");
+                if (total_rollbacks > 80) throw std::runtime_error("[FAIL] Max rollbacks exceeded.");
             }
             else {
-                ls_fail_iter1_cache[step] = 0;
-                ptc_rescue_used_cache[step] = 0;
-                ptc_rescue_boost_cache[step] = 1.0;
-                controlled_accept_used_cache[step] = 0;
-                line_search_hist.clear();
                 t += dt;
                 completed_steps = step;
                 final_residual = step_final_residual;
@@ -2026,27 +1499,18 @@ namespace FIM_Engine {
                     << " iter_used=" << iter_used << " conv_mode=" << converge_mode
                     << " rollback_count=" << total_rollbacks << " limiter_count=" << total_limiters << "\n";
 
-                const double dt_used = dt;
                 if (converge_mode == "abs_res") {
                     if (iter_used <= 3) dt = std::min(dt * 1.2, params.dt_max);
                     else if (iter_used <= 5) dt = std::min(dt * 1.05, params.dt_max);
                     else dt = std::max(dt * 0.8, params.dt_min);
                 }
                 else if (converge_mode == "rel_res_update") {
-                    const int grow_hi = std::max(1, params.dt_relres_iter_grow_hi);
-                    const int neutral_hi = std::max(grow_hi, params.dt_relres_iter_neutral_hi);
-                    const int soft_hi = std::max(neutral_hi, params.dt_relres_iter_soft_shrink_hi);
-                    const double fac_grow = std::max(1.0, params.dt_relres_grow_factor);
-                    const double fac_neutral = std::max(0.1, params.dt_relres_neutral_factor);
-                    const double fac_soft = std::min(1.0, std::max(0.1, params.dt_relres_soft_shrink_factor));
-                    const double fac_hard = std::min(1.0, std::max(0.1, params.dt_relres_hard_shrink_factor));
-
-                    double fac = fac_hard;
-                    if (iter_used <= grow_hi) fac = fac_grow;
-                    else if (iter_used <= neutral_hi) fac = fac_neutral;
-                    else if (iter_used <= soft_hi) fac = fac_soft;
-
-                    dt = std::max(std::min(dt * fac, params.dt_max), params.dt_min);
+                    // rel_res_update often appears with moderate Newton iterations in stiff cases.
+                    // Keep dt neutral around 7~10 iterations to avoid artificial collapse to dt_min.
+                    if (iter_used <= 6) dt = std::min(dt * 1.08, params.dt_max);
+                    else if (iter_used <= 10) dt = dt;
+                    else if (iter_used <= 14) dt = std::max(dt * 0.92, params.dt_min);
+                    else dt = std::max(dt * 0.8, params.dt_min);
                 }
                 else if (converge_mode == "stagnation" || converge_mode == "dt_floor_best" || converge_mode == "best_iter_guard" || converge_mode == "dt_floor_hold") {
                     dt = std::max(dt * 0.85, params.dt_min);
@@ -2055,26 +1519,8 @@ namespace FIM_Engine {
                     dt = std::max(dt * 0.5, params.dt_min);
                 }
 
-                if (params.enable_ramp_dt_protection && params.enable_control_ramp) {
-                    const int ramp_steps = std::max(1, params.control_ramp_steps);
-                    if (step <= ramp_steps) {
-                        const double floor_scale = std::min(1.0, std::max(0.0, params.ramp_dt_min_scale));
-                        const double dt_floor = std::max(dt_used * floor_scale, params.dt_min);
-                        if (dt < dt_floor) dt = dt_floor;
-                    }
-                }
-
-                const double dt_scale_factor = (dt_used > 0.0) ? (dt / dt_used) : 1.0;
-                const double linear_solve_ms_avg = (linear_solve_calls > 0) ? (linear_solve_ms_sum / static_cast<double>(linear_solve_calls)) : 0.0;
-                std::ostringstream speed_ss;
-                speed_ss << std::scientific << std::setprecision(3)
-                         << "    [SPEED] dt_next=" << dt
-                         << " dt_scale_factor=" << dt_scale_factor
-                         << " linear_solve_ms_avg_this_step=" << linear_solve_ms_avg << " ms";
-                std::cout << speed_ss.str() << "\n";
-
                 if (step % 10 == 0 || step == params.max_steps) {
-                    SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                    SyncStateToFieldManager(state, fm, mgr);
                     std::string fname = "Test/Transient/Day6/" + caseName + ((step == params.max_steps) ? "/final.vtk" : ("/step_" + std::to_string(step) + ".vtk"));
                     if constexpr (std::is_same_v<MeshMgrType, MeshManager>) PostProcess_2D(mgr, fm).ExportVTK(fname, t);
                     else PostProcess_3D(mgr, fm).ExportVTK(fname, t);
@@ -2094,19 +1540,3 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

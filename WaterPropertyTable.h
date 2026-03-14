@@ -20,6 +20,13 @@ public:
     /// 在给定压力 P (Pa) 和 温度 T (K) 下插值返回全部水物性
     WaterProperties getProperties(const double& P, const double& T) const;
 
+    // Table bounds helpers for robust AD evaluator
+    double minPressure() const { return pressures_.empty() ? 0.0 : pressures_.front(); }
+    double maxPressure() const { return pressures_.empty() ? 0.0 : pressures_.back(); }
+    double minTemperature() const { return temps_.empty() ? 0.0 : temps_.front(); }
+    double maxTemperature() const { return temps_.empty() ? 0.0 : temps_.back(); }
+    double clampPressure(double P) const { return clamp(P, minPressure(), maxPressure()); }
+    double clampTemperature(double T) const { return clamp(T, minTemperature(), maxTemperature()); }
 private:
     WaterPropertyTable(const std::string& filename);
     void load(const std::string& filename);
@@ -36,6 +43,7 @@ private:
         return v < lo ? lo : (v > hi ? hi : v);
     }
 };
+
 
 
 

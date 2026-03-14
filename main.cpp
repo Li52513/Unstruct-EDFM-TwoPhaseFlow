@@ -95,7 +95,7 @@ void PrintCases(const std::vector<CaseEntry>& cases) {
 }
 } // namespace
 
-int main(int argc, char** argv) {
+int main (int argc, char** argv) {
     const std::vector<CaseEntry> cases = {
         {"day1_arch_conn", "Day1 explicit gate: run R4(trans_2d) + R5(trans_3d)", []() { return RunDay1ArchitectureFreeze(); }},
         {"day1_arch_conn_repro", "Day1 reproducibility gate: trans_2d x2 + trans_3d x2", []() { return RunDay1ArchitectureFreezeRepro(); }},
@@ -209,4 +209,3 @@ int main(int argc, char** argv) {
     PrintCases(cases);
     return 2;
 }
-

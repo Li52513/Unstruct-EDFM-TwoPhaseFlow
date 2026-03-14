@@ -55,7 +55,7 @@ namespace CapRelPerm {
         }
 
         // 2. 正常 VG 计算区间 (Se >= Threshold)
-        if (Se.val >= kSe_Eps) {
+        if (Se.val >= vg.Se_eps) {
             double m = vg.m();
 
             // val = Se^(-1/m) - 1.0; 
@@ -69,14 +69,14 @@ namespace CapRelPerm {
 
             ADVar<N> pc = ADVar<N>(1.0 / vg.alpha) * pow(val, 1.0 / vg.n);
 
-            if (pc.val > kPcMax) {
-                return ADVar<N>(kPcMax);
+            if (pc.val > vg.Pc_max) {
+                return ADVar<N>(vg.Pc_max);
             }
             return pc;
         }
         // 3. 线性化扩展区间 (Smoothing Region) -> 抑制导数爆炸
         else {
-            double Se_star = kSe_Eps;
+            double Se_star = vg.Se_eps;
             double m = vg.m();
 
             // 提前计算常数项斜率和截距，这部分是纯标量 (double) 的解析计算，不浪费 AD 的堆栈资源
@@ -93,7 +93,7 @@ namespace CapRelPerm {
 
             // 安全截断
             if (pc_linear.val < 0.0) return ADVar<N>(0.0);
-            if (pc_linear.val > kPcMax) return ADVar<N>(kPcMax);
+            if (pc_linear.val > vg.Pc_max) return ADVar<N>(vg.Pc_max);
 
             return pc_linear;
         }

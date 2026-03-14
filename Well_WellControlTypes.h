@@ -47,8 +47,16 @@ struct WellScheduleStep {
 
     double wi_override = -1.0;
     double L_override = -1.0;
+    // For WellComponentMode::Total:
+    // - If frac_w + frac_g > 0, assembler normalizes and uses them.
+    // - If both are 0, assembler falls back to mobility-weighted auto split.
     double frac_w = 0.0;
     double frac_g = 0.0;
+
+    // Optional injection stream temperature (K).
+    // Effective for injection branch in energy equation when > 0.
+    double injection_temperature = -1.0;
+    bool injection_is_co2 = false;
 };
 
 #endif // WELL_WELLCONTROLTYPES_H

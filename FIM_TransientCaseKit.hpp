@@ -11,6 +11,7 @@
 #include "BoundaryConditionManager.h"
 #include "MeshDefinitions.h"
 #include "AABB.h"
+#include "CapRelPerm_HD.h"
 
 #include <string>
 #include <utility>
@@ -27,6 +28,10 @@ struct PropertyPreset2D {
     bool enable_rock_region = true;
 
     SolidProperties_Frac frac{};
+
+    FIM_Engine::SinglePhaseFluidModel single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
+    CapRelPerm::VGParams vg{};
+    CapRelPerm::RelPermParams rp{};
 };
 
 struct PropertyPreset3D {
@@ -36,6 +41,10 @@ struct PropertyPreset3D {
     bool enable_rock_region = true;
 
     FractureGlobalParams frac{};
+
+    FIM_Engine::SinglePhaseFluidModel single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
+    CapRelPerm::VGParams vg{};
+    CapRelPerm::RelPermParams rp{};
 };
 
 inline PropertyPreset2D MakeDefaultPropertyPreset2D() {
@@ -63,6 +72,15 @@ inline PropertyPreset2D MakeDefaultPropertyPreset2D() {
     p.frac.cp_f = 900.0;
     p.frac.k_f = 2.0;
 
+    p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
+    p.vg.alpha = 1.0e-5;
+    p.vg.n = 2.0;
+    p.vg.Swr = 0.0;
+    p.vg.Sgr = 0.0;
+    p.vg.Pc_max = 1.0e7;
+    p.vg.Se_eps = 1.0e-3;
+    p.rp.L = 0.5;
+
     return p;
 }
 
@@ -74,6 +92,15 @@ inline PropertyPreset3D MakeDefaultPropertyPreset3D() {
     p.rock_region_box = BoundingBox3D{2.0, 8.0, 2.0, 8.0, 0.0, 10.0};
 
     p.frac = FractureGlobalParams(0.7, 2400.0, 900.0, 2.0, 0.1);
+
+    p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
+    p.vg.alpha = 1.0e-5;
+    p.vg.n = 2.0;
+    p.vg.Swr = 0.0;
+    p.vg.Sgr = 0.0;
+    p.vg.Pc_max = 1.0e7;
+    p.vg.Se_eps = 1.0e-3;
+    p.rp.L = 0.5;
 
     return p;
 }
@@ -124,7 +151,9 @@ inline FIM_Engine::TransientSolverParams BuildSolverParams(bool twoPhase,
                                                            int maxSteps = 50,
                                                            double dtInit = 0.25) {
     FIM_Engine::TransientSolverParams params;
-    params.well_source_sign = -1.0;
+    // Current well operator returns outflow-positive source (Q_out),
+    // and residual is assembled as Acc + Flux + Q_out = 0.
+    params.well_source_sign = 1.0;
     params.max_steps = maxSteps;
     params.dt_init = dtInit;
     params.lin_solver = FIM_Engine::LinearSolverType::SparseLU;
@@ -218,6 +247,9 @@ BuildModules2D(const PropertyPreset2D& preset,
     modules.pressure_bc = pBC;
     modules.temperature_bc = tBC;
     modules.saturation_bc = sBC;
+    modules.single_phase_fluid = preset.single_phase_fluid;
+    modules.vg_params = preset.vg;
+    modules.rp_params = preset.rp;
     return modules;
 }
 
@@ -253,6 +285,9 @@ BuildModules3D(const PropertyPreset3D& preset,
     modules.pressure_bc = pBC;
     modules.temperature_bc = tBC;
     modules.saturation_bc = sBC;
+    modules.single_phase_fluid = preset.single_phase_fluid;
+    modules.vg_params = preset.vg;
+    modules.rp_params = preset.rp;
     return modules;
 }
 

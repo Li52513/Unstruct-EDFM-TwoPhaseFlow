@@ -43,6 +43,8 @@ namespace CapRelPerm{
         double n = 2.0;             ///< 孔径分布指数, 必须 > 1.0
         double Swr = 0.25;          ///< 束缚水饱和度 (Irreducible Water Saturation)
         double Sgr = 0.05;          ///< 残余气饱和度 (Residual Gas Saturation)
+        double Pc_max = kPcMax;     ///< 可配置毛管压力上限 (Pa)
+        double Se_eps = kSe_Eps;    ///< 可配置平滑阈值
 
         /// @brief 计算 Mualem 参数 m = 1 - 1/n
         double m() const { return 1.0 - 1.0 / n; }
@@ -72,6 +74,8 @@ namespace CapRelPerm{
         if (vg.n <= 1.0) return false;
         if (vg.Swr < 0.0 || vg.Sgr < 0.0) return false;
         if (vg.Swr + vg.Sgr >= 1.0 - kTiny) return false;
+        if (vg.Pc_max <= 0.0) return false;
+        if (vg.Se_eps <= 0.0 || vg.Se_eps >= 1.0) return false;
         return true;
     }
 
@@ -111,20 +115,20 @@ namespace CapRelPerm{
         if (Se >= 1.0) return 0.0;
 
         // 2. 正常 VG 计算区间 (Se >= Threshold)
-        if (Se >= kSe_Eps) {
+        if (Se >= vg.Se_eps) {
             double m = vg.m();
             double val = std::pow(Se, -1.0 / m) - 1.0;
             // 防止 val 因数值误差微小于0
             val = std::max(val, 0.0);
             double pc = (1.0 / vg.alpha) * std::pow(val, 1.0 / vg.n);
-            return std::min(pc, kPcMax);
+            return std::min(pc, vg.Pc_max);
         }
 
         // 3. 线性化扩展区间 (Smoothing Region)
         // Pc(Se) ~ Pc(Eps) + Slope * (Se - Eps)
         // 目的：将无穷大的奇点替换为有限斜率的直线
         else {
-            double Se_star = kSe_Eps;
+            double Se_star = vg.Se_eps;
             double m = vg.m();
 
             // 计算参考点 Pc(Eps)
@@ -143,7 +147,7 @@ namespace CapRelPerm{
 
             // 安全截断
             if (pc_linear < 0.0) return 0.0;
-            if (pc_linear > kPcMax) return kPcMax;
+            if (pc_linear > vg.Pc_max) return vg.Pc_max;
 
             return pc_linear;
         }
@@ -165,7 +169,7 @@ namespace CapRelPerm{
         if (Se >= 1.0) return 0.0;
 
         // 2. 正常区间导数
-        if (Se >= kSe_Eps) {
+        if (Se >= vg.Se_eps) {
             double m = vg.m();
             double se_pow = std::pow(Se, -1.0 / m); // Se^(-1/m)
             double val = se_pow - 1.0;
@@ -187,7 +191,7 @@ namespace CapRelPerm{
         // 3. 线性化区间导数 (常数斜率)
         else {
             // 计算 kSe_Eps 处的斜率 (同 pc_vG 中的逻辑)
-            double Se_star = kSe_Eps;
+            double Se_star = vg.Se_eps;
             double m = vg.m();
             double val_star = std::pow(Se_star, -1.0 / m) - 1.0;
 
@@ -207,7 +211,7 @@ namespace CapRelPerm{
             double pc_star = (1.0 / vg.alpha) * std::pow(val_star, 1.0 / vg.n);
             double pc_linear = pc_star + slope_Se * (Se - Se_star);
 
-            if (pc_linear > kPcMax || pc_linear < 0.0) {
+            if (pc_linear > vg.Pc_max || pc_linear < 0.0) {
                 return 0.0;
             }
 

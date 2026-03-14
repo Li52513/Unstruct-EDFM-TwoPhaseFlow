@@ -14,6 +14,13 @@ public:
    static CO2PropertyTable& instance();
    CO2Properties getProperties(double P, double T) const;
 
+   // Table bounds helpers for robust AD evaluator
+   double minPressure() const { return pressures_.empty() ? 0.0 : pressures_.front(); }
+   double maxPressure() const { return pressures_.empty() ? 0.0 : pressures_.back(); }
+   double minTemperature() const { return temps_.empty() ? 0.0 : temps_.front(); }
+   double maxTemperature() const { return temps_.empty() ? 0.0 : temps_.back(); }
+   double clampPressure(double P) const { return clamp(P, minPressure(), maxPressure()); }
+   double clampTemperature(double T) const { return clamp(T, minTemperature(), maxTemperature()); }
 private:
   
    CO2PropertyTable(const std::string& filename);
@@ -30,3 +37,4 @@ private:
        return v < lo ? lo : (v > hi ? hi : v);
    }
 };
+
