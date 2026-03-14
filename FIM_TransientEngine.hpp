@@ -1,6 +1,6 @@
 ﻿/**
  * @file FIM_TransientEngine.hpp
- * @brief ??????????(FIM)????????????? (????????????????)
+ * @brief 全隐式(FIM)瞬态模拟引擎核心 (支持单/两相流、热流耦合及多尺度 EDFM)
  */
 
 #pragma once
@@ -32,6 +32,13 @@
 
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseLU>
+#include <amgcl/backend/builtin.hpp>
+#include <amgcl/make_solver.hpp>
+#include <amgcl/amg.hpp>
+#include <amgcl/solver/bicgstab.hpp>
+#include <amgcl/coarsening/smoothed_aggregation.hpp>
+#include <amgcl/relaxation/spai0.hpp>
+#include <amgcl/adapter/eigen.hpp>
 
 #include <algorithm>
 #include <array>
@@ -58,44 +65,31 @@
 namespace FIM_Engine {
 
 
-    /**
-     * @brief V3 ??????????
-     */
+
     enum class DiagLevel { Off, Summary, Hotspot, Forensic };
 
-    /**
-     * @struct EqContrib
-     * @brief ?????????????????????????????????????????в???Jacobian ?????????
-     */
     struct EqContrib {
         double R_acc = 0.0, R_flux = 0.0, R_well = 0.0, R_bc = 0.0;
         double D_acc = 0.0, D_flux = 0.0, D_well = 0.0, D_bc = 0.0;
 
-        /** @brief ???????????????? */
         void reset() {
             R_acc = R_flux = R_well = R_bc = 0.0;
             D_acc = D_flux = D_well = D_bc = 0.0;
         }
-
-        /** @brief ?????????????в?? */
         double R_total() const { return R_acc + R_flux + R_well + R_bc; }
 
-        /** @brief ??????????? Jacobian ?????????? */
         double D_total() const { return D_acc + D_flux + D_well + D_bc; }
     };
 
-    // =====================================================================
-    // ????????????????? (??????????????
-    // =====================================================================
 
     enum class SolverRoute { FIM, IMPES };
-    enum class LinearSolverType { SparseLU, BiCGSTAB };
+    enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL };
 
-    /** @brief ?????????????????*/
+
     struct InitialConditions {
-        double P_init = 2.0e5;   ///< ?????????? (Pa)
-        double T_init = 300.0;   ///< ?????????? (K)
-        double Sw_init = 0.2;    ///< ??????????? (-)
+        double P_init = 2.0e5;   
+        double T_init = 300.0;   
+        double Sw_init = 0.2;    
     };
 
     struct TransientStageProfile {
@@ -123,38 +117,37 @@ namespace FIM_Engine {
         double dt_relres_soft_shrink_factor = 0.98;
         double dt_relres_hard_shrink_factor = 0.92;
     };
-    /** @brief ?????????????????????*/
+
     struct TransientSolverParams {
-        int max_steps = 50;                     ///< ??????????????
+        int max_steps = 50;                     
+        double dt_init = 1.0;                   
+        double dt_min = 1e-4;                  
+        double dt_max = 86400.0;                
+        double target_end_time_s = -1.0;       
 
-        // ?????????
-        double dt_init = 1.0;                   ///< [?????????] ????????????1.0s?????????????Ч?
-        double dt_min = 1e-4;                   ///< ??С????????? (s)
-        double dt_max = 86400.0;                ///< ?????????????(s)
-        double target_end_time_s = -1.0;        ///< Stop criterion in physical time. <=0 disables and falls back to max_steps.
+        bool enable_two_stage_profile = false;   
+        double startup_end_time_s = 0.0;         
+        TransientStageProfile startup_profile{}; 
+        TransientStageProfile long_profile{};    
 
-        bool enable_two_stage_profile = false;   ///< Enable startup/long-run parameter profiles switched by physical time.
-        double startup_end_time_s = 0.0;         ///< Startup profile valid for t < startup_end_time_s.
-        TransientStageProfile startup_profile{}; ///< Startup stage profile.
-        TransientStageProfile long_profile{};    ///< Long-run stage profile.
-
-        double startup_vtk_output_interval_s = -1.0; ///< Startup VTK interval in physical time; <=0 falls back to step-based output.
+        double startup_vtk_output_interval_s = -1.0; 
         double long_vtk_output_interval_s = -1.0;    ///< Long-run VTK interval in physical time; <=0 falls back to step-based output.
-        bool enable_matrix_audit = false;            ///< Enable one-shot matrix assembly audit on configured step/iter.
-        bool matrix_audit_strict = false;            ///< Throw on audit failure when true.
-        int matrix_audit_step = 1;                   ///< 1-based step index for matrix audit.
-        int matrix_audit_iter = 1;                   ///< 1-based Newton iter index for matrix audit.
         double matrix_audit_coeff_tol = 1.0e-16;     ///< Coefficient threshold used to judge "missing" coupling.
         int matrix_audit_max_detail = 8;             ///< Max detailed missing-coupling lines to print.
+        bool enable_matrix_audit = false;
+        bool matrix_audit_strict = false;
+        int matrix_audit_step = 1;
+        int matrix_audit_iter = 1;
+        double matrix_audit_eps = 1.0e-14;
+        bool matrix_audit_require_nnc = true;
+        bool matrix_audit_require_ff = true;
 
-        // ?????????
-        int max_newton_iter = 8;                ///< Day6 ?????????????8 ?η????????
-        double abs_res_tol = 1e-6;              ///< Day6 ??????????в????????
+        int max_newton_iter = 8;                
+        double abs_res_tol = 1e-6;              
 
-        // ?????(Stagnation)???????
-        double stagnation_growth_tol = 0.995;   ///< ?????????????
-        double stagnation_abs_res_tol = 1.0e6;  ///< ?????????????????в? (?????? 1e4, ?????? 1e6)
-        double stagnation_min_drop = 2.0e-3;    ///< ???????????С???в??????
+        double stagnation_growth_tol = 0.995;   
+        double stagnation_abs_res_tol = 1.0e6;  
+        double stagnation_min_drop = 2.0e-3;    
         double best_iter_growth_trigger = 1.5;  ///< Trigger best-iterate takeover when current residual grows beyond this factor vs in-step best.
         int best_iter_guard_min_iter = 3;       ///< Minimum Newton iterations before enabling best-iterate takeover.
         bool enable_best_iter_guard = false;    ///< Disable best-iterate takeover by default for strict acceptance.
@@ -162,11 +155,9 @@ namespace FIM_Engine {
         bool enable_stagnation_accept = false;  ///< Disable stagnation-based acceptance by default.
         bool enable_dt_floor_hold = false;      ///< Emergency-only fallback at dt_min; keep false for strict acceptance.
 
-        // ????????: ???в? + ????????
         double rel_res_tol = 1.0e-3;            ///< Relative residual threshold (max_res / res_iter1).
         double rel_update_tol = 1.0e-6;         ///< Relative state-update infinity norm threshold.
 
-        // Armijo ??????????
         bool enable_armijo_line_search = true;  ///< Enable residual-tested backtracking line search.
         int armijo_max_backtracks = 8;          ///< Max backtracking count per Newton step.
         double armijo_beta = 0.5;               ///< Backtracking shrink factor in (0,1).
@@ -186,6 +177,7 @@ namespace FIM_Engine {
         int ls_fail_rescue_threshold = 2;          ///< Trigger PTC rescue after this many iter-1 line-search failures in the same step.
         int ls_fail_rescue_max = 1;                ///< Max rescue retries before allowing dt rollback.
         double ptc_rescue_boost = 5.0;            ///< Multiplicative boost for PTC weight during rescue retry.
+        double rollback_shrink_factor = 0.7;      ///< Time-step shrink factor on rollback, in (0,1].
 
         // Pseudo-transient continuation (PTC) diagonal stabilization: J <- J + lambda * M
         bool enable_ptc = false;                   ///< Enable pseudo-transient diagonal regularization.
@@ -211,16 +203,16 @@ namespace FIM_Engine {
         double dt_relres_soft_shrink_factor = 0.98; ///< Soft-shrink factor in rel_res_update mode.
         double dt_relres_hard_shrink_factor = 0.92; ///< Hard-shrink factor in rel_res_update mode.
 
-        // ??????????????: ?? |diag_acc| ?? |diag(A)| ????????????
+
         bool enable_row_scaling = true;         ///< Enable row scaling before linear solve.
         double row_scale_floor = 1.0;           ///< Characteristic lower bound in scaling denominator.
         double row_scale_min = 1.0e-12;         ///< Min allowed row scale factor.
         double row_scale_max = 1.0e+12;         ///< Max allowed row scale factor.
 
-        // ?????????(Limiter & Damping)
-        double max_dP = 1.0e4;                  ///< [?????] ??????????????????仯??(Pa)
-        double max_dT = 2.0;                    ///< [?????] ?????????????????仯??(K)
-        double max_dSw = 0.05;                  ///< ??????????????????仯??(-)
+        
+        double max_dP = 1.0e4;                  
+        double max_dT = 2.0;                    
+        double max_dSw = 0.05;                  
         double min_alpha = 1.0e-8;              ///< line-search/damping lower bound; avoid forced large update at stiff states
         bool enable_alpha_safe_two_phase = true; ///< Appleyard-style Sw safety alpha for two-phase trial updates.
         double sw_safe_eps = 1.0e-8;             ///< Sw safety epsilon used by alpha-safe limiter.
@@ -228,40 +220,38 @@ namespace FIM_Engine {
         bool clamp_state_to_eos_bounds = false; ///< hard-clip P/T into EOS table bounds; disabled by default to avoid edge pinning
         bool enforce_eos_domain = false;        ///< strict EOS domain check: fail step when near_bound/fallback is detected
 
-        // ??????????????
-        LinearSolverType lin_solver = LinearSolverType::SparseLU; ///< [???SparseLU] ?????????????????????
-        double bicgstab_droptol = 1e-2;                           ///< ????????BiCGSTAB ????? ILUT ???
+    
+        LinearSolverType lin_solver = LinearSolverType::SparseLU; 
+        double bicgstab_droptol = 1e-2;                          
         double well_source_sign = 1.0;                           ///< Well sign for outflow-positive well operators in residual: R += Q_out.
         Vector gravity_vector = Vector(0.0, 0.0, -9.81);     ///< body-force direction/magnitude used in potential calculation
 
-        // ==========================================================
-        // V3 ?????λ?????????????(?????? Summary ??)
-        // ==========================================================
-        DiagLevel diag_level = DiagLevel::Summary;   ///< ???????
-        int diag_print_every_iter = 1;               ///< Summary ?????????????????
-        double diag_blowup_factor = 5.0;             ///< ?в????????? (res_new > res_old * factor)
-        int diag_hot_repeat_iters = 3;               ///< ?????? Hotspot ????????????????
-        double diag_hot_res_change_tol = 1e-2;       ///< Hotspot ?в?仯????ж???????
-        int diag_clamp_trigger = 20;                 ///< Limiter ?????籩?????????????
-        int diag_max_hot_conn = 5;                   ///< ???????????????Top-K ??????????
-        int diag_max_clamp_dump = 10;                ///< ?1??????????????Limiter ????????
-        double diag_flux_spike_factor = 10.0;        ///< ????????屶??????????
-        double diag_eos_near_bound_ratio = 0.02;     ///< ??????????????????????EOS ??????
-        bool diag_incident_once_per_step = true;     ///< ????????????????????????1?????(JSON)
+        double amgcl_tol = 1.0e-6;
+        int amgcl_maxiter = 500;
+        bool amgcl_use_fallback_sparselu = true;
+        bool amgcl_log_on_failure = true;
+
+        DiagLevel diag_level = DiagLevel::Summary;   
+        int diag_print_every_iter = 1;               
+        double diag_blowup_factor = 5.0;             
+        int diag_hot_repeat_iters = 3;              
+        double diag_hot_res_change_tol = 1e-2;      
+        int diag_clamp_trigger = 20;                 
+        int diag_max_hot_conn = 5;                   
+        int diag_max_clamp_dump = 10;                
+        double diag_flux_spike_factor = 10.0;        
+        double diag_eos_near_bound_ratio = 0.02;     
+        bool diag_incident_once_per_step = true;     
     };
 
-    // =====================================================================
-// SFINAE ??????????????????????ж?????????????????(????? iterations() ???)
-// =====================================================================
+
     template <typename T, typename = void>
     struct is_iterative_solver : std::false_type {};
 
     template <typename T>
     struct is_iterative_solver<T, std::void_t<decltype(std::declval<T>().iterations())>> : std::true_type {};
 
-    // =====================================================================
-    // V3 ??????3D ????????????????? (Pre-check)
-    // =====================================================================
+
     template<typename MeshMgrType>
     inline void Run3DDiagnosticPrecheck(MeshMgrType& mgr, const std::vector<Connection>& conns, const TransientSolverParams& params) {
         if constexpr (std::is_same_v<MeshMgrType, MeshManager_3D>) {
@@ -283,7 +273,6 @@ namespace FIM_Engine {
                 << "               Area <= eps  : " << invalid_area << "\n"
                 << "               Dist <= eps  : " << invalid_dist << "\n";
 
-            // 2. У????????????? (Connections)
             int mm = 0, mf = 0, ff = 0, fi = 0;
             int neg_t_flow = 0, zero_t_flow = 0;
             int neg_t_heat = 0, zero_t_heat = 0;
@@ -308,13 +297,6 @@ namespace FIM_Engine {
         }
     }
 
-
-    /**
-     * @brief Day6 ???????????: ???????????????/???????????
-     * @details
-     * - property_initializer: ????????????????У??????????????????????
-     * - pressure_bc / saturation_bc / temperature_bc: ????????????????????
-     */
     inline const char* ConnectionTypeLabel(ConnectionType type) {
         switch (type) {
         case ConnectionType::Matrix_Matrix: return "MM";
@@ -342,10 +324,6 @@ namespace FIM_Engine {
         CapRelPerm::RelPermParams rp_params = CapRelPerm::RelPermParams();
         std::function<void(const MeshMgrType&, const std::vector<Vector>&, int, std::vector<double>&, std::vector<double>&, std::vector<double>*)> state_initializer;
     };
-
-    // =====================================================================
-    // Traits ?????????????
-    // =====================================================================
 
     inline int MatrixBlockCount(const MeshManager& mgr) { return mgr.getMatrixDOFCount(); }
     inline int MatrixBlockCount(const MeshManager_3D& mgr) { return mgr.fracture_network().getSolverIndexOffset(); }
@@ -644,7 +622,6 @@ namespace FIM_Engine {
         const int saturationDof = (N == 3) ? 1 : -1;
         const int temperatureDof = (N == 3) ? 2 : 1;
 
-        // ??????????
         for (int i = 0; i < totalBlocks; ++i) {
             state.P[i] = ic.P_init;
             state.T[i] = ic.T_init;
@@ -831,7 +808,6 @@ namespace FIM_Engine {
             double best_res = std::numeric_limits<double>::infinity();
             int best_iter = -1;
 
-            // ??????????V3 ????- ?1??????????
             bool incident_dumped_this_step = false;
             int prev_hot_idx = -1;
             double prev_hot_res = -1.0;
@@ -874,7 +850,7 @@ namespace FIM_Engine {
             stage_initialized = true;
             last_stage_startup = use_startup_stage;
 
-            // ??????????V3 ????- ?? Step 1 ???? 3D ?????
+            
             if (step == 1) {
                 Run3DDiagnosticPrecheck(mgr, connMgr.GetConnections(), params);
             }
@@ -1150,8 +1126,6 @@ namespace FIM_Engine {
                 iter_used++;
                 global_mat.SetZero();
 
-                // ??????????V3 ????- ????????????
-                // ?????С???????????????(???????? * ??????????????N)
                 std::vector<EqContrib> eq_contribs(totalEq);
 
                 // [V3] Diagnostics counters for summary and incident triggers
@@ -1168,7 +1142,7 @@ namespace FIM_Engine {
                 ConnectionType hot_mass_type = ConnectionType::Matrix_Matrix;
                 ConnectionType hot_heat_type = ConnectionType::Matrix_Matrix;
 
-                // ?????????
+                
                 for (int bi = 0; bi < totalBlocks; ++bi) {
                     const double phi = 0.2, c_pr = 1000.0, rho_r = 2600.0;
                     ADVar<N> P(state.P[bi]); P.grad(0) = 1.0;
@@ -1223,8 +1197,21 @@ namespace FIM_Engine {
                     }
                 }
 
-                // ????????
+                struct ConnAuditStat {
+                    int conn_count = 0;
+                    double sum_abs_tflow = 0.0;
+                    double sum_abs_theat = 0.0;
+                    int offdiag_nnz = 0;
+                    double sum_abs_offdiag = 0.0;
+                };
+                std::map<ConnectionType, ConnAuditStat> audit_stats;
+
+                
                 for (const auto& conn : connMgr.GetConnections()) {
+                    audit_stats[conn.type].conn_count++;
+                    audit_stats[conn.type].sum_abs_tflow += std::abs(conn.T_Flow);
+                    audit_stats[conn.type].sum_abs_theat += std::abs(conn.T_Heat);
+
                     int i = conn.nodeI, j = conn.nodeJ;
                     auto evalFlux = [&](bool wrt_i) -> std::vector<ADVar<N>> {
                         std::vector<ADVar<N>> F(N);
@@ -1300,8 +1287,6 @@ namespace FIM_Engine {
                         hot_heat_type = conn.type;
                     }
 
-                    // =========================================================
-                    // ??????????V3 ????- ??? Flux ????????
                     if (params.diag_level != DiagLevel::Off) {
                         for (int eq = 0; eq < N; ++eq) {
                             int g_eq_i = mgr.getEquationIndex(i, eq);
@@ -1316,10 +1301,9 @@ namespace FIM_Engine {
                             }
                         }
                     }
-                    // =========================================================
                 }
 
-                // ????????? Jacobian: d/dP, d/dSw, d/dT??
+             
                 SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
@@ -1372,8 +1356,7 @@ namespace FIM_Engine {
                             global_mat.AddDiagJacobian(bi, eq, 1, dRdSw);
                             global_mat.AddDiagJacobian(bi, eq, 2, dRdT);
                         }
-                        // =========================================================
-                        // ??????????V3 ????- ??? Well ????????
+
                         if (params.diag_level != DiagLevel::Off && g_eq >= 0 && g_eq < eq_contribs.size()) {
                             eq_contribs[g_eq].R_well += rWell;
                             if (eq == 0) eq_contribs[g_eq].D_well += dRdP;
@@ -1383,7 +1366,7 @@ namespace FIM_Engine {
                                 else if (eq == 2) eq_contribs[g_eq].D_well += dRdT;
                             }
                         }
-                        // =========================================================
+
                     }
                 }
 
@@ -1394,7 +1377,6 @@ namespace FIM_Engine {
                 else {
                     std::cout << "    [WellJac] max|dR/dT|=" << std::scientific << max_abs_well_dt << "\n";
                 }
-                // ??????????????? (Dirichlet / Neumann / Robin)
                 auto assembleBoundaryField = [&](const BoundarySetting::BoundaryConditionManager* bcMgr,
                     int dofOffset,
                     const std::string& fieldName,
@@ -1425,13 +1407,10 @@ namespace FIM_Engine {
                             global_mat.AddDiagJacobian(bi, dofOffset, dofOffset, d_bc);
                             ++appliedEq;
 
-                            // =========================================================
-                            // ??????????V3 ????- ??? BC ????????
                             if (params.diag_level != DiagLevel::Off && eqIdx >= 0 && eqIdx < eq_contribs.size()) {
                                 eq_contribs[eqIdx].R_bc += r_bc;
                                 eq_contribs[eqIdx].D_bc += d_bc;
                             }
-                            // =========================================================
                         }
                         if (params.diag_level != DiagLevel::Off) {
                             std::cout << "    [BC-SUM] field=" << fieldLabel
@@ -1461,6 +1440,62 @@ namespace FIM_Engine {
                 assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, "T");
                 auto A = global_mat.ExportEigenSparseMatrix();
                 auto b = global_mat.ExportEigenResidual();
+                if (params.enable_matrix_audit && step == params.matrix_audit_step && iter_used == params.matrix_audit_iter) {
+                    for (const auto& conn : connMgr.GetConnections()) {
+                        int i = conn.nodeI, j = conn.nodeJ;
+                        for (int eq = 0; eq < N; ++eq) {
+                            int g_eq_i = mgr.getEquationIndex(i, eq);
+                            int g_eq_j = mgr.getEquationIndex(j, eq);
+                            for (int var = 0; var < N; ++var) {
+                                int g_var_i = mgr.getEquationIndex(i, var);
+                                int g_var_j = mgr.getEquationIndex(j, var);
+
+                                if (g_eq_i >= 0 && g_var_j >= 0) {
+                                    double val = A.coeff(g_eq_i, g_var_j);
+                                    if (std::abs(val) > 0.0) {
+                                        audit_stats[conn.type].offdiag_nnz++;
+                                        audit_stats[conn.type].sum_abs_offdiag += std::abs(val);
+                                    }
+                                }
+                                if (g_eq_j >= 0 && g_var_i >= 0) {
+                                    double val = A.coeff(g_eq_j, g_var_i);
+                                    if (std::abs(val) > 0.0) {
+                                        audit_stats[conn.type].offdiag_nnz++;
+                                        audit_stats[conn.type].sum_abs_offdiag += std::abs(val);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    for (const auto& kv : audit_stats) {
+                        std::cout << "    [MATRIX-AUDIT] type=" << ConnectionTypeLabel(kv.first)
+                            << " conn=" << kv.second.conn_count
+                            << " sum|Tflow|=" << std::scientific << kv.second.sum_abs_tflow
+                            << " sum|Theat|=" << kv.second.sum_abs_theat
+                            << " offdiag_nnz=" << kv.second.offdiag_nnz
+                            << " sum|Aoff|=" << kv.second.sum_abs_offdiag << "\n";
+                    }
+
+                    if (params.matrix_audit_strict) {
+                        auto check_conn = [&](ConnectionType type, const std::string& name, bool required) {
+                            if (!required) return;
+                            auto it = audit_stats.find(type);
+                            if (it == audit_stats.end() || it->second.conn_count == 0) {
+                                throw std::runtime_error("[MATRIX-AUDIT-FAIL] Strict mode requires " + name + " connections, but none found.");
+                            }
+                            if ((it->second.sum_abs_tflow + it->second.sum_abs_theat) <= params.matrix_audit_eps) {
+                                throw std::runtime_error("[MATRIX-AUDIT-FAIL] " + name + " TFlow/THeat sum is zero or extremely small.");
+                            }
+                            if (it->second.offdiag_nnz == 0 || it->second.sum_abs_offdiag <= params.matrix_audit_eps) {
+                                throw std::runtime_error("[MATRIX-AUDIT-FAIL] " + name + " coefficients were not successfully assembled into off-diagonal Jacobian.");
+                            }
+                            };
+                        check_conn(ConnectionType::Matrix_Fracture, "MF(NNC)", params.matrix_audit_require_nnc);
+                        check_conn(ConnectionType::Fracture_Fracture, "FF", params.matrix_audit_require_ff);
+                        std::cout << "    [MATRIX-AUDIT-PASS] Strict audit completed successfully.\n";
+                    }
+                }
 
                 if (params.enable_matrix_audit &&
                     step == std::max(1, params.matrix_audit_step) &&
@@ -1503,7 +1538,6 @@ namespace FIM_Engine {
                     }
                 }
 
-                // ??λ???в?????????????????????????
                 int max_idx = 0;
                 double max_res = b.cwiseAbs().maxCoeff(&max_idx);
                 double max_res_scaled = max_res;
@@ -1650,7 +1684,6 @@ namespace FIM_Engine {
                     }
                 }
 
-                // [???] ??????????3????????????
                 Eigen::VectorXd dx;
                 bool compute_ok = false;
                 bool solve_ok = false;
@@ -1676,7 +1709,73 @@ namespace FIM_Engine {
                 }
 
                 const auto linear_t0 = std::chrono::steady_clock::now();
-                if (params.lin_solver == LinearSolverType::SparseLU) {
+                if (params.lin_solver == LinearSolverType::AMGCL) {
+                    Eigen::SparseMatrix<double, Eigen::RowMajor> A_row = A_solve;
+                    A_row.makeCompressed();
+
+                    int rows = A_row.rows();
+
+                    typedef amgcl::backend::builtin<double> Backend;
+                    typedef amgcl::make_solver<
+                        amgcl::amg<
+                        Backend,
+                        amgcl::coarsening::smoothed_aggregation,
+                        amgcl::relaxation::spai0
+                        >,
+                        amgcl::solver::bicgstab<Backend>
+                    > Solver;
+
+                    Solver::params prm;
+                    prm.solver.tol = params.amgcl_tol;
+                    prm.solver.maxiter = params.amgcl_maxiter;
+
+                    // =====================================================================
+                    // 【修复核心 1】：直接使用 Eigen 适配器传入 A_row，避免 Tuple 类型推导失败导致 begin() 报错
+                    // =====================================================================
+                    Solver solve(A_row, prm);
+
+                    // =====================================================================
+                    // 【修复核心 2】：使用 std::vector 与 AMGCL 交互，避免 Eigen::VectorXd 的 Traits 报错
+                    // =====================================================================
+                    Eigen::VectorXd rhs_eigen = -b_solve;
+                    std::vector<double> amgcl_rhs(rhs_eigen.data(), rhs_eigen.data() + rows);
+                    std::vector<double> amgcl_dx(rows, 0.0);
+
+                    int iters = 0;
+                    double error = 0.0;
+                    std::tie(iters, error) = solve(amgcl_rhs, amgcl_dx);
+
+                    // 将结果拷贝回 dx 供后续物理量更新使用
+                    dx = Eigen::VectorXd::Map(amgcl_dx.data(), rows);
+                    // =====================================================================
+
+                    compute_ok = true;
+                    solve_ok = std::isfinite(error) && (error <= params.amgcl_tol);
+                    std::string fallback_str = "none";
+
+                    if (!solve_ok && params.amgcl_use_fallback_sparselu) {
+                        fallback_str = "SparseLU";
+                        if (params.amgcl_log_on_failure) {
+                            std::cout << "    [AMGCL-WARN] AMGCL failed to converge (iters=" << iters
+                                << ", err=" << error << "). Falling back to SparseLU.\n";
+                        }
+                        sparse_lu_solver.compute(A_solve);
+                        compute_ok = (sparse_lu_solver.info() == Eigen::Success);
+                        if (compute_ok) {
+                            dx = sparse_lu_solver.solve(-b_solve);
+                            solve_ok = (sparse_lu_solver.info() == Eigen::Success);
+                        }
+                    }
+
+                    solver_log = "solver=AMGCL compute_ok=" + std::string(compute_ok ? "true" : "false") +
+                        " solve_ok=" + std::string(solve_ok ? "true" : "false") +
+                        " iters=" + std::to_string(iters) +
+                        " error=" + std::to_string(error) +
+                        " fallback=" + fallback_str +
+                        " scaled=" + std::string(row_scaling_applied ? "true" : "false");
+                }
+                else if (params.lin_solver == LinearSolverType::SparseLU)
+                {
                     const std::uint64_t pattern_hash = hash_sparse_pattern(A_solve);
                     const bool shape_changed =
                         (!sparse_lu_pattern_ready) ||
@@ -1893,7 +1992,6 @@ namespace FIM_Engine {
                 if (!solve_ok) { fail_reason = "linear_solve_fail"; break; }
                 if (!dx.allFinite()) { fail_reason = "dx_nan_inf"; break; }
 
-                // [???] ???ò??????????????????(Damping)
                 bool state_valid = true;
                 double alpha = 1.0;
                 // Time-step-aware damping:
@@ -2288,7 +2386,8 @@ namespace FIM_Engine {
 
                 if (!rescue_applied) {
                     total_rollbacks++;
-                    dt = std::max(dt * 0.5, params.dt_min);
+                    const double rollback_fac = std::min(1.0, std::max(0.05, params.rollback_shrink_factor));
+                    dt = std::max(dt * rollback_fac, params.dt_min);
                     state = old_state;
                     step--;
                     std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
@@ -2335,7 +2434,8 @@ namespace FIM_Engine {
                     dt = std::max(dt * 0.85, params.dt_min);
                 }
                 else {
-                    dt = std::max(dt * 0.5, params.dt_min);
+                    const double rollback_fac = std::min(1.0, std::max(0.05, params.rollback_shrink_factor));
+                    dt = std::max(dt * rollback_fac, params.dt_min);
                 }
 
                 if (params.enable_ramp_dt_protection && active_enable_control_ramp) {
@@ -2426,36 +2526,3 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
