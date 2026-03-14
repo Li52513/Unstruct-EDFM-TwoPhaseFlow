@@ -25,4 +25,10 @@ namespace Test_Day6 {
     /** @brief 运行 3D 两相 多井干扰 瞬态测试 (>= 50步) */
     void Run_Day6_Transient_3D_TP_Multiwell();
 
+    /** @brief 运行 2D 矩阵审计测试，检查 NNC/FF 系数装配是否正常 */
+    void Run_Day6_MatrixAudit_2D_EDFM();
+
+    /** @brief 运行 3D 矩阵审计测试，检查 NNC/FF 系数装配是否正常 */
+    void Run_Day6_MatrixAudit_3D_EDFM();
+
 } // namespace Test_Day6

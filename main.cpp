@@ -114,6 +114,8 @@ int main (int argc, char** argv) {
         {"day6_transient_3d_sp_injprod", "Day6: 3D single-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_SP_InjProd(); return 0; }},
         {"day6_transient_3d_tp_injprod", "Day6: 3D two-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_TP_InjProd(); return 0; }},
         {"day6_transient_3d_tp_multiwell", "Day6: 3D multi-well interference transient + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_TP_Multiwell(); return 0; }},
+        {"day6_matrix_audit_2d_edfm", "Day6 explicit gate: 2D EDFM matrix assembly audit (NNC/FF)", []() { Test_Day6::Run_Day6_MatrixAudit_2D_EDFM(); return 0; }},
+        {"day6_matrix_audit_3d_edfm", "Day6 explicit gate: 3D EDFM matrix assembly audit (NNC/FF)", []() { Test_Day6::Run_Day6_MatrixAudit_3D_EDFM(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
