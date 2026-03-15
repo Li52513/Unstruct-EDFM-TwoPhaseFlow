@@ -1,576 +1,30 @@
-﻿/**
- * @file FIM_TransientEngine.hpp
- * @brief 全隐式(FIM)瞬态模拟引擎核心 (支持单/两相流、热流耦合及多尺度 EDFM)
- */
-
 #pragma once
 
-#include "MeshManager.h"
-#include "3D_MeshManager.h"
-#include "2D_FieldManager.h"
-#include "3D_FieldManager.h"
-#include "FIM_StateMap.h"
-#include "FIM_BlockSparseMatrix.h"
-#include "FIM_GlobalAssembler.h"
-#include "FIM_ConnectionManager.h"
-#include "FIM_TopologyBuilder2D.h"
-#include "FIM_TopologyBuilder3D.h"
-#include "TransmissibilitySolver_2D.h"
-#include "TransmissibilitySolver_3D.h"
-#include "BoundaryAssembler.h"
-#include "AD_FluidEvaluator.h"
-#include "CapRelPerm_HD_AD.h"
-#include "FVM_Ops_AD.h"
-#include "2D_PostProcess.h"
-#include "3D_PostProcess.h"
-#include "SolverContrlStrName_op.h"
-#include "FIM_TransientSupport.hpp"
-#include <nlohmann/json.hpp>
-#include <fstream>
-#include <iomanip>
-#include <type_traits>
-
-#include <Eigen/IterativeLinearSolvers>
-#include <Eigen/SparseLU>
-#include <amgcl/backend/builtin.hpp>
-#include <amgcl/make_solver.hpp>
-#include <amgcl/amg.hpp>
-#include <amgcl/solver/bicgstab.hpp>
-#include <amgcl/coarsening/smoothed_aggregation.hpp>
-#include <amgcl/relaxation/spai0.hpp>
-#include <amgcl/adapter/eigen.hpp>
+#include "StepKernels.hpp"
+#include "../FIM_TopologyBuilder2D.h"
+#include "../FIM_TopologyBuilder3D.h"
+#include "../TransmissibilitySolver_2D.h"
+#include "../TransmissibilitySolver_3D.h"
+#include "../2D_PostProcess.h"
+#include "../3D_PostProcess.h"
 
 #include <algorithm>
-#include <array>
-#include <cstdint>
 #include <chrono>
-#include <cmath>
-#include <functional>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
+#include <array>
+#include <cmath>
+#include <fstream>
+#include <map>
 #include <memory>
 #include <sstream>
-#include <stdexcept>
-#include <string>
-#include <vector>
+#include <nlohmann/json.hpp>
 
-#ifdef _WIN32
-#include <direct.h>
-#define MKDIR(path) _mkdir(path)
-#else
-#include <sys/stat.h>
-#define MKDIR(path) mkdir(path, 0777)
-#endif
 
 namespace FIM_Engine {
 
-
-
-    enum class DiagLevel { Off, Summary, Hotspot, Forensic };
-
-    struct EqContrib {
-        double R_acc = 0.0, R_flux = 0.0, R_well = 0.0, R_bc = 0.0;
-        double D_acc = 0.0, D_flux = 0.0, D_well = 0.0, D_bc = 0.0;
-
-        void reset() {
-            R_acc = R_flux = R_well = R_bc = 0.0;
-            D_acc = D_flux = D_well = D_bc = 0.0;
-        }
-        double R_total() const { return R_acc + R_flux + R_well + R_bc; }
-
-        double D_total() const { return D_acc + D_flux + D_well + D_bc; }
-    };
-
-
-    enum class SolverRoute { FIM, IMPES };
-    enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL };
-
-
-    struct InitialConditions {
-        double P_init = 2.0e5;   
-        double T_init = 300.0;   
-        double Sw_init = 0.2;    
-    };
-
-    struct TransientStageProfile {
-        double dt_max = 86400.0;
-        int max_newton_iter = 8;
-        double rel_res_tol = 1.0e-3;
-        double rel_update_tol = 1.0e-6;
-
-        bool enable_ptc = false;
-        double ptc_lambda_init = 1.0;
-        double ptc_lambda_decay = 0.5;
-        double ptc_lambda_min = 0.0;
-
-        bool enable_control_ramp = false;
-        int control_ramp_steps = 5;
-        double control_ramp_min = 0.2;
-        bool control_ramp_apply_rate = true;
-        bool control_ramp_apply_bhp = true;
-
-        int dt_relres_iter_grow_hi = 8;
-        int dt_relres_iter_neutral_hi = 14;
-        int dt_relres_iter_soft_shrink_hi = 20;
-        double dt_relres_grow_factor = 1.08;
-        double dt_relres_neutral_factor = 1.00;
-        double dt_relres_soft_shrink_factor = 0.98;
-        double dt_relres_hard_shrink_factor = 0.92;
-    };
-
-    struct TransientSolverParams {
-        int max_steps = 50;                     
-        double dt_init = 1.0;                   
-        double dt_min = 1e-4;                  
-        double dt_max = 86400.0;                
-        double target_end_time_s = -1.0;       
-
-        bool enable_two_stage_profile = false;   
-        double startup_end_time_s = 0.0;         
-        TransientStageProfile startup_profile{}; 
-        TransientStageProfile long_profile{};    
-
-        double startup_vtk_output_interval_s = -1.0; 
-        double long_vtk_output_interval_s = -1.0;    ///< Long-run VTK interval in physical time; <=0 falls back to step-based output.
-        double matrix_audit_coeff_tol = 1.0e-16;     ///< Coefficient threshold used to judge "missing" coupling.
-        int matrix_audit_max_detail = 8;             ///< Max detailed missing-coupling lines to print.
-        bool enable_matrix_audit = false;
-        bool matrix_audit_strict = false;
-        int matrix_audit_step = 1;
-        int matrix_audit_iter = 1;
-        double matrix_audit_eps = 1.0e-14;
-        bool matrix_audit_require_nnc = true;
-        bool matrix_audit_require_ff = true;
-
-        int max_newton_iter = 8;                
-        double abs_res_tol = 1e-6;              
-
-        double stagnation_growth_tol = 0.995;   
-        double stagnation_abs_res_tol = 1.0e6;  
-        double stagnation_min_drop = 2.0e-3;    
-        double best_iter_growth_trigger = 1.5;  ///< Trigger best-iterate takeover when current residual grows beyond this factor vs in-step best.
-        int best_iter_guard_min_iter = 3;       ///< Minimum Newton iterations before enabling best-iterate takeover.
-        bool enable_best_iter_guard = false;    ///< Disable best-iterate takeover by default for strict acceptance.
-        bool enable_dt_floor_best = false;      ///< Disable dt-floor best-state acceptance by default.
-        bool enable_stagnation_accept = false;  ///< Disable stagnation-based acceptance by default.
-        bool enable_dt_floor_hold = false;      ///< Emergency-only fallback at dt_min; keep false for strict acceptance.
-
-        double rel_res_tol = 1.0e-3;            ///< Relative residual threshold (max_res / res_iter1).
-        double rel_update_tol = 1.0e-6;         ///< Relative state-update infinity norm threshold.
-
-        bool enable_armijo_line_search = true;  ///< Enable residual-tested backtracking line search.
-        int armijo_max_backtracks = 8;          ///< Max backtracking count per Newton step.
-        double armijo_beta = 0.5;               ///< Backtracking shrink factor in (0,1).
-        double armijo_c1 = 1.0e-4;              ///< Armijo sufficient decrease coefficient.
-        bool enable_nonmonotone_line_search = true; ///< GLL-style nonmonotone line search acceptance.
-        int nonmonotone_window = 5;                ///< Residual window size for nonmonotone reference.
-        bool enable_ls_trace = true;               ///< Print line-search trace for step-1 and failed attempts.
-        bool enable_ls_base_check = true;          ///< Check residual baseline consistency before Armijo acceptance.
-        double ls_base_mismatch_tol = 0.25;       ///< Warn when |probe/base-1| exceeds this ratio.
-        bool enable_controlled_accept_iter1 = true; ///< Allow one guarded accept when iter-1 repeatedly fails Armijo.
-        int controlled_accept_min_armijo_reject = 6; ///< Minimum Armijo rejects before controlled accept can trigger.
-        double controlled_accept_relax = 2.05;    ///< Accept if best_trial_res <= ref * relax.
-        double controlled_accept_max_rel_update = 0.20; ///< Max rel update allowed for controlled accept (<=0 disables check).
-        int controlled_accept_max_per_step = 1;   ///< Max controlled-accept uses per time step.
-
-        // rollback-aware nonlinear stabilization
-        int ls_fail_rescue_threshold = 2;          ///< Trigger PTC rescue after this many iter-1 line-search failures in the same step.
-        int ls_fail_rescue_max = 1;                ///< Max rescue retries before allowing dt rollback.
-        double ptc_rescue_boost = 5.0;            ///< Multiplicative boost for PTC weight during rescue retry.
-        double rollback_shrink_factor = 0.7;      ///< Time-step shrink factor on rollback, in (0,1].
-
-        // Pseudo-transient continuation (PTC) diagonal stabilization: J <- J + lambda * M
-        bool enable_ptc = false;                   ///< Enable pseudo-transient diagonal regularization.
-        double ptc_lambda_init = 1.0;             ///< Initial PTC weight.
-        double ptc_lambda_decay = 0.5;            ///< Per-Newton decay factor in [0,1].
-        double ptc_lambda_min = 0.0;              ///< Minimum PTC weight.
-
-        // Well-control continuation ramp during startup steps
-        bool enable_control_ramp = false;         ///< Enable staged loading for well controls.
-        int control_ramp_steps = 5;               ///< Number of startup time steps for ramp.
-        double control_ramp_min = 0.2;            ///< Initial ramp factor in (0,1].
-        bool control_ramp_apply_rate = true;      ///< Apply ramp to rate-controlled wells.
-        bool control_ramp_apply_bhp = true;       ///< Apply ramp to BHP-controlled wells.
-        bool enable_ramp_dt_protection = true;    ///< Prevent over-shrinking dt during ramp stage.
-        double ramp_dt_min_scale = 0.98;          ///< Minimum dt scaling factor allowed during ramp stage.
-
-        // rel_res_update dt policy (parameterized; replaces hard-coded thresholds).
-        int dt_relres_iter_grow_hi = 8;           ///< Grow dt when iter_used <= this threshold.
-        int dt_relres_iter_neutral_hi = 14;       ///< Keep dt neutral when iter_used <= this threshold.
-        int dt_relres_iter_soft_shrink_hi = 20;   ///< Soft-shrink dt when iter_used <= this threshold.
-        double dt_relres_grow_factor = 1.08;      ///< Growth factor in rel_res_update mode.
-        double dt_relres_neutral_factor = 1.00;   ///< Neutral factor in rel_res_update mode.
-        double dt_relres_soft_shrink_factor = 0.98; ///< Soft-shrink factor in rel_res_update mode.
-        double dt_relres_hard_shrink_factor = 0.92; ///< Hard-shrink factor in rel_res_update mode.
-
-
-        bool enable_row_scaling = true;         ///< Enable row scaling before linear solve.
-        double row_scale_floor = 1.0;           ///< Characteristic lower bound in scaling denominator.
-        double row_scale_min = 1.0e-12;         ///< Min allowed row scale factor.
-        double row_scale_max = 1.0e+12;         ///< Max allowed row scale factor.
-
-        
-        double max_dP = 1.0e4;                  
-        double max_dT = 2.0;                    
-        double max_dSw = 0.05;                  
-        double min_alpha = 1.0e-8;              ///< line-search/damping lower bound; avoid forced large update at stiff states
-        bool enable_alpha_safe_two_phase = true; ///< Appleyard-style Sw safety alpha for two-phase trial updates.
-        double sw_safe_eps = 1.0e-8;             ///< Sw safety epsilon used by alpha-safe limiter.
-        double sw_alpha_shrink = 0.98;           ///< Safety shrink for computed Sw-safe alpha.
-        bool clamp_state_to_eos_bounds = false; ///< hard-clip P/T into EOS table bounds; disabled by default to avoid edge pinning
-        bool enforce_eos_domain = false;        ///< strict EOS domain check: fail step when near_bound/fallback is detected
-
-    
-        LinearSolverType lin_solver = LinearSolverType::AMGCL;
-        double bicgstab_droptol = 1e-2;                          
-        double well_source_sign = 1.0;                           ///< Well sign for outflow-positive well operators in residual: R += Q_out.
-        Vector gravity_vector = Vector(0.0, 0.0, -9.81);     ///< body-force direction/magnitude used in potential calculation
-
-        double amgcl_tol = 1.0e-6;
-        int amgcl_maxiter = 500;
-        bool amgcl_use_fallback_sparselu = true;
-        bool amgcl_log_on_failure = true;
-
-        DiagLevel diag_level = DiagLevel::Summary;   
-        int diag_print_every_iter = 1;               
-        double diag_blowup_factor = 5.0;             
-        int diag_hot_repeat_iters = 3;              
-        double diag_hot_res_change_tol = 1e-2;      
-        int diag_clamp_trigger = 20;                 
-        int diag_max_hot_conn = 5;                   
-        int diag_max_clamp_dump = 10;                
-        double diag_flux_spike_factor = 10.0;        
-        double diag_eos_near_bound_ratio = 0.02;     
-        bool diag_incident_once_per_step = true;     
-    };
-
-
-    template <typename T, typename = void>
-    struct is_iterative_solver : std::false_type {};
-
-    template <typename T>
-    struct is_iterative_solver<T, std::void_t<decltype(std::declval<T>().iterations())>> : std::true_type {};
-
-
-    template<typename MeshMgrType>
-    inline void Run3DDiagnosticPrecheck(MeshMgrType& mgr, const std::vector<Connection>& conns, const TransientSolverParams& params) {
-        if constexpr (std::is_same_v<MeshMgrType, MeshManager_3D>) {
-            if (params.diag_level == DiagLevel::Off) return;
-
-            std::cout << "\n=========================================================\n"
-                << "[PRE3D-DIAG] V3 Diagnostic Pre-check Starting...\n";
-
-            // 1. У?? InteractionPairs (????-???????)
-            int invalid_idx = 0, invalid_area = 0, invalid_dist = 0;
-            const auto& pairs = mgr.getInteractionPairs();
-            for (const auto& p : pairs) {
-                if (p.matrixSolverIndex < 0 || p.fracCellSolverIndex < 0) invalid_idx++;
-                if (p.intersectionArea <= 1e-12) invalid_area++;
-                if (p.distMatrixToFracPlane <= 1e-12) invalid_dist++;
-            }
-            std::cout << "  [PRE3D-PAIR] Total Pairs: " << pairs.size() << "\n"
-                << "               Invalid Index: " << invalid_idx << "\n"
-                << "               Area <= eps  : " << invalid_area << "\n"
-                << "               Dist <= eps  : " << invalid_dist << "\n";
-
-            int mm = 0, mf = 0, ff = 0, fi = 0;
-            int neg_t_flow = 0, zero_t_flow = 0;
-            int neg_t_heat = 0, zero_t_heat = 0;
-
-            for (const auto& c : conns) {
-                if (c.type == ConnectionType::Matrix_Matrix) mm++;
-                else if (c.type == ConnectionType::Matrix_Fracture) mf++;
-                else if (c.type == ConnectionType::Fracture_Fracture) ff++;
-                else if (c.type == ConnectionType::Fracture_Internal) fi++;
-
-                if (c.T_Flow < 0.0) neg_t_flow++;
-                if (std::abs(c.T_Flow) < 1e-16) zero_t_flow++;
-
-                if (c.T_Heat < 0.0) neg_t_heat++;
-                if (std::abs(c.T_Heat) < 1e-16) zero_t_heat++;
-            }
-            std::cout << "  [PRE3D-CONN] Connections Count -> MM: " << mm << ", MF(NNC): " << mf
-                << ", FF: " << ff << ", FI: " << fi << "\n"
-                << "               T_Flow Anomaly  -> Negative: " << neg_t_flow << ", Zero: " << zero_t_flow << "\n"
-                << "               T_Heat Anomaly  -> Negative: " << neg_t_heat << ", Zero: " << zero_t_heat << "\n"
-                << "=========================================================\n\n";
-        }
-    }
-
-    inline const char* ConnectionTypeLabel(ConnectionType type) {
-        switch (type) {
-        case ConnectionType::Matrix_Matrix: return "MM";
-        case ConnectionType::Matrix_Fracture: return "MF";
-        case ConnectionType::Fracture_Fracture: return "FF";
-        case ConnectionType::Fracture_Internal: return "FI";
-        default: return "Unknown";
-        }
-    }
-
-    enum class SinglePhaseFluidModel {
-        Water,
-        CO2
-    };
-
-    template <typename MeshMgrType, typename FieldMgrType>
-    struct TransientOptionalModules {
-        std::function<void(MeshMgrType&, FieldMgrType&)> property_initializer;
-        const BoundarySetting::BoundaryConditionManager* pressure_bc = nullptr;
-        const BoundarySetting::BoundaryConditionManager* saturation_bc = nullptr;
-        const BoundarySetting::BoundaryConditionManager* temperature_bc = nullptr;
-
-        SinglePhaseFluidModel single_phase_fluid = SinglePhaseFluidModel::Water;
-        CapRelPerm::VGParams vg_params = CapRelPerm::VGParams();
-        CapRelPerm::RelPermParams rp_params = CapRelPerm::RelPermParams();
-        std::function<void(const MeshMgrType&, const std::vector<Vector>&, int, std::vector<double>&, std::vector<double>&, std::vector<double>*)> state_initializer;
-    };
-
-    inline int MatrixBlockCount(const MeshManager& mgr) { return mgr.getMatrixDOFCount(); }
-    inline int MatrixBlockCount(const MeshManager_3D& mgr) { return mgr.fracture_network().getSolverIndexOffset(); }
-
-    template<int N>
-    inline AD_Fluid::ADFluidProperties<N> EvalPrimaryFluid(
-        SinglePhaseFluidModel model,
-        const ADVar<N>& P,
-        const ADVar<N>& T)
-    {
-        if (model == SinglePhaseFluidModel::CO2) {
-            return AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
-        }
-        return AD_Fluid::Evaluator::evaluateWater<N>(P, T);
-    }
-
-    inline void MakePath(const std::string& caseName) {
-        MKDIR("Test"); MKDIR("Test/Transient"); MKDIR("Test/Transient/Day6"); MKDIR(("Test/Transient/Day6/" + caseName).c_str());
-    }
-
-    struct MatrixAuditSummary {
-        int total_checked = 0;
-        int nnc_checked = 0;
-        int ff_checked = 0;
-        int nnc_flow_coupled = 0;
-        int ff_flow_coupled = 0;
-        int nnc_heat_coupled = 0;
-        int ff_heat_coupled = 0;
-        int nnc_zero_tflow = 0;
-        int ff_zero_tflow = 0;
-        int nnc_zero_theat = 0;
-        int ff_zero_theat = 0;
-        int nnc_missing_flow = 0;
-        int ff_missing_flow = 0;
-        int nnc_missing_heat = 0;
-        int ff_missing_heat = 0;
-
-        bool Passed(bool strict) const {
-            if (!strict) return true;
-            if (total_checked <= 0) return false;
-            const int nnc_active_flow = nnc_checked - nnc_zero_tflow;
-            const int ff_active_flow = ff_checked - ff_zero_tflow;
-            const int nnc_active_heat = nnc_checked - nnc_zero_theat;
-            const int ff_active_heat = ff_checked - ff_zero_theat;
-
-            const bool nnc_flow_ok = (nnc_active_flow <= 0) || (nnc_flow_coupled > 0);
-            const bool ff_flow_ok = (ff_active_flow <= 0) || (ff_flow_coupled > 0);
-            const bool nnc_heat_ok = (nnc_active_heat <= 0) || (nnc_heat_coupled > 0);
-            const bool ff_heat_ok = (ff_active_heat <= 0) || (ff_heat_coupled > 0);
-            return nnc_flow_ok && ff_flow_ok && nnc_heat_ok && ff_heat_ok;
-        }
-    };
-
-    template <int N>
-    inline MatrixAuditSummary RunMatrixAssemblyAudit(
-        const Eigen::SparseMatrix<double>& A,
-        const std::vector<Connection>& conns,
-        double tol,
-        int max_detail) {
-
-        MatrixAuditSummary s;
-        const int flow_eq = 0;
-        const int heat_eq = (N == 3) ? 2 : 1;
-        int detail_left = std::max(0, max_detail);
-
-        auto abs_coeff = [&](int row, int col) -> double {
-            if (row < 0 || col < 0 || row >= A.rows() || col >= A.cols()) return 0.0;
-            return std::abs(A.coeff(row, col));
-        };
-
-        auto print_missing = [&](const Connection& c, const char* kind) {
-            if (detail_left <= 0) return;
-            std::cout << "      [MATRIX-AUDIT-MISS] type=" << ConnectionTypeLabel(c.type)
-                << " i=" << c.nodeI << " j=" << c.nodeJ
-                << " kind=" << kind << "\n";
-            --detail_left;
-        };
-
-        const double eps = std::max(0.0, tol);
-        const double trans_eps = std::max(1.0e-12, eps);
-        for (const auto& c : conns) {
-            if (c.type != ConnectionType::Matrix_Fracture && c.type != ConnectionType::Fracture_Fracture) {
-                continue;
-            }
-
-            const bool is_nnc = (c.type == ConnectionType::Matrix_Fracture);
-            ++s.total_checked;
-            if (is_nnc) ++s.nnc_checked;
-            else ++s.ff_checked;
-
-            const bool active_flow = std::abs(c.T_Flow) > trans_eps;
-            if (!active_flow) {
-                if (is_nnc) ++s.nnc_zero_tflow;
-                else ++s.ff_zero_tflow;
-            }
-            const bool active_heat = std::abs(c.T_Heat) > trans_eps;
-            if (!active_heat) {
-                if (is_nnc) ++s.nnc_zero_theat;
-                else ++s.ff_zero_theat;
-            }
-
-            if (active_flow) {
-                const int i_flow = c.nodeI * N + flow_eq;
-                const int j_flow = c.nodeJ * N + flow_eq;
-                const bool has_flow = (abs_coeff(i_flow, j_flow) > eps) || (abs_coeff(j_flow, i_flow) > eps);
-                if (has_flow) {
-                    if (is_nnc) ++s.nnc_flow_coupled;
-                    else ++s.ff_flow_coupled;
-                } else {
-                    if (is_nnc) ++s.nnc_missing_flow;
-                    else ++s.ff_missing_flow;
-                    print_missing(c, "flow");
-                }
-            }
-
-            if (active_heat) {
-                const int i_heat = c.nodeI * N + heat_eq;
-                const int j_heat = c.nodeJ * N + heat_eq;
-                const bool has_heat = (abs_coeff(i_heat, j_heat) > eps) || (abs_coeff(j_heat, i_heat) > eps);
-                if (has_heat) {
-                    if (is_nnc) ++s.nnc_heat_coupled;
-                    else ++s.ff_heat_coupled;
-                } else {
-                    if (is_nnc) ++s.nnc_missing_heat;
-                    else ++s.ff_missing_heat;
-                    print_missing(c, "heat");
-                }
-            }
-        }
-
-        return s;
-    }
-
-    template <typename FieldMgrType, typename MeshMgrType, int N>
-    inline void SyncStateToFieldManager(
-        const FIM_StateMap<N>& state,
-        FieldMgrType& fm,
-        const MeshMgrType& mgr,
-        SinglePhaseFluidModel sp_model = SinglePhaseFluidModel::Water,
-        const CapRelPerm::VGParams& vg_params = CapRelPerm::VGParams(),
-        const CapRelPerm::RelPermParams& rp_params = CapRelPerm::RelPermParams()) {
-        int nMat = MatrixBlockCount(mgr);
-        int nTotal = mgr.getTotalDOFCount();
-
-        const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
-        const auto tCfg = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
-        const auto satCfg = PhysicalProperties_string_op::SaturationEquation_String::FIM();
-        const PhysicalProperties_string_op::Water wCfg;
-        const PhysicalProperties_string_op::CO2 gCfg;
-
-        auto f_pw = fm.getOrCreateMatrixScalar(pCfg.pressure_field, 0.0);
-        auto f_T = fm.getOrCreateMatrixScalar(tCfg.temperatue_field, 0.0);
-        auto f_rhow = fm.getOrCreateMatrixScalar(wCfg.rho_tag, 0.0);
-        auto f_hw = fm.getOrCreateMatrixScalar(wCfg.h_tag, 0.0);
-        auto f_lamw_mob = fm.getOrCreateMatrixScalar(wCfg.lambda_w_tag, 0.0);
-
-        auto frac_pw = fm.getOrCreateFractureScalar(pCfg.pressure_field, 0.0);
-        auto frac_T = fm.getOrCreateFractureScalar(tCfg.temperatue_field, 0.0);
-        auto frac_rhow = fm.getOrCreateFractureScalar(wCfg.rho_tag, 0.0);
-        auto frac_hw = fm.getOrCreateFractureScalar(wCfg.h_tag, 0.0);
-        auto frac_lamw_mob = fm.getOrCreateFractureScalar(wCfg.lambda_w_tag, 0.0);
-
-        auto f_P_viz = fm.getOrCreateMatrixScalar("P", 0.0);
-        auto frac_P_viz = fm.getOrCreateFractureScalar("P", 0.0);
-
-        std::shared_ptr<volScalarField> f_sw, f_Sw_viz, f_rhog, f_hg, f_lamg_mob;
-        std::shared_ptr<volScalarField> frac_sw, frac_Sw_viz, frac_rhog, frac_hg, frac_lamg_mob;
-
-        if constexpr (N == 3) {
-            f_sw = fm.getOrCreateMatrixScalar(satCfg.saturation, 0.0);
-            f_Sw_viz = fm.getOrCreateMatrixScalar("S_w", 0.0);
-            f_rhog = fm.getOrCreateMatrixScalar(gCfg.rho_tag, 0.0);
-            f_hg = fm.getOrCreateMatrixScalar(gCfg.h_tag, 0.0);
-            f_lamg_mob = fm.getOrCreateMatrixScalar(gCfg.lambda_g_tag, 0.0);
-
-            frac_sw = fm.getOrCreateFractureScalar(satCfg.saturation, 0.0);
-            frac_Sw_viz = fm.getOrCreateFractureScalar("S_w", 0.0);
-            frac_rhog = fm.getOrCreateFractureScalar(gCfg.rho_tag, 0.0);
-            frac_hg = fm.getOrCreateFractureScalar(gCfg.h_tag, 0.0);
-            frac_lamg_mob = fm.getOrCreateFractureScalar(gCfg.lambda_g_tag, 0.0);
-        }
-
-        for (int i = 0; i < nTotal; ++i) {
-            double p = state.P[i];
-            double t = state.T[i];
-            ADVar<N> P_ad(p), T_ad(t);
-            auto propsW = EvalPrimaryFluid<N>(sp_model, P_ad, T_ad);
-
-            double sw = (N == 3) ? state.Sw[i] : 1.0;
-            double rho_w = propsW.rho.val;
-            double mu_w = propsW.mu.val;
-            double krw = 1.0, krg = 0.0;
-
-            if constexpr (N == 3) {
-                propsW = AD_Fluid::Evaluator::evaluateWater<N>(P_ad, T_ad);
-                ADVar<N> krw_ad, krg_ad;
-                CapRelPerm::kr_Mualem_vG<N>(ADVar<N>(sw), vg_params, rp_params, krw_ad, krg_ad);
-                krw = krw_ad.val;
-                krg = krg_ad.val;
-                rho_w = propsW.rho.val;
-                mu_w = propsW.mu.val;
-            }
-
-            double lambda_w_mob = krw / std::max(mu_w, 1e-18);
-
-            if (i < nMat) {
-                (*f_pw)[i] = p; (*f_T)[i] = t; (*f_rhow)[i] = rho_w; (*f_hw)[i] = propsW.h.val; (*f_lamw_mob)[i] = lambda_w_mob; (*f_P_viz)[i] = p;
-                if constexpr (N == 3) {
-                    auto propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);
-                    (*f_sw)[i] = sw; (*f_Sw_viz)[i] = sw; (*f_rhog)[i] = propsG.rho.val; (*f_hg)[i] = propsG.h.val; (*f_lamg_mob)[i] = krg / std::max(propsG.mu.val, 1e-18);
-                }
-            }
-            else {
-                int fi = i - nMat;
-                (*frac_pw)[fi] = p; (*frac_T)[fi] = t; (*frac_rhow)[fi] = rho_w; (*frac_hw)[fi] = propsW.h.val; (*frac_lamw_mob)[fi] = lambda_w_mob; (*frac_P_viz)[fi] = p;
-                if constexpr (N == 3) {
-                    auto propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);
-                    (*frac_sw)[fi] = sw; (*frac_Sw_viz)[fi] = sw; (*frac_rhog)[fi] = propsG.rho.val; (*frac_hg)[fi] = propsG.h.val; (*frac_lamg_mob)[fi] = krg / std::max(propsG.mu.val, 1e-18);
-                }
-            }
-        }
-    }
-
-    template <typename FieldMgrType>
-    inline void InjectStaticProperties(FieldMgrType& fm) {
-        const PhysicalProperties_string_op::Rock rock;
-        const PhysicalProperties_string_op::Fracture_string frac;
-        const PhysicalProperties_string_op::Water water;
-
-        fm.getOrCreateMatrixScalar(rock.k_xx_tag, 1.0e-13);
-        fm.getOrCreateMatrixScalar(rock.k_yy_tag, 1.0e-13);
-        fm.getOrCreateMatrixScalar(rock.k_zz_tag, 1.0e-13);
-        fm.getOrCreateMatrixScalar(rock.lambda_tag, 2.0);
-        fm.getOrCreateMatrixScalar(rock.phi_tag, 0.2);
-
-        fm.getOrCreateFractureScalar(frac.k_t_tag, 1.0e-11);
-        fm.getOrCreateFractureScalar(frac.k_n_tag, 1.0e-12);
-        fm.getOrCreateFractureScalar(frac.aperture_tag, 1.0e-3);
-        fm.getOrCreateFractureScalar(frac.lambda_tag, 2.0);
-        fm.getOrCreateFractureScalar(frac.phi_tag, 0.2);
-
-        fm.getOrCreateFractureScalar(water.k_tag, 0.6);
-    }
-
-    /**
-     * @brief Generic transient FIM driver used by transient scenarios. (Fully Parametrized)
-     */
     template <int N, typename MeshMgrType, typename FieldMgrType>
     inline void RunGenericFIMTransient(
         const std::string& caseName,
@@ -580,7 +34,8 @@ namespace FIM_Engine {
         const std::vector<WellScheduleStep>& wells,
         const TransientSolverParams& params,
         SolverRoute route = SolverRoute::FIM,
-        const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules = TransientOptionalModules<MeshMgrType, FieldMgrType>()) {
+        const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules)
+    {
 
         if (route == SolverRoute::IMPES) {
             throw std::runtime_error("[TODO] IMPES explicit route is reserved but currently bypassed.");
@@ -600,11 +55,11 @@ namespace FIM_Engine {
             for (const auto& w : wells) {
                 if (sp_use_co2 && w.component_mode == WellComponentMode::Water) {
                     std::cout << "[WellModeWarn] Single-phase CO2 case uses Water component mode for well '" << w.well_name
-                              << "'. Recommend WellComponentMode::Gas for explicit phase semantics.\n";
+                        << "'. Recommend WellComponentMode::Gas for explicit phase semantics.\n";
                 }
                 if (!sp_use_co2 && w.component_mode == WellComponentMode::Gas) {
                     std::cout << "[WellModeWarn] Single-phase Water case uses Gas component mode for well '" << w.well_name
-                              << "'. Recommend WellComponentMode::Water for explicit phase semantics.\n";
+                        << "'. Recommend WellComponentMode::Water for explicit phase semantics.\n";
                 }
             }
         }
@@ -752,7 +207,7 @@ namespace FIM_Engine {
             prof.dt_relres_soft_shrink_factor = params.dt_relres_soft_shrink_factor;
             prof.dt_relres_hard_shrink_factor = params.dt_relres_hard_shrink_factor;
             return prof;
-        };
+            };
 
         auto sanitize_profile = [&](TransientStageProfile prof, const TransientStageProfile& fallback) {
             if (!(prof.dt_max > 0.0)) prof.dt_max = fallback.dt_max;
@@ -775,7 +230,7 @@ namespace FIM_Engine {
             prof.dt_relres_soft_shrink_factor = std::min(1.0, std::max(0.1, prof.dt_relres_soft_shrink_factor));
             prof.dt_relres_hard_shrink_factor = std::min(1.0, std::max(0.1, prof.dt_relres_hard_shrink_factor));
             return prof;
-        };
+            };
 
         const TransientStageProfile base_profile = sanitize_profile(build_profile_from_params(), build_profile_from_params());
         TransientStageProfile startup_profile = base_profile;
@@ -842,16 +297,16 @@ namespace FIM_Engine {
 
             if (params.enable_two_stage_profile && (!stage_initialized || use_startup_stage != last_stage_startup)) {
                 std::cout << "    [PROFILE] stage=" << (use_startup_stage ? "startup" : "long")
-                          << " t=" << std::scientific << t
-                          << " dt=" << dt
-                          << " dt_max=" << active_dt_max
-                          << " max_iter=" << active_max_newton_iter << "\n";
+                    << " t=" << std::scientific << t
+                    << " dt=" << dt
+                    << " dt_max=" << active_dt_max
+                    << " max_iter=" << active_max_newton_iter << "\n";
                 next_vtk_output_time_s = -1.0;
             }
             stage_initialized = true;
             last_stage_startup = use_startup_stage;
 
-            
+
             if (step == 1) {
                 Run3DDiagnosticPrecheck(mgr, connMgr.GetConnections(), params);
             }
@@ -924,7 +379,7 @@ namespace FIM_Engine {
                 }
                 return h;
                 };
-            if (active_enable_control_ramp) 
+            if (active_enable_control_ramp)
             {
                 const int ramp_steps = active_control_ramp_steps;
                 const double r0 = active_control_ramp_min;
@@ -1066,7 +521,7 @@ namespace FIM_Engine {
                             F[2] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], F[1], up_h_w, up_h_g);
                         }
                         return F;
-                    };
+                        };
                     auto f_wrt_i = evalFlux(true);
                     auto f_wrt_j = evalFlux(false);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, probe_mat);
@@ -1116,7 +571,7 @@ namespace FIM_Engine {
                         if (std::abs(r_bc) <= 1e-16) continue;
                         probe_mat.AddResidual(bi, dofOffset, r_bc);
                     }
-                };
+                    };
                 assembleBoundaryFieldProbe(modules.pressure_bc, pressureDof, pEqCfg.pressure_field);
                 if constexpr (N == 3) {
                     assembleBoundaryFieldProbe(modules.saturation_bc, saturationDof, sEqCfg.saturation);
@@ -1144,7 +599,7 @@ namespace FIM_Engine {
                     }
                 }
                 return max_probe_scaled;
-            };
+                };
 
             for (int iter = 0; iter < active_max_newton_iter; ++iter) {
                 iter_used++;
@@ -1166,7 +621,7 @@ namespace FIM_Engine {
                 ConnectionType hot_mass_type = ConnectionType::Matrix_Matrix;
                 ConnectionType hot_heat_type = ConnectionType::Matrix_Matrix;
 
-                
+
                 for (int bi = 0; bi < totalBlocks; ++bi) {
                     const double phi = 0.2, c_pr = 1000.0, rho_r = 2600.0;
                     ADVar<N> P(state.P[bi]); P.grad(0) = 1.0;
@@ -1230,7 +685,7 @@ namespace FIM_Engine {
                 };
                 std::map<ConnectionType, ConnAuditStat> audit_stats;
 
-                
+
                 for (const auto& conn : connMgr.GetConnections()) {
                     audit_stats[conn.type].conn_count++;
                     audit_stats[conn.type].sum_abs_tflow += std::abs(conn.T_Flow);
@@ -1292,11 +747,11 @@ namespace FIM_Engine {
                     const double abs_mass_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[0].val);
                         else return std::max(std::abs(f_wrt_i[0].val), std::abs(f_wrt_i[1].val));
-                    }();
+                        }();
                     const double abs_heat_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[1].val);
                         else return std::abs(f_wrt_i[2].val);
-                    }();
+                        }();
 
                     if (abs_mass_flux > max_mass_flux) {
                         max_mass_flux = abs_mass_flux;
@@ -1327,7 +782,7 @@ namespace FIM_Engine {
                     }
                 }
 
-             
+
                 SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
@@ -1622,8 +1077,8 @@ namespace FIM_Engine {
                     const double best_growth = best_res / std::max(res_iter1, 1e-30);
                     const double best_drop = 1.0 - best_growth;
                     const bool best_quality_ok = (best_res <= params.stagnation_abs_res_tol) &&
-                                                 (best_res < res_iter1) &&
-                                                 (best_drop >= params.stagnation_min_drop);
+                        (best_res < res_iter1) &&
+                        (best_drop >= params.stagnation_min_drop);
                     if (best_quality_ok && grow_from_best > params.best_iter_growth_trigger) {
                         state = best_state;
                         step_final_residual = best_res;
@@ -1645,8 +1100,8 @@ namespace FIM_Engine {
                     const double best_growth = (res_iter1 > 0.0) ? (best_res / std::max(res_iter1, 1e-30)) : 1.0;
                     const double best_drop = 1.0 - best_growth;
                     const bool best_quality_ok = (best_res <= params.stagnation_abs_res_tol) &&
-                                                 (best_res < res_iter1) &&
-                                                 (best_drop >= params.stagnation_min_drop);
+                        (best_res < res_iter1) &&
+                        (best_drop >= params.stagnation_min_drop);
                     const bool accept_best = (grow_from_best > 2.0) && best_quality_ok;
                     if (accept_best) {
                         state = best_state;
@@ -1833,7 +1288,7 @@ namespace FIM_Engine {
                         " pattern_reused=" + std::string(pattern_reused ? "true" : "false") +
                         " info=" + std::to_string(sparse_lu_solver.info());
                 }
-                else 
+                else
                 {
                     bicgstab_solver.compute(A_work);
                     compute_ok = (bicgstab_solver.info() == Eigen::Success);
@@ -1953,8 +1408,8 @@ namespace FIM_Engine {
                                     Sw_ad.grad[0] = 0.0;
                                     Sw_ad.grad[1] = 1.0;
                                     Sw_ad.grad[2] = 0.0;
-                            const auto& vg = vg_cfg;
-                            const auto& rp = rp_cfg;
+                                    const auto& vg = vg_cfg;
+                                    const auto& rp = rp_cfg;
 
                                     ADVar<3> krw, krg;
                                     CapRelPerm::kr_Mualem_vG<3>(Sw_ad, vg, rp, krw, krg);
@@ -2151,7 +1606,7 @@ namespace FIM_Engine {
                             ref = std::max(ref, *std::max_element(line_search_hist.begin(), line_search_hist.end()));
                         }
                         return ref;
-                    };
+                        };
 
                     const bool ls_trace_live = params.enable_ls_trace && (step == 1);
 
@@ -2464,9 +1919,9 @@ namespace FIM_Engine {
                 const double linear_solve_ms_avg = (linear_solve_calls > 0) ? (linear_solve_ms_sum / static_cast<double>(linear_solve_calls)) : 0.0;
                 std::ostringstream speed_ss;
                 speed_ss << std::scientific << std::setprecision(3)
-                         << "    [SPEED] dt_next=" << dt
-                         << " dt_scale_factor=" << dt_scale_factor
-                         << " linear_solve_ms_avg_this_step=" << linear_solve_ms_avg << " ms";
+                    << "    [SPEED] dt_next=" << dt
+                    << " dt_scale_factor=" << dt_scale_factor
+                    << " linear_solve_ms_avg_this_step=" << linear_solve_ms_avg << " ms";
                 std::cout << speed_ss.str() << "\n";
 
                 if (target_end_time_s > 0.0) {
@@ -2489,13 +1944,13 @@ namespace FIM_Engine {
                     if (suffix == "/final.vtk") final_vtk_exported = true;
                     vtk_export_count++;
                     std::cout << "    [VTK Export PASS] " << fname << "\n";
-                };
+                    };
 
                 const bool reached_target_end = (target_end_time_s > 0.0) && (t >= target_end_time_s - 1.0e-12);
                 const double active_vtk_interval_s =
                     params.enable_two_stage_profile
-                        ? (use_startup_stage ? params.startup_vtk_output_interval_s : params.long_vtk_output_interval_s)
-                        : ((params.long_vtk_output_interval_s > 0.0) ? params.long_vtk_output_interval_s : params.startup_vtk_output_interval_s);
+                    ? (use_startup_stage ? params.startup_vtk_output_interval_s : params.long_vtk_output_interval_s)
+                    : ((params.long_vtk_output_interval_s > 0.0) ? params.long_vtk_output_interval_s : params.startup_vtk_output_interval_s);
 
                 if (active_vtk_interval_s > 0.0) {
                     if (!(next_vtk_output_time_s > 0.0)) {

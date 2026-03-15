@@ -158,12 +158,8 @@ inline FIM_Engine::TransientSolverParams BuildSolverParams(bool twoPhase,
     params.max_steps = maxSteps;
     params.dt_init = dtInit;
 
-    // Prefer AMGCL when available; otherwise fallback to SparseLU at compile-time.
-#if FIM_HAS_AMGCL
+    // Runtime default: AMGCL (SparseLU fallback kept in engine runtime path).
     params.lin_solver = FIM_Engine::LinearSolverType::AMGCL;
-#else
-    params.lin_solver = FIM_Engine::LinearSolverType::SparseLU;
-#endif
 
     // Day6 transient presets
     params.max_newton_iter = 16;
