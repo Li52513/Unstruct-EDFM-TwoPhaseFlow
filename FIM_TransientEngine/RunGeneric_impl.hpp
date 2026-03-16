@@ -206,6 +206,7 @@ namespace FIM_Engine {
             if (!(p_floor < p_ceil)) { p_floor = 1.0e4; p_ceil = std::numeric_limits<double>::max(); }
             if (!(t_floor < t_ceil)) { t_floor = 273.15; t_ceil = std::numeric_limits<double>::max(); }
         }
+        const double sw_constitutive_eps = std::max(1.0e-12, std::min(1.0e-2, params.sw_safe_eps));
 
         auto build_profile_from_params = [&]() {
             TransientStageProfile prof;
@@ -447,14 +448,21 @@ namespace FIM_Engine {
                     }
                     else {
                         ADVar<N> Sw(eval_state.Sw[bi]); Sw.grad(1) = 1.0;
+                        ADVar<N> Sw_old(old_state.Sw[bi]);
+                        ADVar<N> Sw_const = ClampSwForConstitutive<N>(Sw, vg_cfg, sw_constitutive_eps);
+                        ADVar<N> Sw_old_const = ClampSwForConstitutive<N>(Sw_old, vg_cfg, sw_constitutive_eps);
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
-                        ADVar<N> Sw_old(old_state.Sw[bi]), Sg_old = ADVar<N>(1.0) - Sw_old;
-                        auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
-                        auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(P_old, T_old);
+                        ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
+                        ADVar<N> Pc = CapRelPerm::pc_vG<N>(Sw_const, vg_cfg);
+                        ADVar<N> Pc_old = CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
+                        ADVar<N> Pg = P + Pc;
+                        ADVar<N> Pg_old = P_old + Pc_old;
+                        auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(Pg, T);
+                        auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_old, T_old);
                         acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi_old * Sw_old) * (vols[bi] / dt);
                         acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi_old * Sg_old) * (vols[bi] / dt);
-                        ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - P / pG.rho);
-                        ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - P_old / pG_old.rho);
+                        ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - Pg / pG.rho);
+                        ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - Pg_old / pG_old.rho);
                         ADVar<N> e_rock = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
                         ADVar<N> e_rock_old = ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
                         acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi_old + e_rock_old)) * (vols[bi] / dt);
@@ -487,15 +495,18 @@ namespace FIM_Engine {
                             ADVar<N> Sw_i(eval_state.Sw[i]), Sw_j(eval_state.Sw[j]);
                             if (wrt_i) { P_i.grad(0) = 1.0; Sw_i.grad(1) = 1.0; T_i.grad(2) = 1.0; }
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
-                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
-                            auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(P_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(P_j, T_j);
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
+                            ADVar<N> Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
+                            ADVar<N> Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
+                            ADVar<N> Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg), Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
+                            ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
+                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
+                            auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
                             ADVar<N> krw_i, krg_i, krw_j, krg_j;
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_i, vg, rp, krw_i, krg_i);
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_j, vg, rp, krw_j, krg_j);
+                            CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
+                            CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
-                            ADVar<N> Pc_i = CapRelPerm::pc_vG<N>(Sw_i, vg), Pc_j = CapRelPerm::pc_vG<N>(Sw_j, vg);
                             ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
                             ADVar<N> mobW_i = krw_i * pW_i.rho / pW_i.mu, mobW_j = krw_j * pW_j.rho / pW_j.mu;
@@ -633,11 +644,19 @@ namespace FIM_Engine {
                     }
                     else {
                         ADVar<N> Sw(state.Sw[bi]); Sw.grad(1) = 1.0;
+                        ADVar<N> Sw_old(old_state.Sw[bi]);
+                        ADVar<N> Sw_const = ClampSwForConstitutive<N>(Sw, vg_cfg, sw_constitutive_eps);
+                        ADVar<N> Sw_old_const = ClampSwForConstitutive<N>(Sw_old, vg_cfg, sw_constitutive_eps);
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
-                        ADVar<N> Sw_old(old_state.Sw[bi]), Sg_old = ADVar<N>(1.0) - Sw_old;
+                        ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
 
-                        auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
-                        auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(P_old, T_old);
+                        ADVar<N> Pc = CapRelPerm::pc_vG<N>(Sw_const, vg_cfg);
+                        ADVar<N> Pc_old = CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
+                        ADVar<N> Pg = P + Pc;
+                        ADVar<N> Pg_old = P_old + Pc_old;
+
+                        auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(Pg, T);
+                        auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_old, T_old);
                         if (track_eos_domain) {
                             ++eos_total_samples;
                             if (pG.isFallback) ++eos_fallback_co2;
@@ -647,8 +666,8 @@ namespace FIM_Engine {
                         acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi_old * Sw_old) * (vols[bi] / dt);
                         acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi_old * Sg_old) * (vols[bi] / dt);
 
-                        ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - P / pG.rho);
-                        ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - P_old / pG_old.rho);
+                        ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - Pg / pG.rho);
+                        ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - Pg_old / pG_old.rho);
                         ADVar<N> e_rock = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
                         ADVar<N> e_rock_old = ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
                         acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi_old + e_rock_old)) * (vols[bi] / dt);
@@ -702,16 +721,20 @@ namespace FIM_Engine {
                             ADVar<N> Sw_i(state.Sw[i]), Sw_j(state.Sw[j]);
                             if (wrt_i) { P_i.grad(0) = 1.0; Sw_i.grad(1) = 1.0; T_i.grad(2) = 1.0; }
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
-                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
-                            auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(P_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(P_j, T_j);
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
+                            ADVar<N> Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
+                            ADVar<N> Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
+                            ADVar<N> Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg), Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
+                            ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
+
+                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
+                            auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
                             ADVar<N> krw_i, krg_i, krw_j, krg_j;
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_i, vg, rp, krw_i, krg_i);
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_j, vg, rp, krw_j, krg_j);
+                            CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
+                            CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
 
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
-                            ADVar<N> Pc_i = CapRelPerm::pc_vG<N>(Sw_i, vg), Pc_j = CapRelPerm::pc_vG<N>(Sw_j, vg);
                             ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
 
@@ -997,10 +1020,20 @@ namespace FIM_Engine {
                     const double rescue_boost = std::max(1.0, ptc_rescue_boost_cache);
                     ptc_lambda_iter = base_ptc * rescue_boost;
                     if (ptc_lambda_iter > 0.0) {
+                        auto select_ptc_sign = [](double d_acc, double diag_now) -> double {
+                            if (d_acc > 0.0) return 1.0;
+                            if (d_acc < 0.0) return -1.0;
+                            if (diag_now > 0.0) return 1.0;
+                            if (diag_now < 0.0) return -1.0;
+                            return 1.0;
+                            };
+
+                        const double row_floor = std::max(std::abs(params.row_scale_floor), 1.0e-30);
                         for (int r = 0; r < totalEq; ++r) {
-                            const double diag_acc_abs = (r >= 0 && r < static_cast<int>(eq_contribs.size())) ? std::abs(eq_contribs[r].D_acc) : 0.0;
-                            const double m_ptc = std::max(diag_acc_abs, params.row_scale_floor);
-                            A.coeffRef(r, r) += ptc_lambda_iter * m_ptc;
+                            const double d_acc = (r >= 0 && r < static_cast<int>(eq_contribs.size())) ? eq_contribs[r].D_acc : 0.0;
+                            const double m_ptc = std::max(std::abs(d_acc), row_floor);
+                            const double sign_ptc = select_ptc_sign(d_acc, A.coeff(r, r));
+                            A.coeffRef(r, r) += sign_ptc * ptc_lambda_iter * m_ptc;
                         }
                     }
                 }
@@ -1266,12 +1299,14 @@ namespace FIM_Engine {
                                     const auto& vg = vg_cfg;
                                     const auto& rp = rp_cfg;
 
+                                    ADVar<3> Sw_const_ad = ClampSwForConstitutive<3>(Sw_ad, vg, sw_constitutive_eps);
                                     ADVar<3> krw, krg;
-                                    CapRelPerm::kr_Mualem_vG<3>(Sw_ad, vg, rp, krw, krg);
-                                    ADVar<3> pc = CapRelPerm::pc_vG<3>(Sw_ad, vg);
+                                    CapRelPerm::kr_Mualem_vG<3>(Sw_const_ad, vg, rp, krw, krg);
+                                    ADVar<3> pc = CapRelPerm::pc_vG<3>(Sw_const_ad, vg);
 
                                     nlohmann::json const_snap;
                                     const_snap["Sw"] = Sw_ad.val;
+                                    const_snap["Sw_const"] = Sw_const_ad.val;
                                     const_snap["krw"] = krw.val;
                                     const_snap["krg"] = krg.val;
                                     const_snap["Pc"] = pc.val;
@@ -1321,7 +1356,7 @@ namespace FIM_Engine {
                 // accumulation scales with 1/dt, so update caps should shrink at least linearly with dt.
                 const double dt_ref = std::max(params.dt_init, params.dt_min);
                 const double dt_eff = std::max(dt, params.dt_min);
-                const double damp_scale = std::max(1.0e-12, dt_eff / dt_ref);
+                const double damp_scale = std::min(1.0, std::max(1.0e-12, dt_eff / dt_ref));
                 // Keep tiny but non-zero floors for stiff late-time rollback loops.
                 const double max_dP_eff = std::max(1.0e-3, params.max_dP * damp_scale);
                 const double max_dT_eff = std::max(1.0e-5, params.max_dT * damp_scale);

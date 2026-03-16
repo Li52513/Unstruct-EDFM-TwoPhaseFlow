@@ -13,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <algorithm>
+#include <stdexcept>
 
 namespace {
     constexpr double kBoundaryCoeffEps = 1.0e-14;
@@ -91,10 +92,42 @@ namespace {
         }
     }
 
+    /**
+     * @brief Create a constant AD variable with zero gradient.
+     * @tparam N AD dimension.
+     * @param v Scalar value.
+     * @return Constant AD variable.
+     */
+    template<int N>
+    inline ADVar<N> MakeConstAD(double v) {
+        ADVar<N> x;
+        x.val = v;
+        for (int k = 0; k < N; ++k) x.grad(k) = 0.0;
+        return x;
+    }
+
     struct PhaseSplit {
         double fw = 0.0;
         double fg = 0.0;
     };
+
+    /**
+     * @brief Check whether user provided explicit phase fractions.
+     * @param step Well schedule step.
+     * @param[out] split User-normalized split when available.
+     * @return True when explicit fractions are provided.
+     */
+    inline bool TryResolveUserSpecifiedPhaseSplit(const WellScheduleStep& step, PhaseSplit& split) {
+        const double fw_user = std::max(0.0, step.frac_w);
+        const double fg_user = std::max(0.0, step.frac_g);
+        const double sum_user = fw_user + fg_user;
+        if (sum_user <= kEps) {
+            return false;
+        }
+        split.fw = fw_user / sum_user;
+        split.fg = fg_user / sum_user;
+        return true;
+    }
 
     // Total井稳健分相策略：
     // 1) 若用户给了有效 frac_w/frac_g，则归一化后使用；
@@ -102,13 +135,7 @@ namespace {
     // 3) 若 mobility 也不可用，则退化为水相(1,0)。
     inline PhaseSplit ResolveTotalPhaseSplit(const WellScheduleStep& step, double mob_w, double mob_g) {
         PhaseSplit split;
-
-        const double fw_user = std::max(0.0, step.frac_w);
-        const double fg_user = std::max(0.0, step.frac_g);
-        const double sum_user = fw_user + fg_user;
-        if (sum_user > kEps) {
-            split.fw = fw_user / sum_user;
-            split.fg = fg_user / sum_user;
+        if (TryResolveUserSpecifiedPhaseSplit(step, split)) {
             return split;
         }
 
@@ -126,6 +153,32 @@ namespace {
         return split;
     }
 
+    /**
+     * @brief Resolve injection composition split for Total mode.
+     * @details
+     * Priority: explicit user fractions -> component_mode selector -> injection_is_co2 hint.
+     * Falls back to water-only when no explicit information is provided.
+     * @param step Well schedule step.
+     * @param has_w_eq Whether water equation is available.
+     * @param has_g_eq Whether gas equation is available.
+     * @return Injection phase split.
+     */
+    inline PhaseSplit ResolveInjectionPhaseSplit(const WellScheduleStep& step, bool has_w_eq, bool has_g_eq) {
+        if (has_w_eq && !has_g_eq) return PhaseSplit{ 1.0, 0.0 };
+        if (!has_w_eq && has_g_eq) return PhaseSplit{ 0.0, 1.0 };
+        if (!has_w_eq && !has_g_eq) return PhaseSplit{ 0.0, 0.0 };
+
+        PhaseSplit user_split;
+        if (TryResolveUserSpecifiedPhaseSplit(step, user_split)) {
+            return user_split;
+        }
+
+        if (step.component_mode == WellComponentMode::Water) return PhaseSplit{ 1.0, 0.0 };
+        if (step.component_mode == WellComponentMode::Gas) return PhaseSplit{ 0.0, 1.0 };
+
+        return step.injection_is_co2 ? PhaseSplit{ 0.0, 1.0 } : PhaseSplit{ 1.0, 0.0 };
+    }
+
     inline PhaseSplit ResolvePhaseSplit(const WellScheduleStep& step, double mob_w, double mob_g, bool has_w_eq, bool has_g_eq) {
         // Single-equation mode: map all well mass to the available mass row.
         if (has_w_eq && !has_g_eq) return PhaseSplit{ 1.0, 0.0 };
@@ -137,6 +190,112 @@ namespace {
         return ResolveTotalPhaseSplit(step, mob_w, mob_g);
     }
 
+    /**
+     * @brief Clamp saturation to constitutive-safe interval for kr/Pc evaluation.
+     * @tparam N AD dimension.
+     * @param sw Water saturation AD variable.
+     * @param vg van Genuchten parameters.
+     * @return Clamped saturation preserving interior gradients.
+     */
+    template<int N>
+    inline ADVar<N> ClampSwForConstitutiveWell(const ADVar<N>& sw, const CapRelPerm::VGParams& vg) {
+        const double eps = 1.0e-8;
+        const double lower = std::max(0.0, std::min(1.0, vg.Swr + eps));
+        const double upper_raw = std::max(0.0, std::min(1.0, 1.0 - vg.Sgr - eps));
+        const double upper = std::max(lower, upper_raw);
+        if (sw.val < lower) return MakeConstAD<N>(lower);
+        if (sw.val > upper) return MakeConstAD<N>(upper);
+        return sw;
+    }
+
+    /**
+     * @brief Standard-condition densities used for optional std-volume rate conversion.
+     */
+    struct StandardConditionDensities {
+        double rho_w = 1.0;
+        double rho_g = 1.0;
+        bool enabled = false;
+    };
+
+    /**
+     * @brief Evaluate standard-condition densities for water and CO2.
+     * @param step Well schedule step.
+     * @return Standard-condition density bundle.
+     * @throws std::invalid_argument Invalid standard-state pressure/temperature.
+     * @throws std::runtime_error Failed or nonphysical density evaluation.
+     */
+    inline StandardConditionDensities EvaluateStandardConditionDensities(const WellScheduleStep& step) {
+        StandardConditionDensities out;
+        if (step.rate_target_type != WellRateTargetType::StdVolumeRate) {
+            return out;
+        }
+
+        if (!(step.std_pressure > 0.0) || !(step.std_temperature > 0.0)) {
+            throw std::invalid_argument("Standard-condition conversion requires std_pressure>0 and std_temperature>0.");
+        }
+
+        ADVar<1> P_std(step.std_pressure);
+        ADVar<1> T_std(step.std_temperature);
+        const auto props_w_std = AD_Fluid::Evaluator::evaluateWater<1>(P_std, T_std);
+        const auto props_g_std = AD_Fluid::Evaluator::evaluateCO2<1>(P_std, T_std);
+
+        if (!std::isfinite(props_w_std.rho.val) || !std::isfinite(props_g_std.rho.val) ||
+            props_w_std.rho.val <= 0.0 || props_g_std.rho.val <= 0.0) {
+            throw std::runtime_error("Failed to evaluate positive finite standard-condition densities.");
+        }
+
+        out.rho_w = props_w_std.rho.val;
+        out.rho_g = props_g_std.rho.val;
+        out.enabled = true;
+        return out;
+    }
+
+    /**
+     * @brief Build a constant phase mass source from target split.
+     * @tparam N AD dimension.
+     * @param step Well schedule step.
+     * @param split_const Constant split in [0,1].
+     * @param std_dens Standard-condition densities (used only for std-volume target).
+     * @param water_phase True for water phase, false for gas phase.
+     * @return Phase mass source AD variable.
+     */
+    template<int N>
+    inline ADVar<N> BuildMassRateBySplitConst(
+        const WellScheduleStep& step,
+        double split_const,
+        const StandardConditionDensities& std_dens,
+        bool water_phase)
+    {
+        const double split = std::max(0.0, split_const);
+        const double rho_std = water_phase ? std_dens.rho_w : std_dens.rho_g;
+        const double q_mass = (step.rate_target_type == WellRateTargetType::StdVolumeRate)
+            ? (step.target_value * split * rho_std)
+            : (step.target_value * split);
+        return MakeConstAD<N>(q_mass);
+    }
+
+    /**
+     * @brief Build an AD phase mass source from AD split.
+     * @tparam N AD dimension.
+     * @param step Well schedule step.
+     * @param split_ad AD split variable.
+     * @param std_dens Standard-condition densities (used only for std-volume target).
+     * @param water_phase True for water phase, false for gas phase.
+     * @return Phase mass source AD variable.
+     */
+    template<int N>
+    inline ADVar<N> BuildMassRateBySplitAD(
+        const WellScheduleStep& step,
+        const ADVar<N>& split_ad,
+        const StandardConditionDensities& std_dens,
+        bool water_phase)
+    {
+        if (step.rate_target_type == WellRateTargetType::StdVolumeRate) {
+            const double rho_std = water_phase ? std_dens.rho_w : std_dens.rho_g;
+            return MakeConstAD<N>(step.target_value * rho_std) * split_ad;
+        }
+        return MakeConstAD<N>(step.target_value) * split_ad;
+    }
     inline const char* ToBoundaryTypeLabel(BoundarySetting::BoundaryType type) {
         switch (type) {
         case BoundarySetting::BoundaryType::Dirichlet: return "Dirichlet";
@@ -476,8 +635,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
         double WI = step.wi_override;
         if (WI < 0.0) {
             if (step.domain == WellTargetDomain::Fracture) {
-                std::cerr << "[WellSkip][2D][" << step.well_name << "] Fracture requires explicit wi_override.\n";
-                continue;
+                throw std::runtime_error(std::string("[Assemble_Wells_2D] Fracture well requires explicit wi_override: ") + step.well_name);
             }
             double V = mesh.getCells()[localIdx].volume;
             double kxx = safeGetFieldValue(pField_Kxx, localIdx, 1e-13);
@@ -497,36 +655,76 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
             WI = (2.0 * 3.141592653589793 * k_eff * 1.0) / denom;
         }
 
-        ADVar<3> P_cell; P_cell.val = pField_P->data[localIdx];
-        for (int k = 0; k < 3; ++k) P_cell.grad(k) = 0.0;
+        ADVar<3> P_cell = MakeConstAD<3>(pField_P->data[localIdx]);
         P_cell.grad(dofOffset_P) = 1.0;
 
-        ADVar<3> q_mass_w = { 0 }, q_mass_g = { 0 };
-        const PhaseSplit split = ResolvePhaseSplit(step, mob_den_w, mob_den_g, dofOffset_W >= 0, dofOffset_G >= 0);
+        ADVar<3> q_mass_w = MakeConstAD<3>(0.0), q_mass_g = MakeConstAD<3>(0.0);
+        const bool has_w_eq = (dofOffset_W >= 0);
+        const bool has_g_eq = (dofOffset_G >= 0);
+        const bool total_mode = has_w_eq && has_g_eq && (step.component_mode == WellComponentMode::Total);
 
         if (step.control_mode == WellControlMode::BHP) {
-            if (split.fw > 0.0) {
-                q_mass_w = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fw * mob_den_w, P_cell, step.target_value);
+            const ADVar<3> dP = P_cell - MakeConstAD<3>(step.target_value);
+            if (total_mode) {
+                if (dP.val < 0.0) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    const ADVar<3> q_total = MakeConstAD<3>(WI * (mob_den_w + mob_den_g)) * dP;
+                    q_mass_w = MakeConstAD<3>(inj_split.fw) * q_total;
+                    q_mass_g = MakeConstAD<3>(inj_split.fg) * q_total;
+                }
+                else {
+                    q_mass_w = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * mob_den_w, P_cell, step.target_value);
+                    q_mass_g = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * mob_den_g, P_cell, step.target_value);
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fg * mob_den_g, P_cell, step.target_value);
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_den_w, mob_den_g, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fw * mob_den_w, P_cell, step.target_value);
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fg * mob_den_g, P_cell, step.target_value);
+                }
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            if (split.fw > 0.0) {
-                q_mass_w = FVM_Ops::Op_Well_Rate_Source_AD<3, ADVar<3>>(step.target_value * split.fw);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            if (total_mode) {
+                PhaseSplit user_split;
+                const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
+                if (step.target_value < 0.0) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, inj_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, inj_split.fg, std_dens, false);
+                }
+                else if (has_user_split) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, user_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, user_split.fg, std_dens, false);
+                }
+                else {
+                    const PhaseSplit split = ResolveTotalPhaseSplit(step, mob_den_w, mob_den_g);
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = FVM_Ops::Op_Well_Rate_Source_AD<3, ADVar<3>>(step.target_value * split.fg);
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_den_w, mob_den_g, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
+                }
             }
         }
+
         if (dofOffset_W >= 0) {
             int eqIdx_W = mgr.getEquationIndex(solverIdx, dofOffset_W);
             if (isValidEqIdx(eqIdx_W, residual, jacobianDiag)) {
                 residual[eqIdx_W] += q_mass_w.val;
                 jacobianDiag[eqIdx_W] += q_mass_w.grad(dofOffset_P);
                 stats.sumResidual += q_mass_w.val;
-                stats.sumJacobianDiag += q_mass_w.grad(dofOffset_P); // [Patch 2] 完整统计
+                stats.sumJacobianDiag += q_mass_w.grad(dofOffset_P);
             }
         }
         if (dofOffset_G >= 0) {
@@ -542,7 +740,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
             double hw = pField_Hw->data[localIdx];
             double hg = safeGetFieldValue(pField_Hg, localIdx, 0.0);
             if (step.injection_temperature > 0.0) {
-                const double p_eval = pField_P->data[localIdx];
+                const double p_eval = (step.control_mode == WellControlMode::BHP) ? step.target_value : pField_P->data[localIdx];
                 if (q_mass_w.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
                     hw = (step.injection_is_co2
@@ -569,8 +767,6 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
     }
     return stats;
 }
-
-// [Patch 3 & 9] 3D 井装配
 BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
     MeshManager_3D& mgr, FieldManager_3D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
@@ -587,7 +783,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
     }
 
     const auto& mesh = mgr.mesh();
-    int nMat = get3DMatrixOffset(mgr); // [Patch 3] 修复 3D Matrix Offset
+    int nMat = get3DMatrixOffset(mgr);
     const WellFieldTags tags = BuildWellFieldTags();
 
     for (const auto& step : active_steps) {
@@ -655,8 +851,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
         double WI = step.wi_override;
         if (WI < 0.0) {
             if (step.domain == WellTargetDomain::Fracture) {
-                std::cerr << "[WellSkip][3D][" << step.well_name << "] Fracture requires wi_override.\n";
-                continue;
+                throw std::runtime_error(std::string("[Assemble_Wells_3D] Fracture well requires explicit wi_override: ") + step.well_name);
             }
             const auto& cell = mesh.getCells()[localIdx];
             double V = cell.volume;
@@ -664,7 +859,6 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
             double L = step.L_override;
             WellAxis axis = step.well_axis;
 
-            // [Patch 3] None 轴向保护
             if (L < 0.0 && axis == WellAxis::None) {
                 std::cerr << "[Assemble_Wells_3D] Warning: well_axis=None with L_override<0. Defaulting to Z-axis.\n";
                 axis = WellAxis::Z;
@@ -709,29 +903,69 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
             WI = (2.0 * 3.141592653589793 * k_plane * L) / denom;
         }
 
-        ADVar<3> P_cell; P_cell.val = pField_P->data[localIdx];
-        for (int k = 0; k < 3; ++k) P_cell.grad(k) = 0.0;
+        ADVar<3> P_cell = MakeConstAD<3>(pField_P->data[localIdx]);
         P_cell.grad(dofOffset_P) = 1.0;
 
-        ADVar<3> q_mass_w = { 0 }, q_mass_g = { 0 };
-        const PhaseSplit split = ResolvePhaseSplit(step, mob_den_w, mob_den_g, dofOffset_W >= 0, dofOffset_G >= 0);
+        ADVar<3> q_mass_w = MakeConstAD<3>(0.0), q_mass_g = MakeConstAD<3>(0.0);
+        const bool has_w_eq = (dofOffset_W >= 0);
+        const bool has_g_eq = (dofOffset_G >= 0);
+        const bool total_mode = has_w_eq && has_g_eq && (step.component_mode == WellComponentMode::Total);
 
         if (step.control_mode == WellControlMode::BHP) {
-            if (split.fw > 0.0) {
-                q_mass_w = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fw * mob_den_w, P_cell, step.target_value);
+            const ADVar<3> dP = P_cell - MakeConstAD<3>(step.target_value);
+            if (total_mode) {
+                if (dP.val < 0.0) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    const ADVar<3> q_total = MakeConstAD<3>(WI * (mob_den_w + mob_den_g)) * dP;
+                    q_mass_w = MakeConstAD<3>(inj_split.fw) * q_total;
+                    q_mass_g = MakeConstAD<3>(inj_split.fg) * q_total;
+                }
+                else {
+                    q_mass_w = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * mob_den_w, P_cell, step.target_value);
+                    q_mass_g = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * mob_den_g, P_cell, step.target_value);
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fg * mob_den_g, P_cell, step.target_value);
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_den_w, mob_den_g, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fw * mob_den_w, P_cell, step.target_value);
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = FVM_Ops::Op_Well_BHP_Source_AD<3, ADVar<3>>(WI * split.fg * mob_den_g, P_cell, step.target_value);
+                }
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            if (split.fw > 0.0) {
-                q_mass_w = FVM_Ops::Op_Well_Rate_Source_AD<3, ADVar<3>>(step.target_value * split.fw);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            if (total_mode) {
+                PhaseSplit user_split;
+                const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
+                if (step.target_value < 0.0) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, inj_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, inj_split.fg, std_dens, false);
+                }
+                else if (has_user_split) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, user_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, user_split.fg, std_dens, false);
+                }
+                else {
+                    const PhaseSplit split = ResolveTotalPhaseSplit(step, mob_den_w, mob_den_g);
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = FVM_Ops::Op_Well_Rate_Source_AD<3, ADVar<3>>(step.target_value * split.fg);
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_den_w, mob_den_g, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
+                }
             }
         }
+
         if (dofOffset_W >= 0) {
             int eqIdx_W = mgr.getEquationIndex(solverIdx, dofOffset_W);
             if (isValidEqIdx(eqIdx_W, residual, jacobianDiag)) {
@@ -754,7 +988,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
             double hw = pField_Hw->data[localIdx];
             double hg = safeGetFieldValue(pField_Hg, localIdx, 0.0);
             if (step.injection_temperature > 0.0) {
-                const double p_eval = pField_P->data[localIdx];
+                const double p_eval = (step.control_mode == WellControlMode::BHP) ? step.target_value : pField_P->data[localIdx];
                 if (q_mass_w.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
                     hw = (step.injection_is_co2
@@ -781,7 +1015,6 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
     }
     return stats;
 }
-
 namespace {
     inline ADVar<3> MakeConstAD3(double v) {
         ADVar<3> x;
@@ -851,7 +1084,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
 
         double WI = step.wi_override;
         if (WI < 0.0) {
-            if (step.domain == WellTargetDomain::Fracture) continue;
+            if (step.domain == WellTargetDomain::Fracture) {
+                throw std::runtime_error(std::string("[Assemble_Wells_2D_FullJac] Fracture well requires explicit wi_override: ") + step.well_name);
+            }
 
             const double V = mesh.getCells()[localIdx].volume;
             const double kxx = safeGetFieldValue(pField_Kxx, localIdx, 1e-13);
@@ -875,8 +1110,15 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
         ADVar<3> Sw_cell = MakeConstAD3(has_sw ? pField_Sw->data[localIdx] : 1.0);
         if (has_sw) Sw_cell.grad(1) = 1.0;
 
+        ADVar<3> Sw_const = Sw_cell;
+        ADVar<3> Pc_cell = MakeConstAD3(0.0);
+        if (has_sw) {
+            Sw_const = ClampSwForConstitutiveWell<3>(Sw_cell, vg);
+            Pc_cell = CapRelPerm::pc_vG<3>(Sw_const, vg);
+        }
+
         auto propsW = AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_cell);
-        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
+        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell + Pc_cell, T_cell);
         if (!has_sw && single_phase_use_co2) {
             propsW = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
         }
@@ -884,10 +1126,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
         ADVar<3> krw = MakeConstAD3(1.0);
         ADVar<3> krg = MakeConstAD3(0.0);
         if (has_sw) {
-            CapRelPerm::kr_Mualem_vG<3>(Sw_cell, vg, rp, krw, krg);
+            CapRelPerm::kr_Mualem_vG<3>(Sw_const, vg, rp, krw, krg);
         }
         else if (single_phase_use_co2) {
-            // Single-phase CO2: route mobility to gas channel explicitly.
             krw = MakeConstAD3(0.0);
             krg = MakeConstAD3(1.0);
         }
@@ -897,36 +1138,84 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
 
         ADVar<3> q_mass_w = MakeConstAD3(0.0);
         ADVar<3> q_mass_g = MakeConstAD3(0.0);
-        const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, dofOffset_W >= 0, dofOffset_G >= 0);
+
+        const bool has_w_eq = (dofOffset_W >= 0);
+        const bool has_g_eq = (dofOffset_G >= 0);
+        const bool total_mode = has_w_eq && has_g_eq && (step.component_mode == WellComponentMode::Total);
 
         if (step.control_mode == WellControlMode::BHP) {
-            if (split.fw > 0.0) {
-                q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * (P_cell - MakeConstAD3(step.target_value));
+            ADVar<3> dP = P_cell - MakeConstAD3(step.target_value);
+            if (total_mode) {
+                if (dP.val < 0.0) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    ADVar<3> q_total = MakeConstAD3(WI) * (mob_w + mob_g) * dP;
+                    q_mass_w = MakeConstAD3(inj_split.fw) * q_total;
+                    q_mass_g = MakeConstAD3(inj_split.fg) * q_total;
+                }
+                else {
+                    q_mass_w = MakeConstAD3(WI) * mob_w * dP;
+                    q_mass_g = MakeConstAD3(WI) * mob_g * dP;
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * (P_cell - MakeConstAD3(step.target_value));
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * dP;
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * dP;
+                }
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            if (split.fw > 0.0) {
-                q_mass_w = MakeConstAD3(step.target_value * split.fw);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            if (total_mode) {
+                PhaseSplit user_split;
+                const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
+                const bool is_injection = (step.target_value < 0.0);
+
+                if (is_injection) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, inj_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, inj_split.fg, std_dens, false);
+                }
+                else if (has_user_split) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, user_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, user_split.fg, std_dens, false);
+                }
+                else {
+                    const ADVar<3> denom = mob_w + mob_g + MakeConstAD3(kEps);
+                    const ADVar<3> fw_ad = mob_w / denom;
+                    const ADVar<3> fg_ad = MakeConstAD3(1.0) - fw_ad;
+                    q_mass_w = BuildMassRateBySplitAD<3>(step, fw_ad, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitAD<3>(step, fg_ad, std_dens, false);
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = MakeConstAD3(step.target_value * split.fg);
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
+                }
             }
         }
+
         ADVar<3> h_w_well = propsW.h;
         ADVar<3> h_g_well = propsG.h;
         if (step.injection_temperature > 0.0) {
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
+            const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
+            ADVar<3> P_inj_const = MakeConstAD3(p_inj);
             const bool inj_w_co2 = step.injection_is_co2 || (!has_sw && single_phase_use_co2);
             if (q_mass_w.val < 0.0) {
                 h_w_well = (inj_w_co2
-                    ? AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_inj)
-                    : AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_inj)).h;
+                    ? AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj)
+                    : AD_Fluid::Evaluator::evaluateWater<3>(P_inj_const, T_inj)).h;
             }
             if (q_mass_g.val < 0.0) {
-                h_g_well = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_inj).h;
+                h_g_well = AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj).h;
             }
         }
         ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
@@ -947,7 +1236,6 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
 
     return stats;
 }
-
 BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
     MeshManager_3D& mgr, FieldManager_3D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
@@ -994,7 +1282,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
 
         double WI = step.wi_override;
         if (WI < 0.0) {
-            if (step.domain == WellTargetDomain::Fracture) continue;
+            if (step.domain == WellTargetDomain::Fracture) {
+                throw std::runtime_error(std::string("[Assemble_Wells_3D_FullJac] Fracture well requires explicit wi_override: ") + step.well_name);
+            }
 
             const auto& cell = mesh.getCells()[localIdx];
             const double V = cell.volume;
@@ -1043,8 +1333,15 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
         ADVar<3> Sw_cell = MakeConstAD3(has_sw ? pField_Sw->data[localIdx] : 1.0);
         if (has_sw) Sw_cell.grad(1) = 1.0;
 
+        ADVar<3> Sw_const = Sw_cell;
+        ADVar<3> Pc_cell = MakeConstAD3(0.0);
+        if (has_sw) {
+            Sw_const = ClampSwForConstitutiveWell<3>(Sw_cell, vg);
+            Pc_cell = CapRelPerm::pc_vG<3>(Sw_const, vg);
+        }
+
         auto propsW = AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_cell);
-        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
+        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell + Pc_cell, T_cell);
         if (!has_sw && single_phase_use_co2) {
             propsW = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
         }
@@ -1052,10 +1349,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
         ADVar<3> krw = MakeConstAD3(1.0);
         ADVar<3> krg = MakeConstAD3(0.0);
         if (has_sw) {
-            CapRelPerm::kr_Mualem_vG<3>(Sw_cell, vg, rp, krw, krg);
+            CapRelPerm::kr_Mualem_vG<3>(Sw_const, vg, rp, krw, krg);
         }
         else if (single_phase_use_co2) {
-            // Single-phase CO2: route mobility to gas channel explicitly.
             krw = MakeConstAD3(0.0);
             krg = MakeConstAD3(1.0);
         }
@@ -1065,36 +1361,84 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
 
         ADVar<3> q_mass_w = MakeConstAD3(0.0);
         ADVar<3> q_mass_g = MakeConstAD3(0.0);
-        const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, dofOffset_W >= 0, dofOffset_G >= 0);
+
+        const bool has_w_eq = (dofOffset_W >= 0);
+        const bool has_g_eq = (dofOffset_G >= 0);
+        const bool total_mode = has_w_eq && has_g_eq && (step.component_mode == WellComponentMode::Total);
 
         if (step.control_mode == WellControlMode::BHP) {
-            if (split.fw > 0.0) {
-                q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * (P_cell - MakeConstAD3(step.target_value));
+            ADVar<3> dP = P_cell - MakeConstAD3(step.target_value);
+            if (total_mode) {
+                if (dP.val < 0.0) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    ADVar<3> q_total = MakeConstAD3(WI) * (mob_w + mob_g) * dP;
+                    q_mass_w = MakeConstAD3(inj_split.fw) * q_total;
+                    q_mass_g = MakeConstAD3(inj_split.fg) * q_total;
+                }
+                else {
+                    q_mass_w = MakeConstAD3(WI) * mob_w * dP;
+                    q_mass_g = MakeConstAD3(WI) * mob_g * dP;
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * (P_cell - MakeConstAD3(step.target_value));
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * dP;
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * dP;
+                }
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            if (split.fw > 0.0) {
-                q_mass_w = MakeConstAD3(step.target_value * split.fw);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            if (total_mode) {
+                PhaseSplit user_split;
+                const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
+                const bool is_injection = (step.target_value < 0.0);
+
+                if (is_injection) {
+                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, inj_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, inj_split.fg, std_dens, false);
+                }
+                else if (has_user_split) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, user_split.fw, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, user_split.fg, std_dens, false);
+                }
+                else {
+                    const ADVar<3> denom = mob_w + mob_g + MakeConstAD3(kEps);
+                    const ADVar<3> fw_ad = mob_w / denom;
+                    const ADVar<3> fg_ad = MakeConstAD3(1.0) - fw_ad;
+                    q_mass_w = BuildMassRateBySplitAD<3>(step, fw_ad, std_dens, true);
+                    q_mass_g = BuildMassRateBySplitAD<3>(step, fg_ad, std_dens, false);
+                }
             }
-            if (split.fg > 0.0) {
-                q_mass_g = MakeConstAD3(step.target_value * split.fg);
+            else {
+                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
+                if (split.fw > 0.0) {
+                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
+                }
+                if (split.fg > 0.0) {
+                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
+                }
             }
         }
+
         ADVar<3> h_w_well = propsW.h;
         ADVar<3> h_g_well = propsG.h;
         if (step.injection_temperature > 0.0) {
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
+            const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
+            ADVar<3> P_inj_const = MakeConstAD3(p_inj);
             const bool inj_w_co2 = step.injection_is_co2 || (!has_sw && single_phase_use_co2);
             if (q_mass_w.val < 0.0) {
                 h_w_well = (inj_w_co2
-                    ? AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_inj)
-                    : AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_inj)).h;
+                    ? AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj)
+                    : AD_Fluid::Evaluator::evaluateWater<3>(P_inj_const, T_inj)).h;
             }
             if (q_mass_g.val < 0.0) {
-                h_g_well = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_inj).h;
+                h_g_well = AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj).h;
             }
         }
         ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);

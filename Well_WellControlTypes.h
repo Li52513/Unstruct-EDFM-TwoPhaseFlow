@@ -23,6 +23,14 @@ enum class WellComponentMode {
     Total   ///< 总相
 };
 
+/**
+ * @brief Rate 控制目标量纲类型。
+ */
+enum class WellRateTargetType {
+    MassRate,           ///< 目标值为质量流量 [kg/s]
+    StdVolumeRate       ///< 目标值为标准态体积流量 [m^3/s]
+};
+
 enum class WellAxis {
     X,
     Y,
@@ -57,6 +65,21 @@ struct WellScheduleStep {
     // Effective for injection branch in energy equation when > 0.
     double injection_temperature = -1.0;
     bool injection_is_co2 = false;
+
+    /**
+     * @brief Rate 目标量纲类型（默认保持现有行为：质量流量）。
+     */
+    WellRateTargetType rate_target_type = WellRateTargetType::MassRate;
+
+    /**
+     * @brief 标准态参考压力 [Pa]，仅在 rate_target_type=StdVolumeRate 时生效。
+     */
+    double std_pressure = 101325.0;
+
+    /**
+     * @brief 标准态参考温度 [K]，仅在 rate_target_type=StdVolumeRate 时生效。
+     */
+    double std_temperature = 288.15;
 };
 
 #endif // WELL_WELLCONTROLTYPES_H

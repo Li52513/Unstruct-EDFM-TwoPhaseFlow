@@ -196,9 +196,59 @@ namespace AD_Fluid
 
             return res;
         }
+        /**
+         * @brief Apply a small derivative floor to avoid zero-Jacobian fallback states.
+         * @details
+         * This routine is used only in the deepest fallback path when robust differencing
+         * fails in all directions. It injects physically tiny but non-zero sensitivities,
+         * preventing fully decoupled zero-gradient rows in the global Jacobian.
+         * @tparam TProps Fluid property POD type (WaterProperties/CO2Properties).
+         * @param base_props Base fluid properties at the evaluation point.
+         * @param reference_value Perturbation reference value (pressure or temperature).
+         * @param[out] drho Density derivative.
+         * @param[out] dmu Viscosity derivative.
+         * @param[out] dcp Cp derivative.
+         * @param[out] dcv Cv derivative.
+         * @param[out] dh Enthalpy derivative.
+         * @param[out] dk Conductivity derivative.
+         */
+        template<typename TProps>
+        static void applyDerivativeFloor(
+            const TProps& base_props,
+            double reference_value,
+            double& drho,
+            double& dmu,
+            double& dcp,
+            double& dcv,
+            double& dh,
+            double& dk)
+        {
+            const double denom = std::max(std::abs(reference_value), 1.0);
+            const double floor_scale = 1.0e-12;
+            auto floorMag = [&](double base_val) -> double {
+                const double scaled = floor_scale * std::max(std::abs(base_val), 1.0) / denom;
+                return std::max(scaled, 1.0e-18);
+            };
 
-    private:
+            auto applyFloorOne = [&](double& dval, double base_val) {
+                const double floor_mag = floorMag(base_val);
+                if (!std::isfinite(dval)) {
+                    dval = floor_mag;
+                    return;
+                }
+                if (std::abs(dval) < floor_mag) {
+                    const double sign = (dval < 0.0) ? -1.0 : 1.0;
+                    dval = sign * floor_mag;
+                }
+            };
 
+            applyFloorOne(drho, base_props.rho);
+            applyFloorOne(dmu, base_props.mu);
+            applyFloorOne(dcp, base_props.cp);
+            applyFloorOne(dcv, base_props.cv);
+            applyFloorOne(dh, base_props.h);
+            applyFloorOne(dk, base_props.k);
+        }
         /**
          * @brief 显式安全的 AD 变量装配器 (消除未初始化污染风险)
          */
@@ -280,8 +330,9 @@ namespace AD_Fluid
                         return DiffMode::Backward;
                     }
                     catch (...) {
-                        // Tier 4: 终极防御，赋予 0 梯度 (Zero Gradient)
+                        // Tier 4: final defense, avoid exact zero Jacobian rows by applying tiny derivative floor.
                         drho = 0.0; dmu = 0.0; dcp = 0.0; dcv = 0.0; dh = 0.0; dk = 0.0;
+                        applyDerivativeFloor(base_props, val, drho, dmu, dcp, dcv, dh, dk);
                         return DiffMode::ZeroGrad;
                     }
                 }

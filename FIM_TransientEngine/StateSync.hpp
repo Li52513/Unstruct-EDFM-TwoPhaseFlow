@@ -5,6 +5,7 @@
 #include "../AD_FluidEvaluator.h"
 #include "../SolverContrlStrName_op.h"
 
+#include <algorithm>
 #include <string>
 
 #ifdef _WIN32
@@ -19,6 +20,48 @@ namespace FIM_Engine {
 
     inline int MatrixBlockCount(const MeshManager& mgr) { return mgr.getMatrixDOFCount(); }
     inline int MatrixBlockCount(const MeshManager_3D& mgr) { return mgr.fracture_network().getSolverIndexOffset(); }
+
+    /**
+     * @brief Clamp scalar water saturation into constitutive-safe interval.
+     * @param sw Raw water saturation.
+     * @param vg_params van Genuchten parameter set used by kr/Pc models.
+     * @param safety_eps Safety margin away from constitutive singular points.
+     * @return Clamped saturation value for constitutive evaluation.
+     */
+    inline double ClampSwForConstitutive(
+        double sw,
+        const CapRelPerm::VGParams& vg_params,
+        double safety_eps = 1.0e-8)
+    {
+        const double eps = std::max(1.0e-12, std::min(1.0e-2, safety_eps));
+        const double lower = std::max(0.0, std::min(1.0, vg_params.Swr + eps));
+        const double upper_raw = std::max(0.0, std::min(1.0, 1.0 - vg_params.Sgr - eps));
+        const double upper = std::max(lower, upper_raw);
+        if (sw < lower) return lower;
+        if (sw > upper) return upper;
+        return sw;
+    }
+
+    /**
+     * @brief Clamp AD water saturation into constitutive-safe interval.
+     * @tparam N AD variable dimension.
+     * @param sw Raw AD water saturation.
+     * @param vg_params van Genuchten parameter set used by kr/Pc models.
+     * @param safety_eps Safety margin away from constitutive singular points.
+     * @return AD saturation for constitutive evaluation (boundary-clipped with zero slope outside interval).
+     */
+    template<int N>
+    inline ADVar<N> ClampSwForConstitutive(
+        const ADVar<N>& sw,
+        const CapRelPerm::VGParams& vg_params,
+        double safety_eps = 1.0e-8)
+    {
+        const double sw_clamped = ClampSwForConstitutive(sw.val, vg_params, safety_eps);
+        if (sw_clamped == sw.val) {
+            return sw;
+        }
+        return ADVar<N>(sw_clamped);
+    }
 
     template<int N>
     inline AD_Fluid::ADFluidProperties<N> EvalPrimaryFluid(
@@ -92,14 +135,22 @@ namespace FIM_Engine {
             auto propsW = EvalPrimaryFluid<N>(sp_model, P_ad, T_ad);
 
             double sw = (N == 3) ? state.Sw[i] : 1.0;
+            double sw_constitutive = sw;
             double rho_w = propsW.rho.val;
             double mu_w = propsW.mu.val;
             double krw = 1.0, krg = 0.0;
+            AD_Fluid::ADFluidProperties<N> propsG{};
 
             if constexpr (N == 3) {
+                sw_constitutive = ClampSwForConstitutive(sw, vg_params);
+                const ADVar<N> Sw_const_ad(sw_constitutive);
+                const ADVar<N> Pc_const_ad = CapRelPerm::pc_vG<N>(Sw_const_ad, vg_params);
+                const ADVar<N> P_gas_ad = P_ad + Pc_const_ad;
+
                 propsW = AD_Fluid::Evaluator::evaluateWater<N>(P_ad, T_ad);
+                propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_gas_ad, T_ad);
                 ADVar<N> krw_ad, krg_ad;
-                CapRelPerm::kr_Mualem_vG<N>(ADVar<N>(sw), vg_params, rp_params, krw_ad, krg_ad);
+                CapRelPerm::kr_Mualem_vG<N>(Sw_const_ad, vg_params, rp_params, krw_ad, krg_ad);
                 krw = krw_ad.val;
                 krg = krg_ad.val;
                 rho_w = propsW.rho.val;
@@ -111,16 +162,14 @@ namespace FIM_Engine {
             if (i < nMat) {
                 (*f_pw)[i] = p; (*f_T)[i] = t; (*f_rhow)[i] = rho_w; (*f_hw)[i] = propsW.h.val; (*f_lamw_mob)[i] = lambda_w_mob; (*f_P_viz)[i] = p;
                 if constexpr (N == 3) {
-                    auto propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);
-                    (*f_sw)[i] = sw; (*f_Sw_viz)[i] = sw; (*f_rhog)[i] = propsG.rho.val; (*f_hg)[i] = propsG.h.val; (*f_lamg_mob)[i] = krg / std::max(propsG.mu.val, 1e-18);
+                    (*f_sw)[i] = sw_constitutive; (*f_Sw_viz)[i] = sw_constitutive; (*f_rhog)[i] = propsG.rho.val; (*f_hg)[i] = propsG.h.val; (*f_lamg_mob)[i] = krg / std::max(propsG.mu.val, 1e-18);
                 }
             }
             else {
                 int fi = i - nMat;
                 (*frac_pw)[fi] = p; (*frac_T)[fi] = t; (*frac_rhow)[fi] = rho_w; (*frac_hw)[fi] = propsW.h.val; (*frac_lamw_mob)[fi] = lambda_w_mob; (*frac_P_viz)[fi] = p;
                 if constexpr (N == 3) {
-                    auto propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);
-                    (*frac_sw)[fi] = sw; (*frac_Sw_viz)[fi] = sw; (*frac_rhog)[fi] = propsG.rho.val; (*frac_hg)[fi] = propsG.h.val; (*frac_lamg_mob)[fi] = krg / std::max(propsG.mu.val, 1e-18);
+                    (*frac_sw)[fi] = sw_constitutive; (*frac_Sw_viz)[fi] = sw_constitutive; (*frac_rhog)[fi] = propsG.rho.val; (*frac_hg)[fi] = propsG.h.val; (*frac_lamg_mob)[fi] = krg / std::max(propsG.mu.val, 1e-18);
                 }
             }
         }
