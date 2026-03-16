@@ -195,7 +195,7 @@ inline FIM_Engine::TransientSolverParams BuildSolverParams(bool twoPhase,
     params.enable_ls_trace = false;
     params.diag_level = FIM_Engine::DiagLevel::Off;
     params.stagnation_min_drop = 5.0e-3;
-    params.stagnation_abs_res_tol = 5.0e6;
+    params.stagnation_abs_res_tol = 1.0e2;
 
     return params;
 }
@@ -282,9 +282,9 @@ inline FIM_Engine::TransientSolverParams BuildLongRunTemplate(
         : (twoPhase && !is3d) ? 1.0 * 86400.0
         : (!twoPhase && is3d) ? 0.5 * 86400.0
         : 0.25 * 86400.0) * long_dt_scale;
-    longrun.max_newton_iter = twoPhase ? (is3d ? 14 : 12) : (is3d ? 12 : 10);
-    longrun.rel_res_tol = 2.0e-1;
-    longrun.rel_update_tol = 1.0e-5;
+    longrun.max_newton_iter = 24;                          // [包01] 拉长牛顿最大迭代数以穿越强非线性区
+    longrun.rel_res_tol = 2.0e-1;                          // 保持不变
+    longrun.rel_update_tol = 1.0e-3;                       // [包01] 放宽相对更新容差避免在最后阶段卡死
     longrun.enable_ptc = true;
     longrun.ptc_lambda_init = 0.2;
     longrun.ptc_lambda_decay = 0.5;
@@ -297,9 +297,9 @@ inline FIM_Engine::TransientSolverParams BuildLongRunTemplate(
     longrun.dt_relres_iter_grow_hi = twoPhase ? 10 : 12;
     longrun.dt_relres_iter_neutral_hi = twoPhase ? 14 : 16;
     longrun.dt_relres_iter_soft_shrink_hi = twoPhase ? 20 : 24;
-    longrun.dt_relres_grow_factor = 1.15;
+    longrun.dt_relres_grow_factor = 1.05;                  // [包01] 减缓时间步放大倍数
     longrun.dt_relres_neutral_factor = 1.03;
-    longrun.dt_relres_soft_shrink_factor = 1.00;
+    longrun.dt_relres_soft_shrink_factor = 0.90;           // [包01] 增加软退坡时的收缩力度
     longrun.dt_relres_hard_shrink_factor = 0.90;
 
     params.startup_profile = startup;

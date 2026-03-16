@@ -157,6 +157,24 @@ namespace FIM_Engine {
         }
         global_mat.FreezePattern();
 
+        const auto str_rock = PhysicalProperties_string_op::Rock();
+        const auto str_frac = PhysicalProperties_string_op::Fracture_string();
+
+        auto phi_mat = fm.getMatrixScalar(str_rock.phi_tag);
+        auto rho_mat = fm.getMatrixScalar(str_rock.rho_tag);
+        auto cp_mat = fm.getMatrixScalar(str_rock.cp_tag);
+        auto cr_mat = fm.getMatrixScalar(str_rock.c_r_tag);
+        if (!cr_mat) std::cout << "    [Warning] Matrix c_r field not found, defaulting to 0.0.\n";
+
+        auto phi_frac = fm.getFractureScalar(str_frac.phi_tag);
+        auto rho_frac = fm.getFractureScalar(str_frac.rho_tag);
+        auto cp_frac = fm.getFractureScalar(str_frac.cp_tag);
+        auto cr_frac = fm.getFractureScalar(str_frac.c_r_tag);
+        if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
+
+        std::vector<double> P_ref(totalBlocks, ic.P_init);
+        for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i]; // 使用初始场作为压缩系数计算的参考压力
+
         double t = 0.0;
         double dt = params.dt_init;
         int total_rollbacks = 0;
@@ -389,26 +407,42 @@ namespace FIM_Engine {
             }
 
             // Residual probe used by Armijo line search.
-            auto compute_residual_inf_for_state = [&](const FIM_StateMap<N>& eval_state, double probe_ptc_lambda = 0.0) -> double {
+            auto compute_residual_inf_for_state = [&](const FIM_StateMap<N>& eval_state) -> double {
                 FIM_BlockSparseMatrix<N> probe_mat(totalBlocks);
                 probe_mat.SetZero();
-                std::vector<double> probe_diag_acc(totalEq, 0.0);
 
                 // 1) accumulation
                 for (int bi = 0; bi < totalBlocks; ++bi) {
-                    const double phi = 0.2, c_pr = 1000.0, rho_r = 2600.0;
+                    double phi_ref = 0.2, c_pr = 1000.0, rho_r = 2600.0, c_r = 0.0;
+                    if (bi < nMat) {
+                        if (phi_mat) phi_ref = (*phi_mat)[bi];
+                        if (cp_mat) c_pr = (*cp_mat)[bi];
+                        if (rho_mat) rho_r = (*rho_mat)[bi];
+                        if (cr_mat) c_r = (*cr_mat)[bi];
+                    }
+                    else {
+                        int fi = bi - nMat;
+                        if (phi_frac) phi_ref = (*phi_frac)[fi];
+                        if (cp_frac) c_pr = (*cp_frac)[fi];
+                        if (rho_frac) rho_r = (*rho_frac)[fi];
+                        if (cr_frac) c_r = (*cr_frac)[fi];
+                    }
                     ADVar<N> P(eval_state.P[bi]); P.grad(0) = 1.0;
                     ADVar<N> T(eval_state.T[bi]); T.grad((N == 2) ? 1 : 2) = 1.0;
                     auto pW = EvalPrimaryFluid<N>(sp_model, P, T);
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
                     auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
 
+                    // 引入岩石压缩性，由于 P 含有梯度 1.0，phi 自动继承对压力的导数 c_r * phi_ref
+                    ADVar<N> phi = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P - ADVar<N>(P_ref[bi])));
+                    ADVar<N> phi_old = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P_old - ADVar<N>(P_ref[bi])));
+
                     std::vector<ADVar<N>> acc_eqs(N);
                     if constexpr (N == 2) {
-                        ADVar<N> m_w = pW.rho * phi, m_w_old = pW_old.rho * phi;
+                        ADVar<N> m_w = pW.rho * phi, m_w_old = pW_old.rho * phi_old;
                         acc_eqs[0] = (m_w - m_w_old) * (vols[bi] / dt);
                         ADVar<N> e_w = m_w * (pW.h - P / pW.rho) + ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
-                        ADVar<N> e_w_old = m_w_old * (pW_old.h - P_old / pW_old.rho) + ADVar<N>((1.0 - phi) * rho_r * c_pr) * T_old;
+                        ADVar<N> e_w_old = m_w_old * (pW_old.h - P_old / pW_old.rho) + ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
                         acc_eqs[1] = (e_w - e_w_old) * (vols[bi] / dt);
                     }
                     else {
@@ -417,21 +451,15 @@ namespace FIM_Engine {
                         ADVar<N> Sw_old(old_state.Sw[bi]), Sg_old = ADVar<N>(1.0) - Sw_old;
                         auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
                         auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(P_old, T_old);
-                        acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi * Sw_old) * (vols[bi] / dt);
-                        acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi * Sg_old) * (vols[bi] / dt);
+                        acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi_old * Sw_old) * (vols[bi] / dt);
+                        acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi_old * Sg_old) * (vols[bi] / dt);
                         ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - P / pG.rho);
                         ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - P_old / pG_old.rho);
                         ADVar<N> e_rock = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
-                        ADVar<N> e_rock_old = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T_old;
-                        acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi + e_rock_old)) * (vols[bi] / dt);
+                        ADVar<N> e_rock_old = ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
+                        acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi_old + e_rock_old)) * (vols[bi] / dt);
                     }
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleAccumulation(bi, acc_eqs, probe_mat);
-                    for (int eq = 0; eq < N; ++eq) {
-                        const int g_eq = mgr.getEquationIndex(bi, eq);
-                        if (g_eq >= 0 && g_eq < totalEq) {
-                            probe_diag_acc[g_eq] += acc_eqs[eq].grad[eq];
-                        }
-                    }
                 }
 
                 // 2) flux
@@ -542,23 +570,7 @@ namespace FIM_Engine {
                 int max_probe_idx = 0;
                 const double max_probe = b_probe.cwiseAbs().maxCoeff(&max_probe_idx);
                 (void)max_probe_idx;
-                if (!params.enable_row_scaling) {
-                    return max_probe;
-                }
-
-                const Eigen::SparseMatrix<double> A_probe = probe_mat.ExportEigenSparseMatrix();
-                double max_probe_scaled = 0.0;
-                for (int r = 0; r < b_probe.size(); ++r) {
-                    const double diag_acc_abs = (r >= 0 && r < static_cast<int>(probe_diag_acc.size())) ? std::abs(probe_diag_acc[r]) : 0.0;
-                    const double diag_abs = std::abs(A_probe.coeff(r, r));
-                    const double diag_eff = diag_abs + std::max(0.0, probe_ptc_lambda) * std::max(diag_acc_abs, params.row_scale_floor);
-                    const double denom = std::max({ diag_acc_abs, diag_eff, params.row_scale_floor });
-                    const double scaled = std::abs(b_probe[r]) / std::max(denom, 1.0e-30);
-                    if (scaled > max_probe_scaled) {
-                        max_probe_scaled = scaled;
-                    }
-                }
-                return max_probe_scaled;
+                return max_probe; // [包02] 线搜索探测必须基于原始残差 (raw_res) 以保证物理意义
                 };
 
             for (int iter = 0; iter < active_max_newton_iter; ++iter) {
@@ -583,7 +595,20 @@ namespace FIM_Engine {
 
 
                 for (int bi = 0; bi < totalBlocks; ++bi) {
-                    const double phi = 0.2, c_pr = 1000.0, rho_r = 2600.0;
+                    double phi_ref = 0.2, c_pr = 1000.0, rho_r = 2600.0, c_r = 0.0;
+                    if (bi < nMat) {
+                        if (phi_mat) phi_ref = (*phi_mat)[bi];
+                        if (cp_mat) c_pr = (*cp_mat)[bi];
+                        if (rho_mat) rho_r = (*rho_mat)[bi];
+                        if (cr_mat) c_r = (*cr_mat)[bi];
+                    }
+                    else {
+                        int fi = bi - nMat;
+                        if (phi_frac) phi_ref = (*phi_frac)[fi];
+                        if (cp_frac) c_pr = (*cp_frac)[fi];
+                        if (rho_frac) rho_r = (*rho_frac)[fi];
+                        if (cr_frac) c_r = (*cr_frac)[fi];
+                    }
                     ADVar<N> P(state.P[bi]); P.grad(0) = 1.0;
                     ADVar<N> T(state.T[bi]); T.grad((N == 2) ? 1 : 2) = 1.0;
                     auto pW = EvalPrimaryFluid<N>(sp_model, P, T);
@@ -595,12 +620,15 @@ namespace FIM_Engine {
                         if (pW.near_bound) ++eos_near_bound_count;
                     }
 
+                    ADVar<N> phi = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P - ADVar<N>(P_ref[bi])));
+                    ADVar<N> phi_old = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P_old - ADVar<N>(P_ref[bi])));
+
                     std::vector<ADVar<N>> acc_eqs(N);
                     if constexpr (N == 2) {
-                        ADVar<N> m_w = pW.rho * phi, m_w_old = pW_old.rho * phi;
+                        ADVar<N> m_w = pW.rho * phi, m_w_old = pW_old.rho * phi_old;
                         acc_eqs[0] = (m_w - m_w_old) * (vols[bi] / dt);
                         ADVar<N> e_w = m_w * (pW.h - P / pW.rho) + ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
-                        ADVar<N> e_w_old = m_w_old * (pW_old.h - P_old / pW_old.rho) + ADVar<N>((1.0 - phi) * rho_r * c_pr) * T_old;
+                        ADVar<N> e_w_old = m_w_old * (pW_old.h - P_old / pW_old.rho) + ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
                         acc_eqs[1] = (e_w - e_w_old) * (vols[bi] / dt);
                     }
                     else {
@@ -616,14 +644,14 @@ namespace FIM_Engine {
                             if (pG.near_bound) ++eos_near_bound_count;
                         }
 
-                        acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi * Sw_old) * (vols[bi] / dt);
-                        acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi * Sg_old) * (vols[bi] / dt);
+                        acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi_old * Sw_old) * (vols[bi] / dt);
+                        acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi_old * Sg_old) * (vols[bi] / dt);
 
                         ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - P / pG.rho);
                         ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - P_old / pG_old.rho);
                         ADVar<N> e_rock = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
-                        ADVar<N> e_rock_old = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T_old;
-                        acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi + e_rock_old)) * (vols[bi] / dt);
+                        ADVar<N> e_rock_old = ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
+                        acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi_old + e_rock_old)) * (vols[bi] / dt);
                     }
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleAccumulation(bi, acc_eqs, global_mat);
                     // Keep accumulation contributions always available for row scaling / diagnostics.
@@ -992,7 +1020,7 @@ namespace FIM_Engine {
                         }
                     }
                 }
-                const double conv_res = params.enable_row_scaling ? max_res_scaled : max_res;
+                const double conv_res = max_res; // [包02] 牛顿收敛判据仅依赖 raw_res，消除因行缩放过大导致的“假收敛”
 
                 if (iter == 0) res_iter1 = conv_res;
                 step_final_residual = conv_res;
@@ -1369,7 +1397,7 @@ namespace FIM_Engine {
                 double conv_res_for_line_search = conv_res;
                 double conv_res_probe = std::numeric_limits<double>::quiet_NaN();
                 if (params.enable_armijo_line_search && params.enable_ls_base_check) {
-                    conv_res_probe = compute_residual_inf_for_state(state_before_update, ptc_lambda_iter);
+                    conv_res_probe = compute_residual_inf_for_state(state_before_update);
                     if (std::isfinite(conv_res_probe) && conv_res_probe > 0.0) {
                         conv_res_for_line_search = conv_res_probe;
                         const double mismatch = std::abs(conv_res_probe - conv_res) / std::max(std::abs(conv_res), 1.0e-30);
@@ -1431,7 +1459,7 @@ namespace FIM_Engine {
                             ls_last_reason = "state_invalid";
                         }
                         else {
-                            trial_res = compute_residual_inf_for_state(trial_state, ptc_lambda_iter);
+                            trial_res = compute_residual_inf_for_state(trial_state);
                             if (!std::isfinite(trial_res)) {
                                 ++ls_reject_nan_inf;
                                 ls_last_reason = "trial_res_nan_inf";

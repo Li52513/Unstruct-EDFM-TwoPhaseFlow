@@ -78,7 +78,7 @@ namespace FIM_Engine {
         double abs_res_tol = 1e-6;
 
         double stagnation_growth_tol = 0.995;
-        double stagnation_abs_res_tol = 1.0e6;
+        double stagnation_abs_res_tol = 1.0e2;
         double stagnation_min_drop = 2.0e-3;
         double best_iter_growth_trigger = 1.5;
         int best_iter_guard_min_iter = 3;

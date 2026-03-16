@@ -146,17 +146,17 @@ namespace Test_Day6 {
         params.startup_profile.dt_relres_soft_shrink_factor = 0.995;
         params.startup_profile.dt_relres_hard_shrink_factor = 0.92;
 
-        params.long_profile.max_newton_iter = 16;
-        params.long_profile.rel_update_tol = 3.0e-5;
+		params.long_profile.max_newton_iter = 24; // Allow moderate Newton iterations for long-term stability, but keep it in check to prevent excessive runtime in this test scenario.
+        params.long_profile.rel_update_tol = 1e-3;
         params.long_profile.ptc_lambda_init = 0.5;
         params.long_profile.ptc_lambda_decay = 0.7;
         params.long_profile.ptc_lambda_min = 1.0e-3;
         params.long_profile.dt_relres_iter_grow_hi = 8;
         params.long_profile.dt_relres_iter_neutral_hi = 14;
         params.long_profile.dt_relres_iter_soft_shrink_hi = 18;
-        params.long_profile.dt_relres_grow_factor = 1.08;
+        params.long_profile.dt_relres_grow_factor = 1.05;
         params.long_profile.dt_relres_neutral_factor = 1.02;
-        params.long_profile.dt_relres_soft_shrink_factor = 0.98;
+        params.long_profile.dt_relres_soft_shrink_factor = 0.90;
         params.long_profile.dt_relres_hard_shrink_factor = 0.90;
         params.rollback_shrink_factor = 0.7;
 

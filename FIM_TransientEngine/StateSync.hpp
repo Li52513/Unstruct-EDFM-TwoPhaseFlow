@@ -138,11 +138,19 @@ namespace FIM_Engine {
         fm.getOrCreateMatrixScalar(rock.lambda_tag, 2.0);
         fm.getOrCreateMatrixScalar(rock.phi_tag, 0.2);
 
+        fm.getOrCreateMatrixScalar(rock.rho_tag, 2600.0);
+        fm.getOrCreateMatrixScalar(rock.cp_tag, 1000.0);
+        fm.getOrCreateMatrixScalar(rock.c_r_tag, 0.0);
+
         fm.getOrCreateFractureScalar(frac.k_t_tag, 1.0e-11);
         fm.getOrCreateFractureScalar(frac.k_n_tag, 1.0e-12);
         fm.getOrCreateFractureScalar(frac.aperture_tag, 1.0e-3);
         fm.getOrCreateFractureScalar(frac.lambda_tag, 2.0);
         fm.getOrCreateFractureScalar(frac.phi_tag, 0.2);
+
+        fm.getOrCreateFractureScalar(frac.rho_tag, 2600.0);
+        fm.getOrCreateFractureScalar(frac.cp_tag, 1000.0);
+        fm.getOrCreateFractureScalar(frac.c_r_tag, 0.0);
 
         fm.getOrCreateFractureScalar(water.k_tag, 0.6);
     }
