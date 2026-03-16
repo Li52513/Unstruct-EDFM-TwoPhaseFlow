@@ -1,6 +1,10 @@
 #pragma once
 
 #include "StepKernels.hpp"
+#include "../FIM_BlockSparseMatrix.h"
+#include "../FIM_GlobalAssembler.h"
+#include "../FIM_ConnectionManager.h"
+#include "../FVM_Ops_AD.h"
 #include "../FIM_TopologyBuilder2D.h"
 #include "../FIM_TopologyBuilder3D.h"
 #include "../TransmissibilitySolver_2D.h"
@@ -9,6 +13,7 @@
 #include "../3D_PostProcess.h"
 
 #include <algorithm>
+
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -33,7 +38,7 @@ namespace FIM_Engine {
         const InitialConditions& ic,
         const std::vector<WellScheduleStep>& wells,
         const TransientSolverParams& params,
-        SolverRoute route = SolverRoute::FIM,
+        SolverRoute route,
         const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules)
     {
 
@@ -332,53 +337,8 @@ namespace FIM_Engine {
             double control_ramp = 1.0;
             double linear_solve_ms_sum = 0.0;
             int linear_solve_calls = 0;
-            using RowMajorMat = Eigen::SparseMatrix<double, Eigen::RowMajor, int>;
-            using ColMajorMat = Eigen::SparseMatrix<double>;
-            using AMGCLBackend = amgcl::backend::builtin<double>;
-            using AMGCLSolver = amgcl::make_solver<
-                amgcl::amg<
-                AMGCLBackend,
-                amgcl::coarsening::smoothed_aggregation,
-                amgcl::relaxation::spai0
-                >,
-                amgcl::solver::bicgstab<AMGCLBackend>
-            >;
-            // Reuse SparseLU symbolic analysis inside one time step when matrix sparsity pattern is unchanged.
-            Eigen::SparseLU<ColMajorMat> sparse_lu_solver;
-            bool sparse_lu_pattern_ready = false;
-            bool sparse_lu_initialized = false;
-            int sparse_lu_rows = -1;
-            int sparse_lu_cols = -1;
-            Eigen::Index sparse_lu_nnz = -1;
-            std::uint64_t sparse_lu_pattern_hash = 0;
-
-            Eigen::BiCGSTAB<RowMajorMat, Eigen::IncompleteLUT<double>> bicgstab_solver;
-            bicgstab_solver.preconditioner().setDroptol(params.bicgstab_droptol);
-
-            AMGCLSolver::params amgcl_prm;
-            amgcl_prm.solver.tol = params.amgcl_tol;
-            amgcl_prm.solver.maxiter = params.amgcl_maxiter;
-            amgcl_prm.precond.allow_rebuild = true;
-            std::unique_ptr<AMGCLSolver> amgcl_solver;
-            bool amgcl_solver_ready = false;
-
-            auto hash_sparse_pattern = [](const auto& mat) -> std::uint64_t {
-                constexpr std::uint64_t kOffset = 1469598103934665603ull;
-                constexpr std::uint64_t kPrime = 1099511628211ull;
-                std::uint64_t h = kOffset;
-                const auto* outer = mat.outerIndexPtr();
-                const auto* inner = mat.innerIndexPtr();
-                for (int i = 0; i <= mat.outerSize(); ++i) {
-                    h ^= static_cast<std::uint64_t>(static_cast<unsigned int>(outer[i]));
-                    h *= kPrime;
-                }
-                const Eigen::Index nnz = mat.nonZeros();
-                for (Eigen::Index k = 0; k < nnz; ++k) {
-                    h ^= static_cast<std::uint64_t>(static_cast<unsigned int>(inner[k]));
-                    h *= kPrime;
-                }
-                return h;
-                };
+            detail::LinearSolverCache<N> linear_solver_cache;
+            linear_solver_cache.Configure(params);
             if (active_enable_control_ramp)
             {
                 const int ramp_steps = active_control_ramp_steps;
@@ -1163,149 +1123,16 @@ namespace FIM_Engine {
                     }
                 }
 
-                Eigen::VectorXd dx;
-                bool compute_ok = false;
-                bool solve_ok = false;
-                std::string solver_log;
-                RowMajorMat A_work = A;
-                Eigen::VectorXd b_work = b;
-                bool row_scaling_applied = false;
-
-                if (params.enable_row_scaling) {
-                    Eigen::VectorXd row_scale(totalEq);
-                    for (int r = 0; r < totalEq; ++r) {
-                        const double diag_acc_abs = (r >= 0 && r < static_cast<int>(eq_contribs.size())) ? std::abs(eq_contribs[r].D_acc) : 0.0;
-                        const double diag_abs = std::abs(A_work.coeff(r, r));
-                        const double denom = std::max({ diag_acc_abs, diag_abs, params.row_scale_floor });
-                        double s = 1.0 / std::max(denom, 1e-30);
-                        s = std::max(params.row_scale_min, std::min(params.row_scale_max, s));
-                        row_scale[r] = s;
-                    }
-
-                    for (int r = 0; r < A_work.rows(); ++r) {
-                        const double s = row_scale[r];
-                        for (RowMajorMat::InnerIterator it(A_work, r); it; ++it) {
-                            it.valueRef() *= s;
-                        }
-                    }
-                    b_work.array() *= row_scale.array();
-                    row_scaling_applied = true;
-                }
-                A_work.makeCompressed();
-
                 const auto linear_t0 = std::chrono::steady_clock::now();
-                if (params.lin_solver == LinearSolverType::AMGCL) {
-                    const int rows = static_cast<int>(A_work.rows());
-
-                    if (!amgcl_solver_ready) {
-                        amgcl_solver = std::make_unique<AMGCLSolver>(A_work, amgcl_prm);
-                        amgcl_solver_ready = true;
-                    }
-                    else {
-                        amgcl_solver->precond().rebuild(A_work);
-                    }
-
-                    Eigen::VectorXd rhs_eigen = -b_work;
-                    std::vector<double> amgcl_rhs(rhs_eigen.data(), rhs_eigen.data() + rows);
-                    std::vector<double> amgcl_dx(rows, 0.0);
-
-                    int iters = 0;
-                    double error = 0.0;
-                    std::tie(iters, error) = (*amgcl_solver)(amgcl_rhs, amgcl_dx);
-
-                    dx = Eigen::VectorXd::Map(amgcl_dx.data(), rows);
-
-                    compute_ok = true;
-                    solve_ok = std::isfinite(error) && (error <= params.amgcl_tol);
-                    std::string fallback_str = "none";
-
-                    if (!solve_ok && params.amgcl_use_fallback_sparselu) {
-                        fallback_str = "SparseLU";
-                        if (params.amgcl_log_on_failure) {
-                            std::cout << "    [AMGCL-WARN] AMGCL failed to converge (iters=" << iters
-                                << ", err=" << error << "). Falling back to SparseLU.\n";
-                        }
-                        ColMajorMat A_lu = A_work;
-                        A_lu.makeCompressed();
-                        sparse_lu_solver.compute(A_lu);
-                        compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                        if (compute_ok) {
-                            dx = sparse_lu_solver.solve(-b_work);
-                            solve_ok = (sparse_lu_solver.info() == Eigen::Success);
-                        }
-                    }
-
-                    solver_log = "solver=AMGCL compute_ok=" + std::string(compute_ok ? "true" : "false") +
-                        " solve_ok=" + std::string(solve_ok ? "true" : "false") +
-                        " iters=" + std::to_string(iters) +
-                        " error=" + std::to_string(error) +
-                        " fallback=" + fallback_str +
-                        " scaled=" + std::string(row_scaling_applied ? "true" : "false");
-                }
-                else if (params.lin_solver == LinearSolverType::SparseLU)
-                {
-                    ColMajorMat A_lu = A_work;
-                    A_lu.makeCompressed();
-
-                    const std::uint64_t pattern_hash = hash_sparse_pattern(A_lu);
-                    const bool shape_changed =
-                        (!sparse_lu_pattern_ready) ||
-                        (sparse_lu_rows != A_lu.rows()) ||
-                        (sparse_lu_cols != A_lu.cols()) ||
-                        (sparse_lu_nnz != A_lu.nonZeros()) ||
-                        (sparse_lu_pattern_hash != pattern_hash);
-                    const bool pattern_reused = sparse_lu_initialized && !shape_changed;
-
-                    if (!sparse_lu_initialized || shape_changed) {
-                        sparse_lu_solver.compute(A_lu);
-                        compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                        sparse_lu_pattern_ready = compute_ok;
-                        sparse_lu_initialized = compute_ok;
-                    }
-                    else {
-                        sparse_lu_solver.factorize(A_lu);
-                        compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                        if (!compute_ok) {
-                            sparse_lu_solver.compute(A_lu);
-                            compute_ok = (sparse_lu_solver.info() == Eigen::Success);
-                            sparse_lu_pattern_ready = compute_ok;
-                            sparse_lu_initialized = compute_ok;
-                        }
-                    }
-
-                    if (compute_ok) {
-                        sparse_lu_rows = static_cast<int>(A_lu.rows());
-                        sparse_lu_cols = static_cast<int>(A_lu.cols());
-                        sparse_lu_nnz = A_lu.nonZeros();
-                        sparse_lu_pattern_hash = pattern_hash;
-                        dx = sparse_lu_solver.solve(-b_work);
-                        solve_ok = (sparse_lu_solver.info() == Eigen::Success);
-                    }
-                    solver_log = "solver=SparseLU compute_ok=" + std::string(compute_ok ? "true" : "false") +
-                        " solve_ok=" + std::string(solve_ok ? "true" : "false") +
-                        " nnzA=" + std::to_string(A_lu.nonZeros()) +
-                        " scaled=" + std::string(row_scaling_applied ? "true" : "false") +
-                        " pattern_reused=" + std::string(pattern_reused ? "true" : "false") +
-                        " info=" + std::to_string(sparse_lu_solver.info());
-                }
-                else
-                {
-                    bicgstab_solver.compute(A_work);
-                    compute_ok = (bicgstab_solver.info() == Eigen::Success);
-                    if (compute_ok) {
-                        dx = bicgstab_solver.solve(-b_work);
-                        solve_ok = (bicgstab_solver.info() == Eigen::Success);
-                    }
-                    const std::string iters = compute_ok ? std::to_string(bicgstab_solver.iterations()) : "NA";
-                    const std::string error = compute_ok ? std::to_string(bicgstab_solver.error()) : "NA";
-                    solver_log = "solver=BiCGSTAB compute_ok=" + std::string(compute_ok ? "true" : "false") +
-                        " solve_ok=" + std::string(solve_ok ? "true" : "false") +
-                        " iters=" + iters +
-                        " error=" + error +
-                        " scaled=" + std::string(row_scaling_applied ? "true" : "false") +
-                        " info=" + std::to_string(bicgstab_solver.info());
-                }
+                const auto linear_result = detail::SolveLinearSystem<N>(
+                    A, b, eq_contribs, totalEq, params, linear_solver_cache);
                 const auto linear_t1 = std::chrono::steady_clock::now();
+
+                Eigen::VectorXd dx = linear_result.dx;
+                const bool compute_ok = linear_result.compute_ok;
+                const bool solve_ok = linear_result.solve_ok;
+                const bool row_scaling_applied = linear_result.row_scaling_applied;
+                const std::string solver_log = linear_result.solver_log;
                 linear_solve_ms_sum += std::chrono::duration<double, std::milli>(linear_t1 - linear_t0).count();
                 linear_solve_calls++;
 
@@ -1518,50 +1345,21 @@ namespace FIM_Engine {
                     FIM_StateMap<N>& out_state,
                     int& limiter_added_local,
                     double& rel_update_inf) -> bool {
-                        out_state = base_state;
-                        limiter_added_local = 0;
-                        rel_update_inf = 0.0;
-
-                        for (int bi = 0; bi < totalBlocks; ++bi) {
-                            const int eqP = mgr.getEquationIndex(bi, 0);
-                            const int eqT = mgr.getEquationIndex(bi, (N == 3) ? 2 : 1);
-                            if (eqP < 0 || eqP >= dx.size() || eqT < 0 || eqT >= dx.size()) return false;
-
-                            const double dP = alpha_try * dx[eqP];
-                            const double p_ref = std::max(std::abs(base_state.P[bi]), 1.0e5);
-                            rel_update_inf = std::max(rel_update_inf, std::abs(dP) / p_ref);
-                            out_state.P[bi] += dP;
-                            if (!std::isfinite(out_state.P[bi])) return false;
-                            if (params.clamp_state_to_eos_bounds) {
-                                if (out_state.P[bi] < p_floor) { out_state.P[bi] = p_floor; limiter_added_local++; }
-                                if (out_state.P[bi] > p_ceil) { out_state.P[bi] = p_ceil; limiter_added_local++; }
-                            }
-
-                            const double dT = alpha_try * dx[eqT];
-                            const double t_ref = std::max(std::abs(base_state.T[bi]), 300.0);
-                            rel_update_inf = std::max(rel_update_inf, std::abs(dT) / t_ref);
-
-                            if constexpr (N == 3) {
-                                const int eqSw = mgr.getEquationIndex(bi, 1);
-                                if (eqSw < 0 || eqSw >= dx.size()) return false;
-                                const double dSw = alpha_try * dx[eqSw];
-                                rel_update_inf = std::max(rel_update_inf, std::abs(dSw));
-                                out_state.Sw[bi] += dSw;
-                                if (!std::isfinite(out_state.Sw[bi])) return false;
-                                if (out_state.Sw[bi] < 0.0) { out_state.Sw[bi] = 0.0; limiter_added_local++; }
-                                if (out_state.Sw[bi] > 1.0) { out_state.Sw[bi] = 1.0; limiter_added_local++; }
-                            }
-
-                            out_state.T[bi] += dT;
-                            if (!std::isfinite(out_state.T[bi])) return false;
-                            if (params.clamp_state_to_eos_bounds) {
-                                if (out_state.T[bi] < t_floor) { out_state.T[bi] = t_floor; limiter_added_local++; }
-                                if (out_state.T[bi] > t_ceil) { out_state.T[bi] = t_ceil; limiter_added_local++; }
-                            }
-                        }
-                        return true;
+                        return detail::ApplyTrialUpdate<N>(
+                            base_state,
+                            alpha_try,
+                            dx,
+                            mgr,
+                            totalBlocks,
+                            params,
+                            p_floor,
+                            p_ceil,
+                            t_floor,
+                            t_ceil,
+                            out_state,
+                            limiter_added_local,
+                            rel_update_inf);
                     };
-
                 const FIM_StateMap<N> state_before_update = state;
                 double accepted_alpha = alpha;
                 int accepted_limiter_added = 0;
