@@ -142,7 +142,16 @@ namespace FVM_Ops {
         return q_N;
     }
 
+        template <int N, typename ADVarType>
+    inline ADVarType Op_Boundary_ScaleFlux_AD(const ADVarType& q_raw, double coeff) {
+        return q_raw * coeff;
+    }
+
     template <int N, typename ADVarType>
+    inline ADVarType Op_Boundary_ScaleFlux_AD(const ADVarType& q_raw, const ADVarType& coeff) {
+        return q_raw * coeff;
+    }
+template <int N, typename ADVarType>
     inline ADVarType Op_Leakoff_Source_AD(bool enable, double C_L, const ADVarType& P_cell, double P_farfield) {
         if (!enable) {
             ADVarType zero; zero.val = 0.0;

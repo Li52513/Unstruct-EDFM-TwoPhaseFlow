@@ -173,7 +173,7 @@ namespace FIM_Engine {
         if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
 
         std::vector<double> P_ref(totalBlocks, ic.P_init);
-        for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i]; //  π”√≥ı º≥°◊˜Œ™—πÀıœµ ˝º∆À„µƒ≤Œøº—π¡¶
+        for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i]; //  πÔøΩ√≥ÔøΩ ºÔøΩÔøΩÔøΩÔøΩŒ™—πÔøΩÔøΩœµÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩƒ≤ŒøÔøΩ—πÔøΩÔøΩ
 
         double t = 0.0;
         double dt = params.dt_init;
@@ -434,7 +434,7 @@ namespace FIM_Engine {
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
                     auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
 
-                    // “˝»Î—“ Ø—πÀı–‘£¨”…”⁄ P ∫¨”–Ã›∂» 1.0£¨phi ◊‘∂ØºÃ≥–∂‘—π¡¶µƒµº ˝ c_r * phi_ref
+                    // ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ Ø—πÔøΩÔøΩÔøΩ‘£ÔøΩÔøΩÔøΩÔøΩÔøΩ P ÔøΩÔøΩÔøΩÔøΩÔøΩ›∂ÔøΩ 1.0ÔøΩÔøΩphi ÔøΩ‘∂ÔøΩÔøΩÃ≥–∂ÔøΩ—πÔøΩÔøΩÔøΩƒµÔøΩÔøΩÔøΩ c_r * phi_ref
                     ADVar<N> phi = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P - ADVar<N>(P_ref[bi])));
                     ADVar<N> phi_old = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P_old - ADVar<N>(P_ref[bi])));
 
@@ -453,8 +453,9 @@ namespace FIM_Engine {
                         ADVar<N> Sw_old_const = ClampSwForConstitutive<N>(Sw_old, vg_cfg, sw_constitutive_eps);
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
-                        ADVar<N> Pc = CapRelPerm::pc_vG<N>(Sw_const, vg_cfg);
-                        ADVar<N> Pc_old = CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
+                        // [DAY6-08] Ë£ÇÁºù Pc=0ÔºåÂü∫Ë¥®‰øùÊåÅ vG
+                        ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
+                        ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;
                         ADVar<N> Pg_old = P_old + Pc_old;
                         auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(Pg, T);
@@ -497,15 +498,28 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
-                            ADVar<N> Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
-                            ADVar<N> Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
-                            ADVar<N> Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg), Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
+                            // [DAY6-08] ÊåâÂüüÂà§Êñ≠ÔºöË£ÇÁºùÁ∫øÊÄßkr+Pc=0ÔºåÂü∫Ë¥®vG
+                            ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
+                            if (i >= nMat) {
+                                Sw_i_const = (Sw_i.val < 0.0) ? ADVar<N>(0.0) : (Sw_i.val > 1.0) ? ADVar<N>(1.0) : Sw_i;
+                                Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
+                            } else {
+                                Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
+                                Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg);
+                                CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
+                            }
+                            ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
+                            if (j >= nMat) {
+                                Sw_j_const = (Sw_j.val < 0.0) ? ADVar<N>(0.0) : (Sw_j.val > 1.0) ? ADVar<N>(1.0) : Sw_j;
+                                Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
+                            } else {
+                                Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
+                                Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
+                                CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
+                            }
                             ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
                             auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
                             auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
-                            ADVar<N> krw_i, krg_i, krw_j, krg_j;
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
                             ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
@@ -554,13 +568,17 @@ namespace FIM_Engine {
                 auto assembleBoundaryFieldProbe = [&](const BoundarySetting::BoundaryConditionManager* bcMgr, int dofOffset, const std::string& fieldName) {
                     if (!bcMgr || dofOffset < 0) return;
                     std::vector<double> bc_res(totalEq, 0.0);
-                    std::vector<double> bc_diag(totalEq, 0.0);
+                    std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
                     BoundaryAssemblyStats bc_stats;
                     if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                        bc_stats = BoundaryAssembler::Assemble_2D(mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_diag);
+                        bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
+                            mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                            modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
                     }
                     else {
-                        bc_stats = BoundaryAssembler::Assemble_3D(mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_diag);
+                        bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
+                            mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                            modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
                     }
                     (void)bc_stats;
                     for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -581,7 +599,7 @@ namespace FIM_Engine {
                 int max_probe_idx = 0;
                 const double max_probe = b_probe.cwiseAbs().maxCoeff(&max_probe_idx);
                 (void)max_probe_idx;
-                return max_probe; // [∞¸02] œﬂÀ—À˜ÃΩ≤‚±ÿ–Îª˘”⁄‘≠ º≤–≤Ó (raw_res) “‘±£÷§ŒÔ¿Ì“‚“Â
+                return max_probe; // [ÔøΩÔøΩ02] ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÃΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ‘≠ ºÔøΩ–≤ÔøΩ (raw_res) ÔøΩ‘±ÔøΩ÷§ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ
                 };
 
             for (int iter = 0; iter < active_max_newton_iter; ++iter) {
@@ -650,8 +668,9 @@ namespace FIM_Engine {
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
 
-                        ADVar<N> Pc = CapRelPerm::pc_vG<N>(Sw_const, vg_cfg);
-                        ADVar<N> Pc_old = CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
+                        // [DAY6-08] Ë£ÇÁºù Pc=0ÔºåÂü∫Ë¥®‰øùÊåÅ vG
+                        ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
+                        ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;
                         ADVar<N> Pg_old = P_old + Pc_old;
 
@@ -692,6 +711,48 @@ namespace FIM_Engine {
                 };
                 std::map<ConnectionType, ConnAuditStat> audit_stats;
 
+                // [DAY6-09] ÂçïËø≠‰ª£Áâ©ÊÄßÁºìÂ≠òÔºöÈ¢ÑËÆ°ÁÆóÂêÑcellÊ†áÈáèÁâ©ÊÄßÔºåÈÅøÂÖçpassive‰æßÂÜó‰ΩôEOSË∞ÉÁî®
+                struct CellPropsCache {
+                    double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
+                    double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
+                    double Pc = 0.0, krw = 1.0, krg = 0.0;
+                };
+                std::vector<CellPropsCache> cprop(totalBlocks);
+                for (int ci = 0; ci < totalBlocks; ++ci) {
+                    const double p_ci = state.P[ci], t_ci = state.T[ci];
+                    {
+                        ADVar<N> P0(p_ci), T0(t_ci);
+                        auto pw = EvalPrimaryFluid<N>(sp_model, P0, T0);
+                        cprop[ci].rho_w = pw.rho.val;
+                        cprop[ci].mu_w  = pw.mu.val;
+                        cprop[ci].h_w   = pw.h.val;
+                    }
+                    if constexpr (N == 3) {
+                        const double sw_ci = state.Sw[ci];
+                        double pc_s = 0.0, krw_s = 1.0, krg_s = 0.0;
+                        if (ci >= nMat) {
+                            const double sw_c = (sw_ci < 0.0) ? 0.0 : (sw_ci > 1.0) ? 1.0 : sw_ci;
+                            krw_s = sw_c; krg_s = 1.0 - sw_c;
+                        } else {
+                            ADVar<N> SwC(sw_ci);
+                            ADVar<N> SwCC = ClampSwForConstitutive<N>(SwC, vg_cfg, sw_constitutive_eps);
+                            pc_s  = CapRelPerm::pc_vG<N>(SwCC, vg_cfg).val;
+                            ADVar<N> krw0, krg0;
+                            CapRelPerm::kr_Mualem_vG<N>(SwCC, vg_cfg, rp_cfg, krw0, krg0);
+                            krw_s = krw0.val; krg_s = krg0.val;
+                        }
+                        cprop[ci].Pc  = pc_s;
+                        cprop[ci].krw = krw_s;
+                        cprop[ci].krg = krg_s;
+                        {
+                            ADVar<N> Pg0(p_ci + pc_s), T0(t_ci);
+                            auto pg = AD_Fluid::Evaluator::evaluateCO2<N>(Pg0, T0);
+                            cprop[ci].rho_g = pg.rho.val;
+                            cprop[ci].mu_g  = pg.mu.val;
+                            cprop[ci].h_g   = pg.h.val;
+                        }
+                    }
+                }
 
                 for (const auto& conn : connMgr.GetConnections()) {
                     audit_stats[conn.type].conn_count++;
@@ -707,8 +768,15 @@ namespace FIM_Engine {
                         if constexpr (N == 2) {
                             if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
                             else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            auto pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
-                            auto pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
+                            // [DAY6-09] active‰æßÂÆåÊï¥EOSÔºåpassive‰æß‰ªéÁºìÂ≠òÊûÑÈÄ†Â∏∏ÈáèADVarÔºàÊ¢ØÂ∫¶ÂÖ®Èõ∂Ôºâ
+                            AD_Fluid::ADFluidProperties<N> pW_i, pW_j;
+                            if (wrt_i) {
+                                pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
+                                pW_j.rho = ADVar<N>(cprop[j].rho_w); pW_j.mu = ADVar<N>(cprop[j].mu_w); pW_j.h = ADVar<N>(cprop[j].h_w);
+                            } else {
+                                pW_i.rho = ADVar<N>(cprop[i].rho_w); pW_i.mu = ADVar<N>(cprop[i].mu_w); pW_i.h = ADVar<N>(cprop[i].h_w);
+                                pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
+                            }
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
                             ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> mob_i = pW_i.rho / pW_i.mu, mob_j = pW_j.rho / pW_j.mu;
@@ -723,16 +791,53 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
-                            ADVar<N> Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
-                            ADVar<N> Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
-                            ADVar<N> Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg), Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
+                            // [DAY6-09] active‰æßÔºöÂÆåÊï¥ADËÆ°ÁÆókr/Pc/EOSÔºõpassive‰æßÔºö‰ªéÁºìÂ≠òÊûÑÈÄ†Â∏∏ÈáèADVar
+                            ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
+                            ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
+                            if (wrt_i) {
+                                // i ÊòØ activeÔºöÂÆåÊï¥ AD ËÆ°ÁÆó
+                                if (i >= nMat) {
+                                    Sw_i_const = (Sw_i.val < 0.0) ? ADVar<N>(0.0) : (Sw_i.val > 1.0) ? ADVar<N>(1.0) : Sw_i;
+                                    Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
+                                } else {
+                                    Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
+                                    Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg);
+                                    CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
+                                }
+                                // j ÊòØ passiveÔºö‰ªéÁºìÂ≠òËØªÂèñÂ∏∏Èáè
+                                Pc_j  = ADVar<N>(cprop[j].Pc);
+                                krw_j = ADVar<N>(cprop[j].krw);
+                                krg_j = ADVar<N>(cprop[j].krg);
+                            } else {
+                                // i ÊòØ passiveÔºö‰ªéÁºìÂ≠òËØªÂèñÂ∏∏Èáè
+                                Pc_i  = ADVar<N>(cprop[i].Pc);
+                                krw_i = ADVar<N>(cprop[i].krw);
+                                krg_i = ADVar<N>(cprop[i].krg);
+                                // j ÊòØ activeÔºöÂÆåÊï¥ AD ËÆ°ÁÆó
+                                if (j >= nMat) {
+                                    Sw_j_const = (Sw_j.val < 0.0) ? ADVar<N>(0.0) : (Sw_j.val > 1.0) ? ADVar<N>(1.0) : Sw_j;
+                                    Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
+                                } else {
+                                    Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
+                                    Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
+                                    CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
+                                }
+                            }
                             ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
 
-                            auto pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i), pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
-                            auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
-                            ADVar<N> krw_i, krg_i, krw_j, krg_j;
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
-                            CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
+                            // [DAY6-09] active‰æßÂÆåÊï¥EOSÔºåpassive‰æß‰ªéÁºìÂ≠òÊûÑÈÄ†Â∏∏ÈáèADVarÔºàÊ¢ØÂ∫¶ÂÖ®Èõ∂Ôºâ
+                            AD_Fluid::ADFluidProperties<N> pW_i, pW_j, pG_i, pG_j;
+                            if (wrt_i) {
+                                pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i);
+                                pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i);
+                                pW_j.rho = ADVar<N>(cprop[j].rho_w); pW_j.mu = ADVar<N>(cprop[j].mu_w); pW_j.h = ADVar<N>(cprop[j].h_w);
+                                pG_j.rho = ADVar<N>(cprop[j].rho_g); pG_j.mu = ADVar<N>(cprop[j].mu_g); pG_j.h = ADVar<N>(cprop[j].h_g);
+                            } else {
+                                pW_i.rho = ADVar<N>(cprop[i].rho_w); pW_i.mu = ADVar<N>(cprop[i].mu_w); pW_i.h = ADVar<N>(cprop[i].h_w);
+                                pG_i.rho = ADVar<N>(cprop[i].rho_g); pG_i.mu = ADVar<N>(cprop[i].mu_g); pG_i.h = ADVar<N>(cprop[i].h_g);
+                                pW_j = AD_Fluid::Evaluator::evaluateWater<N>(P_j, T_j);
+                                pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
+                            }
 
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
                             ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
@@ -874,14 +979,18 @@ namespace FIM_Engine {
                         if (!bcMgr || dofOffset < 0) return;
 
                         std::vector<double> bc_res(totalEq, 0.0);
-                        std::vector<double> bc_diag(totalEq, 0.0);
+                        std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
                         BoundaryAssemblyStats bc_stats;
 
                         if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                            bc_stats = BoundaryAssembler::Assemble_2D(mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_diag);
+                            bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
+                                mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                                modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
                         }
                         else {
-                            bc_stats = BoundaryAssembler::Assemble_3D(mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_diag);
+                            bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
+                                mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                                modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
                         }
 
                         int appliedEq = 0;
@@ -890,16 +999,37 @@ namespace FIM_Engine {
                             if (eqIdx < 0 || eqIdx >= totalEq) continue;
 
                             const double r_bc = bc_res[eqIdx];
-                            const double d_bc = bc_diag[eqIdx];
-                            if (std::abs(r_bc) <= 1e-16 && std::abs(d_bc) <= 1e-16) continue;
+                            const double dRdP = bc_jac3[eqIdx][0];
+                            const double dRdSw = bc_jac3[eqIdx][1];
+                            const double dRdT = bc_jac3[eqIdx][2];
+                            if (std::abs(r_bc) <= 1e-16 &&
+                                std::abs(dRdP) <= 1e-16 &&
+                                std::abs(dRdSw) <= 1e-16 &&
+                                std::abs(dRdT) <= 1e-16) {
+                                continue;
+                            }
 
                             global_mat.AddResidual(bi, dofOffset, r_bc);
-                            global_mat.AddDiagJacobian(bi, dofOffset, dofOffset, d_bc);
+                            global_mat.AddDiagJacobian(bi, dofOffset, 0, dRdP);
+                            if constexpr (N == 2) {
+                                global_mat.AddDiagJacobian(bi, dofOffset, 1, dRdT);
+                            }
+                            else {
+                                global_mat.AddDiagJacobian(bi, dofOffset, 1, dRdSw);
+                                global_mat.AddDiagJacobian(bi, dofOffset, 2, dRdT);
+                            }
                             ++appliedEq;
 
                             if (params.diag_level != DiagLevel::Off && eqIdx >= 0 && eqIdx < eq_contribs.size()) {
                                 eq_contribs[eqIdx].R_bc += r_bc;
-                                eq_contribs[eqIdx].D_bc += d_bc;
+                                if constexpr (N == 2) {
+                                    eq_contribs[eqIdx].D_bc += (dofOffset == 0) ? dRdP : dRdT;
+                                }
+                                else {
+                                    if (dofOffset == 0) eq_contribs[eqIdx].D_bc += dRdP;
+                                    else if (dofOffset == 1) eq_contribs[eqIdx].D_bc += dRdSw;
+                                    else if (dofOffset == 2) eq_contribs[eqIdx].D_bc += dRdT;
+                                }
                             }
                         }
                         if (params.diag_level != DiagLevel::Off) {
@@ -1053,7 +1183,7 @@ namespace FIM_Engine {
                         }
                     }
                 }
-                const double conv_res = max_res; // [∞¸02] ≈£∂Ÿ ’¡≤≈–æ›Ωˆ“¿¿µ raw_res£¨œ˚≥˝“Ú––Àı∑≈π˝¥Ûµº÷¬µƒ°∞ºŸ ’¡≤°±
+                const double conv_res = max_res; // [ÔøΩÔøΩ02] ≈£ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ–æ›ΩÔøΩÔøΩÔøΩÔøΩÔøΩ raw_resÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ≈πÔøΩÔøΩÔøΩÔøΩ¬µƒ°ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ
 
                 if (iter == 0) res_iter1 = conv_res;
                 step_final_residual = conv_res;

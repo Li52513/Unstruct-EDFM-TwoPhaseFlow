@@ -44,7 +44,7 @@ struct BoundaryAssemblyStats {
 
 class BoundaryAssembler {
 public:
-    static BoundaryAssemblyStats Assemble_2D(
+        static BoundaryAssemblyStats Assemble_2D(
         MeshManager& mgr,
         const BoundarySetting::BoundaryConditionManager& bcMgr,
         int dofOffset,
@@ -52,6 +52,20 @@ public:
         const std::string& fieldName,
         std::vector<double>& residual,
         std::vector<double>& jacobianDiag
+    );
+
+    static BoundaryAssemblyStats Assemble_2D_FullJac(
+        MeshManager& mgr,
+        const BoundarySetting::BoundaryConditionManager& bcMgr,
+        int dofOffset,
+        FieldManager_2D& fm,
+        const std::string& fieldName,
+        std::vector<double>& residual,
+        std::vector<std::array<double, 3>>& jacobianFull,
+        const BoundarySetting::BoundaryConditionManager* coupledPressureBC = nullptr,
+        bool single_phase_use_co2 = false,
+        const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
+        const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
 
     static BoundaryAssemblyStats Assemble_3D(
@@ -62,6 +76,20 @@ public:
         const std::string& fieldName,
         std::vector<double>& residual,
         std::vector<double>& jacobianDiag
+    );
+
+    static BoundaryAssemblyStats Assemble_3D_FullJac(
+        MeshManager_3D& mgr,
+        const BoundarySetting::BoundaryConditionManager& bcMgr,
+        int dofOffset,
+        FieldManager_3D& fm,
+        const std::string& fieldName,
+        std::vector<double>& residual,
+        std::vector<std::array<double, 3>>& jacobianFull,
+        const BoundarySetting::BoundaryConditionManager* coupledPressureBC = nullptr,
+        bool single_phase_use_co2 = false,
+        const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
+        const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
 
     static BoundaryAssemblyStats Assemble_Wells_2D(

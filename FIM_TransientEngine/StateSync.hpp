@@ -142,19 +142,27 @@ namespace FIM_Engine {
             AD_Fluid::ADFluidProperties<N> propsG{};
 
             if constexpr (N == 3) {
-                sw_constitutive = ClampSwForConstitutive(sw, vg_params);
-                const ADVar<N> Sw_const_ad(sw_constitutive);
-                const ADVar<N> Pc_const_ad = CapRelPerm::pc_vG<N>(Sw_const_ad, vg_params);
-                const ADVar<N> P_gas_ad = P_ad + Pc_const_ad;
-
+                // [DAY6-08] 按域判断：裂缝线性kr+Pc=0，基质vG
                 propsW = AD_Fluid::Evaluator::evaluateWater<N>(P_ad, T_ad);
-                propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_gas_ad, T_ad);
-                ADVar<N> krw_ad, krg_ad;
-                CapRelPerm::kr_Mualem_vG<N>(Sw_const_ad, vg_params, rp_params, krw_ad, krg_ad);
-                krw = krw_ad.val;
-                krg = krg_ad.val;
                 rho_w = propsW.rho.val;
-                mu_w = propsW.mu.val;
+                mu_w  = propsW.mu.val;
+                if (i >= nMat) {
+                    double sw_c = std::max(0.0, std::min(1.0, sw));
+                    sw_constitutive = sw_c;
+                    krw = sw_c;
+                    krg = 1.0 - sw_c;
+                    propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);  // Pc=0
+                } else {
+                    sw_constitutive = ClampSwForConstitutive(sw, vg_params);
+                    const ADVar<N> Sw_const_ad(sw_constitutive);
+                    const ADVar<N> Pc_const_ad = CapRelPerm::pc_vG<N>(Sw_const_ad, vg_params);
+                    const ADVar<N> P_gas_ad = P_ad + Pc_const_ad;
+                    propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_gas_ad, T_ad);
+                    ADVar<N> krw_ad, krg_ad;
+                    CapRelPerm::kr_Mualem_vG<N>(Sw_const_ad, vg_params, rp_params, krw_ad, krg_ad);
+                    krw = krw_ad.val;
+                    krg = krg_ad.val;
+                }
             }
 
             double lambda_w_mob = krw / std::max(mu_w, 1e-18);
