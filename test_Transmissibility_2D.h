@@ -43,7 +43,7 @@ namespace Benchmark2D {
         int nx = 4, ny =4;
 
         // 1.1 生成 10x10 的结构化四边形极简网格 (用作完美对标)
-        MeshManager meshMgr(Lx, Ly, 0.0, nx, ny, 0, false, true);
+        MeshManager meshMgr(Lx, Ly, 0.0, nx, ny, 0, true, false);
         meshMgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OrthogonalCorrection);
 
         // 1.2 构建一个标准的 "X" 型交叉裂缝，以完美触发 FF 交叉点计算

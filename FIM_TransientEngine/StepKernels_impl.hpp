@@ -36,8 +36,19 @@ namespace FIM_Engine {
                 cache.Configure(params);
             }
 
-            RowMajorMat<N> A_work = A;
-            Eigen::VectorXd b_work = b;
+            // ── 雷区27修复：首次调用完整拷贝（含结构），后续仅 memcpy values ──
+            if (cache.solver_A_work.rows() == 0 || cache.solver_A_work.rows() != A.rows()) {
+                cache.solver_A_work = A;
+                cache.solver_b_work.resize(b.size());
+            } else {
+                // 稀疏模式已冻结（Issue #11）：只需拷贝值数组，O(nnz) 无堆分配
+                std::copy(A.valuePtr(),
+                          A.valuePtr() + A.nonZeros(),
+                          cache.solver_A_work.valuePtr());
+            }
+            cache.solver_b_work = b;
+            auto& A_work = cache.solver_A_work;
+            auto& b_work = cache.solver_b_work;
 
             if (params.enable_row_scaling) {
                 Eigen::VectorXd row_scale(totalEq);
@@ -63,32 +74,19 @@ namespace FIM_Engine {
 
             A_work.makeCompressed();
 
-            if (params.lin_solver == LinearSolverType::AMGCL) {
-                const int rows = static_cast<int>(A_work.rows());
-
-                if (!cache.amgcl_solver_ready) {
-                    cache.amgcl_solver = std::make_unique<AMGCLSolver<N>>(A_work, cache.amgcl_prm);
-                    cache.amgcl_solver_ready = true;
+            // ── 共用辅助 lambda：AMGCL 向量准备（消除临时 Eigen 堆分配）──
+            auto prepare_amgcl_rhs = [&](int rows) {
+                if ((int)cache.amgcl_rhs_cache.size() != rows) {
+                    cache.amgcl_rhs_cache.resize(rows);
+                    cache.amgcl_dx_cache.resize(rows);
                 }
-                else {
-                    cache.amgcl_solver->precond().rebuild(A_work);
-                }
+                for (int i = 0; i < rows; ++i) cache.amgcl_rhs_cache[i] = -b_work[i];
+                std::fill(cache.amgcl_dx_cache.begin(), cache.amgcl_dx_cache.end(), 0.0);
+            };
 
-                Eigen::VectorXd rhs_eigen = -b_work;
-                std::vector<double> amgcl_rhs(rhs_eigen.data(), rhs_eigen.data() + rows);
-                std::vector<double> amgcl_dx(rows, 0.0);
-
-                std::size_t iters = 0;
-                double error = 0.0;
-                std::tie(iters, error) = (*cache.amgcl_solver)(amgcl_rhs, amgcl_dx);
-
-                out.dx = Eigen::VectorXd::Map(amgcl_dx.data(), rows);
-                out.compute_ok = true;
-                out.solve_ok = std::isfinite(error) && (error <= params.amgcl_tol);
-
-                std::string fallback_str = "none";
-                if (!out.solve_ok && params.amgcl_use_fallback_sparselu) {
-                    fallback_str = "SparseLU";
+            // ── 共用辅助 lambda：迭代求解失败时 fallback 到 SparseLU ──
+            auto sparselu_fallback = [&](bool should_fallback) -> std::string {
+                if (!out.solve_ok && should_fallback) {
                     ColMajorMat<N> A_lu = A_work;
                     A_lu.makeCompressed();
                     cache.sparse_lu_solver.compute(A_lu);
@@ -97,7 +95,61 @@ namespace FIM_Engine {
                         out.dx = cache.sparse_lu_solver.solve(-b_work);
                         out.solve_ok = (cache.sparse_lu_solver.info() == Eigen::Success);
                     }
+                    return "SparseLU";
                 }
+                return "none";
+            };
+
+            if (params.lin_solver == LinearSolverType::AMGCL_CPR) {
+                const int rows = static_cast<int>(A_work.rows());
+
+                // 首次建立 CPR 层次，后续用 partial_update 仅重建值
+                if (!cache.amgcl_cpr_solver) {
+                    cache.amgcl_cpr_solver = std::make_unique<AMGCLCPRSolver<N>>(
+                        A_work, cache.amgcl_cpr_prm);
+                } else {
+                    cache.amgcl_cpr_solver->precond().partial_update(A_work);
+                }
+
+                prepare_amgcl_rhs(rows);
+                std::size_t iters = 0;
+                double error = 0.0;
+                std::tie(iters, error) = (*cache.amgcl_cpr_solver)(
+                    cache.amgcl_rhs_cache, cache.amgcl_dx_cache);
+
+                out.dx = Eigen::VectorXd::Map(cache.amgcl_dx_cache.data(), rows);
+                out.compute_ok = true;
+                out.solve_ok = std::isfinite(error) && (error <= params.amgcl_cpr_tol);
+                const std::string fallback_str = sparselu_fallback(params.amgcl_cpr_use_fallback_sparselu);
+
+                out.solver_log = "solver=AMGCL_CPR"
+                    " compute_ok=" + std::string(out.compute_ok ? "true" : "false") +
+                    " solve_ok="   + std::string(out.solve_ok   ? "true" : "false") +
+                    " iters="      + std::to_string(iters) +
+                    " error="      + std::to_string(error) +
+                    " fallback="   + fallback_str +
+                    " scaled="     + std::string(out.row_scaling_applied ? "true" : "false");
+                return out;
+            }
+
+            if (params.lin_solver == LinearSolverType::AMGCL) {
+                const int rows = static_cast<int>(A_work.rows());
+
+                if (!cache.amgcl_solver) {
+                    cache.amgcl_solver = std::make_unique<AMGCLSolver<N>>(A_work, cache.amgcl_prm);
+                } else {
+                    cache.amgcl_solver->precond().rebuild(A_work);
+                }
+
+                prepare_amgcl_rhs(rows);
+                std::size_t iters = 0;
+                double error = 0.0;
+                std::tie(iters, error) = (*cache.amgcl_solver)(cache.amgcl_rhs_cache, cache.amgcl_dx_cache);
+
+                out.dx = Eigen::VectorXd::Map(cache.amgcl_dx_cache.data(), rows);
+                out.compute_ok = true;
+                out.solve_ok = std::isfinite(error) && (error <= params.amgcl_tol);
+                const std::string fallback_str = sparselu_fallback(params.amgcl_use_fallback_sparselu);
 
                 out.solver_log = "solver=AMGCL compute_ok=" + std::string(out.compute_ok ? "true" : "false") +
                     " solve_ok=" + std::string(out.solve_ok ? "true" : "false") +

@@ -1058,7 +1058,7 @@ namespace FIM_Engine {
                     assembleBoundaryField(modules.saturation_bc, saturationDof, sEqCfg.saturation, "Sw");
                 }
                 assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, "T");
-                auto A = global_mat.ExportEigenSparseMatrix();
+                auto A = global_mat.GetFrozenMatrix(); // Issue#11: O(nnz) CSR value-update, no Triplet sort
                 auto b = global_mat.ExportEigenResidual();
                 if (params.enable_matrix_audit && step == params.matrix_audit_step && iter_used == params.matrix_audit_iter) {
                     for (const auto& conn : connMgr.GetConnections()) {

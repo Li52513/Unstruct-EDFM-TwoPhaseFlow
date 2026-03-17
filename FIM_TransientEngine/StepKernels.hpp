@@ -14,6 +14,9 @@
 #include <amgcl/coarsening/smoothed_aggregation.hpp>
 #include <amgcl/relaxation/spai0.hpp>
 #include <amgcl/adapter/eigen.hpp>
+#include <amgcl/preconditioner/cpr.hpp>
+#include <amgcl/relaxation/ilu0.hpp>
+#include <amgcl/relaxation/as_preconditioner.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -45,6 +48,22 @@ namespace FIM_Engine {
         >;
 
         template<int N>
+        using AMGCLCPRSolver = amgcl::make_solver<
+            amgcl::preconditioner::cpr<
+                amgcl::amg<
+                    AMGCLBackend<N>,
+                    amgcl::coarsening::smoothed_aggregation,
+                    amgcl::relaxation::spai0
+                >,
+                amgcl::relaxation::as_preconditioner<
+                    AMGCLBackend<N>,
+                    amgcl::relaxation::ilu0
+                >
+            >,
+            amgcl::solver::bicgstab<AMGCLBackend<N>>
+        >;
+
+        template<int N>
         struct LinearSolverCache {
             Eigen::SparseLU<ColMajorMat<N>> sparse_lu_solver;
             bool sparse_lu_pattern_ready = false;
@@ -58,14 +77,27 @@ namespace FIM_Engine {
 
             typename AMGCLSolver<N>::params amgcl_prm{};
             std::unique_ptr<AMGCLSolver<N>> amgcl_solver;
-            bool amgcl_solver_ready = false;
             bool configured = false;
+
+            // ── 雷区27修复：工作矩阵/向量缓存（避免每次 Newton 迭代堆分配）──
+            RowMajorMat<N>      solver_A_work;       // rows()==0 → not yet built
+            Eigen::VectorXd     solver_b_work;
+            std::vector<double> amgcl_rhs_cache;
+            std::vector<double> amgcl_dx_cache;
+
+            // ── 雷区28修复：CPR-AMG 求解器 ──
+            typename AMGCLCPRSolver<N>::params amgcl_cpr_prm{};
+            std::unique_ptr<AMGCLCPRSolver<N>> amgcl_cpr_solver; // nullptr → not yet built
 
             void Configure(const TransientSolverParams& params) {
                 bicgstab_solver.preconditioner().setDroptol(params.bicgstab_droptol);
                 amgcl_prm.solver.tol = params.amgcl_tol;
                 amgcl_prm.solver.maxiter = params.amgcl_maxiter;
                 amgcl_prm.precond.allow_rebuild = true;
+                // CPR 参数初始化
+                amgcl_cpr_prm.precond.block_size = N;
+                amgcl_cpr_prm.solver.tol         = params.amgcl_cpr_tol;
+                amgcl_cpr_prm.solver.maxiter      = params.amgcl_cpr_maxiter;
                 configured = true;
             }
         };

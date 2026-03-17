@@ -15,7 +15,7 @@ namespace FIM_Engine {
 
     enum class DiagLevel { Off, Summary, Hotspot, Forensic };
     enum class SolverRoute { FIM, IMPES };
-    enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL };
+    enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL, AMGCL_CPR };
     enum class SinglePhaseFluidModel { Water, CO2 };
 
     struct InitialConditions {
@@ -155,6 +155,11 @@ namespace FIM_Engine {
         int amgcl_maxiter = 500;
         bool amgcl_use_fallback_sparselu = true;
         bool amgcl_log_on_failure = true;
+
+        // CPR-AMG 参数（block_size = N，压力为每块第0个DOF）
+        double amgcl_cpr_tol     = 1.0e-6;
+        int    amgcl_cpr_maxiter = 300;
+        bool   amgcl_cpr_use_fallback_sparselu = true;
 
         DiagLevel diag_level = DiagLevel::Summary;
         int diag_print_every_iter = 1;

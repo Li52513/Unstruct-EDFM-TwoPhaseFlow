@@ -160,6 +160,8 @@ namespace Test_Day6 {
         params.long_profile.dt_relres_hard_shrink_factor = 0.90;
         params.rollback_shrink_factor = 0.7;
 
+        // Issue#12: 切换至 CPR-AMG 求解器，验证全流程稳定性
+        params.lin_solver = FIM_Engine::LinearSolverType::AMGCL_CPR;
 
         // =====================================================================
         // 8. Execution

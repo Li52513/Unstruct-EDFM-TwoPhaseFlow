@@ -24,6 +24,8 @@
 #include "Test_FVM_Ops_AD.h"
 #include "Test_Day5_GlobalAssembly_Jacobian.h"
 #include "Test_Day6_TransientSolver.h"
+#include "Test_Issue11_FrozenMatrix.h"
+#include "Test_Issue12_LinearSolverMemory.h"
 #include "ADVar.hpp"
 
 #include <exception>
@@ -106,6 +108,8 @@ int main (int argc, char** argv) {
         {"day4_well_patch", "Day4 explicit gate: Well(BHP/Rate) + WAG schedule skeleton + matrix/fracture completion path", []() { Test_FVM::Run_Day4_Well_Patch<3, ADVar<3>>(); return 0; }},
         {"day4_well_viz", "Day4 visualization gate: export fixed-path 2D/3D well-source VTK files", []() { Test_FVM::Run_Day4_Well_Viz<3, ADVar<3>>(); return 0; }},
         {"day5_block_matrix_robust", "Day5 infra gate: FIM block sparse matrix robustness test", []() { Test_Day5::Test_FIM_BlockSparseMatrix_Robustness(); return 0; }},
+        {"issue11_frozen_matrix", "Issue#11: FrozenMatrix CSR cache structure, numerical equivalence, pattern stability & timing", []() { Test_Issue11::Run_All(); return 0; }},
+        {"issue12_linear_solver", "Issue#12: Linear solver memory (cache A_work) & CPR-AMG solvability", []() { Test_Issue12::Run_All(); return 0; }},
         { "day5_global_jac_2d","Day5 core gate: 2D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_2D(); return 0; }},
         { "day5_global_jac_3d","Day5 core gate: 3D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_3D(); return 0; }},
         {"day6_transient_2d_sp_injprod", "Day6: 2D single-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_SP_InjProd(); return 0; }},
