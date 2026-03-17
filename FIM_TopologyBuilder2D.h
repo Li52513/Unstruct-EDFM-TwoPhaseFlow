@@ -9,6 +9,24 @@
 class FIM_TopologyBuilder2D {
 public:
     static void LoadAllConnections(FIM_ConnectionManager& connMgr, const MeshManager& meshMgr, const FieldManager_2D& fieldMgr) {
+        size_t expected = 0;
+
+        const auto& faces = meshMgr.mesh().getFaces();
+        for (const auto& face : faces) {
+            if (!face.isBoundary()) ++expected;
+        }
+
+        const auto& fracs = meshMgr.fracture_network().fractures;
+        for (const auto& frac : fracs) {
+            if (frac.elements.size() > 1) expected += (frac.elements.size() - 1);
+        }
+
+        const auto& nncMap = meshMgr.getNNCTopologyMap();
+        for (const auto& kv : nncMap) expected += kv.second.size();
+
+        expected += fieldMgr.ff_topology.size();
+        connMgr.ReserveRawConnections(expected);
+
         _loadMatrix(connMgr, meshMgr, fieldMgr);
         _loadFI(connMgr, meshMgr, fieldMgr);
         _loadNNC(connMgr, meshMgr, fieldMgr);
@@ -98,14 +116,25 @@ private:
             throw std::runtime_error("[Build 2D] NNC arrays mismatch with topology map.");
         }
 
+        constexpr double thickness = 1.0;
+        constexpr double eps = 1e-12;
+
         size_t idx = 0;
         for (const auto& kv : pairsMap) {
             int nodeI = kv.first;
             for (int nodeJ : kv.second) {
+                const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(nodeJ);
+                if (!pElem) {
+                    throw std::runtime_error("[Build 2D] NNC solverIndex cannot map to fracture element.");
+                }
+
+                const double auxArea = std::max(pElem->length * thickness, eps);
+                const double auxDist = std::max(pElem->avgDistance, eps);
+
                 connMgr.PushConnection(
                     nodeI, nodeJ,
                     pFlow->data[idx], pHeat->data[idx],
-                    1.0, 1.0,
+                    auxArea, auxDist,
                     ConnectionType::Matrix_Fracture
                 );
                 ++idx;
@@ -136,7 +165,7 @@ private:
             const double mI = std::max(eI->length * std::max(eI->aperture, 1e-12), 1e-12);
             const double mJ = std::max(eJ->length * std::max(eJ->aperture, 1e-12), 1e-12);
 
-            double auxArea = 0.5 * (mI + mJ);                         // 2D 等效“交换尺度”
+            double auxArea = 0.5 * (mI + mJ);
             double auxDist = std::max(0.5 * (eI->length + eJ->length), 1e-12);
 
             connMgr.PushConnection(
@@ -147,5 +176,4 @@ private:
             );
         }
     }
-
 };

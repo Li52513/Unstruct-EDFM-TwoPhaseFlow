@@ -8,6 +8,8 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <cstdint>
+#include <stdexcept>
 
 using namespace PhysicalProperties_string_op;
 
@@ -250,31 +252,33 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
     Fracture_string frac_str;
     Water waterStr;
 
-    const double MIN_VAL = 1e-15;
-    const double thickness = 1.0;     // [Assumption] 2D 模拟单位厚度
+    const double thickness = 1.0;
+    const double minDist = 1e-6;
+    const double minArea = 1e-12;
 
-    // --- 获取基岩场数据 ---
     auto p_Kxx = fieldMgr.getMatrixScalar(rock_str.k_xx_tag);
     auto p_Kyy = fieldMgr.getMatrixScalar(rock_str.k_yy_tag);
     auto p_Lam_m = fieldMgr.getMatrixScalar(rock_str.lambda_tag);
-
-    if (!p_Kxx) { std::cerr << "[Error] Matrix Permeability missing!" << std::endl; return; }
+    if (!p_Kxx) {
+        throw std::runtime_error("[Solver 2D] Matrix permeability field k_xx is required for NNC.");
+    }
 
     const std::vector<double>& Kxx = p_Kxx->data;
     const std::vector<double>& Kyy = (p_Kyy) ? p_Kyy->data : Kxx;
     const std::vector<double>* Lam_m = (p_Lam_m) ? &(p_Lam_m->data) : nullptr;
 
-    // --- 获取裂缝场数据 ---
     auto p_Kf = fieldMgr.getFractureScalar(frac_str.k_n_tag);
-    if (!p_Kf) p_Kf = fieldMgr.getFractureScalar(frac_str.k_t_tag); // Fallback
+    if (!p_Kf) {
+        throw std::runtime_error("[Solver 2D] Fracture normal permeability k_n is required for NNC.");
+    }
     auto p_Wf = fieldMgr.getFractureScalar(frac_str.aperture_tag);
-    auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag); // 裂缝固相热导率
-    auto p_Phi_f = fieldMgr.getFractureScalar(frac_str.phi_tag);    // 裂缝孔隙度
-
-    // 获取流体热导率 lambda_w
+    auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag);
+    auto p_Phi_f = fieldMgr.getFractureScalar(frac_str.phi_tag);
     auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
-    if (!p_Kf || !p_Wf) { std::cerr << "[Error] Frac properties missing!" << std::endl; return; }
+    if (!p_Wf) {
+        throw std::runtime_error("[Solver 2D] Fracture aperture is required for NNC.");
+    }
 
     const std::vector<double>& Kf = p_Kf->data;
     const std::vector<double>& Wf = p_Wf->data;
@@ -282,112 +286,136 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
     const std::vector<double>* Phi_f = (p_Phi_f) ? &(p_Phi_f->data) : nullptr;
     const std::vector<double>* LamFluid = (p_LamFluid) ? &(p_LamFluid->data) : nullptr;
 
-    // --- 输出场 ---
-    const std::string tag_T_NNC_Flow = "T_NNC_Flow";
-    const std::string tag_T_NNC_Heat = "T_NNC_Heat";
+    if (Kf.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] NNC requires same fracture field size for k_n and aperture.");
+    }
+    if (Lam_m && Lam_m->size() != Kxx.size()) {
+        throw std::runtime_error("[Solver 2D] Matrix lambda size mismatch with matrix permeability size.");
+    }
+    if (Lam_f && Lam_f->size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] Fracture lambda size mismatch with aperture size.");
+    }
+    if (Phi_f && Phi_f->size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] Fracture porosity size mismatch with aperture size.");
+    }
+    if (LamFluid && LamFluid->size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] Fluid lambda size mismatch with aperture size.");
+    }
 
-    auto& T_Flow = fieldMgr.createNNCScalar(tag_T_NNC_Flow, 0.0)->data;
-    auto& T_Heat = fieldMgr.createNNCScalar(tag_T_NNC_Heat, 0.0)->data;
+    auto& T_Flow = fieldMgr.createNNCScalar("T_NNC_Flow", 0.0)->data;
+    auto& T_Heat = fieldMgr.createNNCScalar("T_NNC_Heat", 0.0)->data;
 
-    // --- 构建任务列表 (O(N_NNC) 极致性能优化版) ---
     struct NNCJob {
-        int mIdx;         // Matrix Local Index
-        int fSolverIdx;   // Frac Solver Index
-        size_t nncIdx;    // Index in T_NNC array
+        int mIdx;
+        int fSolverIdx;
+        size_t nncIdx;
     };
 
     const auto& nncMap = meshMgr.getNNCTopologyMap();
     std::vector<NNCJob> jobs;
 
-    // 预分配准确内存，彻底杜绝 std::vector 动态扩容开销
     size_t exactNNCCount = 0;
-    for (const auto& kv : nncMap) { exactNNCCount += kv.second.size(); }
+    for (const auto& kv : nncMap) {
+        exactNNCCount += kv.second.size();
+    }
     jobs.reserve(exactNNCCount);
 
     size_t nncIndex = 0;
-    // 【核心提速】直接遍历含有裂缝的网格，跳过百万级无裂缝基岩
     for (const auto& kv : nncMap) {
-        int mIdx = kv.first; // kv.first 严格对应基岩网格的局部索引 (Local Index)
+        const int mIdx = kv.first;
         for (int fSolverIdx : kv.second) {
             jobs.push_back({ mIdx, fSolverIdx, nncIndex++ });
         }
     }
 
-    // 动态校准 FieldManager 数组大小以匹配实际有效 NNC 数量
     if (T_Flow.size() != jobs.size()) {
-        T_Flow.resize(jobs.size());
-        T_Heat.resize(jobs.size());
+        T_Flow.resize(jobs.size(), 0.0);
+        T_Heat.resize(jobs.size(), 0.0);
     }
 
-    // 获取宏观裂缝列表与基岩单元列表，以便在后续并行循环中 O(1) 访问几何
-    const auto& macroFractures = meshMgr.fracture_network().fractures;
+    const auto& frNet = meshMgr.fracture_network();
+    const auto& macroFractures = frNet.fractures;
     const auto& matrixCells = meshMgr.mesh().getCells();
+    const int nMat = static_cast<int>(matrixCells.size());
 
-    // --- 计算循环 ---
-#pragma omp parallel for schedule(static)
-    for (long long i = 0; i < (long long)jobs.size(); ++i)
-    {
+    std::vector<int> mIdxBuf(jobs.size(), -1);
+    std::vector<int> fLocIdxBuf(jobs.size(), -1);
+    std::vector<double> nxBuf(jobs.size(), 0.0);
+    std::vector<double> nyBuf(jobs.size(), 0.0);
+    std::vector<double> dBuf(jobs.size(), minDist);
+    std::vector<double> areaBuf(jobs.size(), minArea);
+
+    for (size_t i = 0; i < jobs.size(); ++i) {
         const auto& job = jobs[i];
-        int mIdx = job.mIdx;
-        int fIdx = job.fSolverIdx;
+        const int mIdx = job.mIdx;
+        const int fIdx = job.fSolverIdx;
+        const int fLocIdx = fIdx - nMat;
 
-        // 【核心修复】将全局 solverIndex 转换为 FieldManager 中的局部裂缝索引
-        int nMat = matrixCells.size();
-        int fLocIdx = (fIdx >= nMat) ? (fIdx - nMat) : fIdx;
+        if (mIdx < 0 || mIdx >= static_cast<int>(Kxx.size())) {
+            throw std::runtime_error("[Solver 2D] NNC matrix index out of range.");
+        }
+        if (fLocIdx < 0 || fLocIdx >= static_cast<int>(Wf.size())) {
+            throw std::runtime_error("[Solver 2D] NNC fracture local index out of range.");
+        }
 
-        // 越界安全保护
-        if (mIdx < 0 || mIdx >= (int)Kxx.size()) continue;
-        if (fLocIdx < 0 || fLocIdx >= (int)Wf.size()) continue;
-
-        // 获取裂缝单元 (底层仍需使用全局 solverIndex 查询拓扑)
         const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(fIdx);
-        if (!pElem) continue;
-
-        // 2D FractureElement 没有直接存储坐标，需要通过 parentFractureID 和 params 还原
-        if (pElem->parentFractureID < 0 || pElem->parentFractureID >= (int)macroFractures.size()) continue;
+        if (!pElem) {
+            throw std::runtime_error("[Solver 2D] NNC cannot map solver index to fracture element.");
+        }
+        if (pElem->parentFractureID < 0 || pElem->parentFractureID >= static_cast<int>(macroFractures.size())) {
+            throw std::runtime_error("[Solver 2D] NNC fracture element has invalid parentFractureID.");
+        }
 
         const auto& parentFrac = macroFractures[pElem->parentFractureID];
-        Vector fracStart = parentFrac.start;
-        Vector fracVec = parentFrac.end - parentFrac.start;
+        const Vector fracStart = parentFrac.start;
+        const Vector fracVec = parentFrac.end - parentFrac.start;
+        const Vector p1 = fracStart + fracVec * pElem->param0;
+        const Vector p2 = fracStart + fracVec * pElem->param1;
 
-        // 还原线段端点 p1, p2
-        Vector p1 = fracStart + fracVec * pElem->param0;
-        Vector p2 = fracStart + fracVec * pElem->param1;
-
-        // 计算法向 (2D) 以用于获取渗透率张量的等效主值
         Vector tangent = p2 - p1;
         Vector normal(-tangent.m_y, tangent.m_x, 0.0);
-        double len = Geometry_2D::Mag(normal);
-        if (len > 1e-12) normal = normal * (1.0 / len);
-        else normal = Vector(0, 0, 0);
+        const double norm = Geometry_2D::Mag(normal);
+        if (norm <= 1e-14) {
+            throw std::runtime_error("[Solver 2D] NNC degenerate fracture segment yields zero normal.");
+        }
+        normal = normal * (1.0 / norm);
 
-        // 1. Matrix Directional Permeability
-        double nx = normal.m_x;
-        double ny = normal.m_y;
-        double k_m_dir = (nx * nx * Kxx[mIdx]) + (ny * ny * Kyy[mIdx]);
+        mIdxBuf[i] = mIdx;
+        fLocIdxBuf[i] = fLocIdx;
+        nxBuf[i] = normal.m_x;
+        nyBuf[i] = normal.m_y;
+        dBuf[i] = std::max(pElem->avgDistance, minDist);
+        areaBuf[i] = std::max(pElem->length * thickness, minArea);
+    }
 
-        double d_m = std::max(pElem->avgDistance, 1e-6);
+#pragma omp parallel for schedule(static)
+    for (long long i = 0; i < static_cast<long long>(jobs.size()); ++i)
+    {
+        const int mIdx = mIdxBuf[i];
+        const int fLocIdx = fLocIdxBuf[i];
+        const double nx = nxBuf[i];
+        const double ny = nyBuf[i];
 
-        double area = pElem->length * thickness;
+        const double k_m_dir = (nx * nx * Kxx[mIdx]) + (ny * ny * Kyy[mIdx]);
+        const double d_m = dBuf[i];
+        const double area = areaBuf[i];
 
-        // 物理场必须使用局部索引 fLocIdx 访问！
-        T_Flow[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, k_m_dir, Wf[fLocIdx] / 2.0, Kf[fLocIdx], area);
+        T_Flow[jobs[i].nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, k_m_dir, Wf[fLocIdx] * 0.5, Kf[fLocIdx], area);
 
-        // 3. Heat Transmissibility
         if (Lam_m && Lam_f && Phi_f && LamFluid) {
-            double lam_m_val = (*Lam_m)[mIdx];
-            double phi_val = (*Phi_f)[fLocIdx];
-            double lam_fluid_val = (*LamFluid)[fLocIdx];
-            double lam_solid_val = (*Lam_f)[fLocIdx];
+            const double lam_m_val = (*Lam_m)[mIdx];
+            const double phi_val = (*Phi_f)[fLocIdx];
+            const double lam_fluid_val = (*LamFluid)[fLocIdx];
+            const double lam_solid_val = (*Lam_f)[fLocIdx];
+            const double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
 
-            // 裂缝侧有效热导率
-            double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
-
-            T_Heat[job.nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, lam_m_val, Wf[fLocIdx] / 2.0, lam_f_eff, area);
+            T_Heat[jobs[i].nncIdx] = FVM_Ops::Op_Math_Transmissibility(d_m, lam_m_val, Wf[fLocIdx] * 0.5, lam_f_eff, area);
         }
     }
+
     std::cout << "[Solver 2D] NNC Done (" << jobs.size() << " pairs)." << std::endl;
-}// =========================================================================
+}
+// =========================================================================
 // 静态传导率计算：FF (Fracture - Fracture)
 // =========================================================================
 /**
@@ -421,7 +449,6 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
     const auto& macroFractures = frNet.fractures;
     const int nMat = static_cast<int>(meshMgr.mesh().getCells().size());
 
-    // --- 获取场数据 ---
     auto p_Kt = fieldMgr.getFractureScalar(fracStr.k_t_tag);
     auto p_Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag);
     auto p_LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag);
@@ -429,8 +456,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
     auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
     if (!p_Kt || !p_Wf) {
-        std::cerr << "[Error] Critical fracture properties missing for FF!" << std::endl;
-        return;
+        throw std::runtime_error("[Solver 2D] Critical fracture properties k_t/aperture missing for FF.");
     }
 
     const auto& KtF = p_Kt->data;
@@ -439,15 +465,39 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
     const auto& PhiF = p_PhiF ? p_PhiF->data : std::vector<double>();
     const auto& LamFluid = p_LamFluid ? p_LamFluid->data : std::vector<double>();
 
-    // =====================================================================
-    // 步骤 1：构建 Junction (枢纽) 到 FractureElement 的精确拓扑映射
-    // Key: GlobalFFPoint ID
-    // Value: vector of 全局 Solver Index (所有连接到该点的裂缝微段)
-    // =====================================================================
+    if (KtF.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] FF requires same fracture field size for k_t and aperture.");
+    }
+    if (!LamF.empty() && LamF.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] FF fracture lambda size mismatch.");
+    }
+    if (!PhiF.empty() && PhiF.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] FF fracture porosity size mismatch.");
+    }
+    if (!LamFluid.empty() && LamFluid.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 2D] FF fluid lambda size mismatch.");
+    }
+
+    auto makePairKey = [](int a, int b) -> std::uint64_t {
+        const std::uint32_t i = static_cast<std::uint32_t>(std::min(a, b));
+        const std::uint32_t j = static_cast<std::uint32_t>(std::max(a, b));
+        return (static_cast<std::uint64_t>(i) << 32) | static_cast<std::uint64_t>(j);
+    };
+
+    std::unordered_set<std::uint64_t> fiPairs;
+    for (const auto& frac : macroFractures) {
+        if (frac.elements.size() < 2) continue;
+        for (size_t i = 0; i + 1 < frac.elements.size(); ++i) {
+            const int a = frac.elements[i].solverIndex;
+            const int b = frac.elements[i + 1].solverIndex;
+            if (a < 0 || b < 0) continue;
+            fiPairs.insert(makePairKey(a, b));
+        }
+    }
+
     std::unordered_map<int, std::vector<int>> junctionMap;
     for (const auto& frac : macroFractures) {
         for (const auto& elem : frac.elements) {
-            // 利用网格底层的打标，直接完成绝对精确的聚类
             if (elem.isFFatStart && elem.gIDstart >= 0) {
                 junctionMap[elem.gIDstart].push_back(elem.solverIndex);
             }
@@ -457,104 +507,128 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
         }
     }
 
-    // =====================================================================
-    // 步骤 2：统计所需的 Star-Delta 展开配对总数，并安全分配内存
-    // 公式: sum( n * (n - 1) / 2 )
-    // =====================================================================
-    size_t totalFFPairs = 0;
+    struct JunctionEntry {
+        int id = -1;
+        std::vector<int> solverIndices;
+    };
+
+    std::vector<int> junctionIDs;
+    junctionIDs.reserve(junctionMap.size());
     for (const auto& kv : junctionMap) {
-        size_t n = kv.second.size();
-        if (n > 1) totalFFPairs += n * (n - 1) / 2;
+        junctionIDs.push_back(kv.first);
+    }
+    std::sort(junctionIDs.begin(), junctionIDs.end());
+
+    std::vector<JunctionEntry> validJunctions;
+    validJunctions.reserve(junctionIDs.size());
+
+    for (int jID : junctionIDs) {
+        auto indices = junctionMap[jID];
+        std::sort(indices.begin(), indices.end());
+        indices.erase(std::unique(indices.begin(), indices.end()), indices.end());
+
+        std::vector<int> valid;
+        valid.reserve(indices.size());
+
+        for (int sIdx : indices) {
+            const int fLocIdx = sIdx - nMat;
+            if (fLocIdx < 0 || fLocIdx >= static_cast<int>(Wf.size())) {
+                continue;
+            }
+
+            const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(sIdx);
+            if (!pElem) {
+                continue;
+            }
+            if (pElem->length <= 1e-14) {
+                continue;
+            }
+
+            valid.push_back(sIdx);
+        }
+
+        if (valid.size() >= 2) {
+            validJunctions.push_back({ jID, std::move(valid) });
+        }
     }
 
-    const std::string tag_T_FF_Flow = "T_FF_Flow";
-    const std::string tag_T_FF_Heat = "T_FF_Heat";
+    size_t totalFFPairs = 0;
+    for (const auto& junction : validJunctions) {
+        const auto& elems = junction.solverIndices;
+        for (size_t i = 0; i < elems.size(); ++i) {
+            for (size_t j = i + 1; j < elems.size(); ++j) {
+                if (fiPairs.find(makePairKey(elems[i], elems[j])) != fiPairs.end()) {
+                    continue;
+                }
+                ++totalFFPairs;
+            }
+        }
+    }
 
-    auto& T_FF_Flow = fieldMgr.createFFScalar(tag_T_FF_Flow, 0.0)->data;
-    auto& T_FF_Heat = fieldMgr.createFFScalar(tag_T_FF_Heat, 0.0)->data;
-
+    auto& T_FF_Flow = fieldMgr.createFFScalar("T_FF_Flow", 0.0)->data;
+    auto& T_FF_Heat = fieldMgr.createFFScalar("T_FF_Heat", 0.0)->data;
     if (T_FF_Flow.size() != totalFFPairs) {
         T_FF_Flow.assign(totalFFPairs, 0.0);
         T_FF_Heat.assign(totalFFPairs, 0.0);
     }
 
-    // =====================================================================
-    // 步骤 3：遍历 Junction 节点，执行严格的星角变换数学计算
-    // 为了保证科研求解在跨平台时的绝对一致性，必须对 unordered_map 的 Key 进行排序
-    // =====================================================================
-    std::vector<int> junctionIDs;
-    junctionIDs.reserve(junctionMap.size());
-    for (const auto& kv : junctionMap) junctionIDs.push_back(kv.first);
-    std::sort(junctionIDs.begin(), junctionIDs.end());
-
     size_t ffIdx = 0;
     fieldMgr.ff_topology.clear();
     fieldMgr.ff_topology.reserve(totalFFPairs);
-    for (int jID : junctionIDs) {
-        const auto& elemSolverIndices = junctionMap[jID];
-        size_t nElems = elemSolverIndices.size();
-        if (nElems < 2) continue; // 只有一条裂缝接触到此点 (无效交点) 不发生 FF 交换
 
-        // 预计算该 Junction 下各个分支的“半传导率” (Half-Transmissibility, T_i)
+    for (const auto& junction : validJunctions) {
+        const auto& elemSolverIndices = junction.solverIndices;
+        const size_t nElems = elemSolverIndices.size();
+
         std::vector<double> half_T_Flow(nElems, 0.0);
         std::vector<double> half_T_Heat(nElems, 0.0);
         double sum_T_Flow = 0.0;
         double sum_T_Heat = 0.0;
 
         for (size_t i = 0; i < nElems; ++i) {
-            int sIdx = elemSolverIndices[i];
-            int fLocIdx = sIdx - nMat;
-
-            if (fLocIdx < 0 || fLocIdx >= (int)KtF.size()) continue; // 安全保护
-
+            const int sIdx = elemSolverIndices[i];
+            const int fLocIdx = sIdx - nMat;
             const FractureElement* pElem = meshMgr.getFractureElementBySolverIndex(sIdx);
-            if (!pElem) continue;
+            if (!pElem) {
+                continue;
+            }
 
-            // 物理距离：网格在交点处被打断，故交点正好在段的末端。中心到交点的距离严谨为 L/2
-            double d = std::max(pElem->length * 0.5, 1e-12);
+            const double d = std::max(pElem->length * 0.5, 1e-12);
+            const double condFlow = KtF[fLocIdx] * Wf[fLocIdx];
+            const double tFlow = (condFlow * thickness) / d;
+            half_T_Flow[i] = tFlow;
+            sum_T_Flow += tFlow;
 
-            // 支路渗流传导能力 T_i = (K_t * W_f * thickness) / d
-            double cond = KtF[fLocIdx] * Wf[fLocIdx];
-            double t_f = (cond * thickness) / d;
-            half_T_Flow[i] = t_f;
-            sum_T_Flow += t_f;
-
-            // 支路热传导能力
             if (!LamF.empty() && !PhiF.empty() && !LamFluid.empty()) {
-                double lam_eff = PhiF[fLocIdx] * LamFluid[fLocIdx] + (1.0 - PhiF[fLocIdx]) * LamF[fLocIdx];
-                double cond_h = lam_eff * Wf[fLocIdx];
-                double t_h = (cond_h * thickness) / d;
-                half_T_Heat[i] = t_h;
-                sum_T_Heat += t_h;
+                const double lamEff = PhiF[fLocIdx] * LamFluid[fLocIdx] + (1.0 - PhiF[fLocIdx]) * LamF[fLocIdx];
+                const double condHeat = lamEff * Wf[fLocIdx];
+                const double tHeat = (condHeat * thickness) / d;
+                half_T_Heat[i] = tHeat;
+                sum_T_Heat += tHeat;
             }
         }
 
-        // 星角变换展开：T_ij = (T_i * T_j) / Sum(T_k)
         for (size_t i = 0; i < nElems; ++i) {
             for (size_t j = i + 1; j < nElems; ++j) {
-                // Flow
-                if (sum_T_Flow > 1e-25) {
-                    T_FF_Flow[ffIdx] = (half_T_Flow[i] * half_T_Flow[j]) / sum_T_Flow;
-                }
-                else {
-                    T_FF_Flow[ffIdx] = 0.0;
+                const int sI = elemSolverIndices[i];
+                const int sJ = elemSolverIndices[j];
+                if (fiPairs.find(makePairKey(sI, sJ)) != fiPairs.end()) {
+                    continue;
                 }
 
-                // Heat
-                if (sum_T_Heat > 1e-25) {
-                    T_FF_Heat[ffIdx] = (half_T_Heat[i] * half_T_Heat[j]) / sum_T_Heat;
-                }
-                else {
-                    T_FF_Heat[ffIdx] = 0.0;
-                }
+                T_FF_Flow[ffIdx] = (sum_T_Flow > 1e-25) ? ((half_T_Flow[i] * half_T_Flow[j]) / sum_T_Flow) : 0.0;
+                T_FF_Heat[ffIdx] = (sum_T_Heat > 1e-25) ? ((half_T_Heat[i] * half_T_Heat[j]) / sum_T_Heat) : 0.0;
 
-                fieldMgr.ff_topology.emplace_back(elemSolverIndices[i], elemSolverIndices[j]);
-
-                ffIdx++;
+                fieldMgr.ff_topology.emplace_back(sI, sJ);
+                ++ffIdx;
             }
         }
     }
 
+    if (ffIdx != totalFFPairs) {
+        throw std::runtime_error("[Solver 2D] FF generated pair count mismatch with pre-count.");
+    }
+
     std::cout << "[Solver 2D] FF Done (" << totalFFPairs << " Star-Delta pairs over "
-        << junctionIDs.size() << " junctions)." << std::endl;
+              << validJunctions.size() << " junctions)." << std::endl;
 }

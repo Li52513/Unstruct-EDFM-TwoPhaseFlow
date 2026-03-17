@@ -11,6 +11,7 @@
 #include <tuple>
 #include <cstdint>
 #include <string>
+#include <stdexcept>
 
 
 using namespace PhysicalProperties_string_op;
@@ -36,7 +37,7 @@ namespace Geometry_3D {
     }
 
     /**
-     * @brief 计算点 P 到线段 AB 的最短物理距离 (Robust)
+     * @brief 计算�?P 到线�?AB 的最短物理距�?(Robust)
      * @details 自动处理投影落在线段外的情况，避免传导率奇异
      */
     inline double PointToSegmentDistance(const Vector& P, const Vector& A, const Vector& B) {
@@ -45,34 +46,34 @@ namespace Geometry_3D {
 
         double lenSq = MagSqr(AB); // [Fix] 使用本地函数替代 AB.MagSqr()
 
-        // 退化情况处理：线段长度极小，退化为点
+        // 退化情况处理：线段长度极小，退化为�?
         if (lenSq < 1e-12) return Mag(AP);
 
         // 计算投影系数 t = (AP . AB) / |AB|^2
         double t = Dot(AP, AB) / lenSq;
 
-        // 钳位操作 (Clamping)：强制 t 在 [0, 1] 范围内
+        // 钳位操作 (Clamping)：强�?t �?[0, 1] 范围�?
         if (t < 0.0) t = 0.0;
         else if (t > 1.0) t = 1.0;
 
         // 计算最近点坐标
         Vector ClosestPoint = A + AB * t;
 
-        // 返回点 P 到最近点的距离
+        // 返回�?P 到最近点的距�?
         return Mag(P - ClosestPoint);
     }
 }
 
-// ==================== 新增部分开始：3D Matrix 传导率计算 ====================
+// ==================== 新增部分开始：3D Matrix 传导率计�?====================
 void TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(const MeshManager_3D& meshMgr, FieldManager_3D& fieldMgr)
 {
     // 1. 获取 3D 基岩网格数据
-    const Mesh& mesh = meshMgr.mesh(); // [已修复] 调用正确的 mesh() 接口
+    const Mesh& mesh = meshMgr.mesh(); // [已修复] 调用正确�?mesh() 接口
     const auto& faces = mesh.getFaces();
     const auto& cells = mesh.getCells();
     const auto& cellId2Idx = mesh.getCellId2Index();
 
-    // 2. 获取 3D 基岩物性场 (消除硬编码)
+    // 2. 获取 3D 基岩物性场 (消除硬编�?
     PhysicalProperties_string_op::Rock rockStr; // 实例化名称结构体
     auto Kxx = fieldMgr.getMatrixScalar(rockStr.k_xx_tag);
     auto Kyy = fieldMgr.getMatrixScalar(rockStr.k_yy_tag);
@@ -84,11 +85,11 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(const MeshMana
         return;
     }
 
-    // 3. 分配面心场容器
+    // 3. 分配面心场容�?
     auto T_Flow = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Flow", 0.0);
     auto T_Heat = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Heat", 0.0);
 
-    // 4. 面计算具有完美的独立性，安全开启 OpenMP 加速以应对百万级面计算
+    // 4. 面计算具有完美的独立性，安全开�?OpenMP 加速以应对百万级面计算
 #pragma omp parallel for
     for (int i = 0; i < static_cast<int>(faces.size()); ++i)
     {
@@ -117,7 +118,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(const MeshMana
         double dO = std::max(std::abs(dVecO.m_x * nx + dVecO.m_y * ny + dVecO.m_z * nz), 1e-6);
         double dN = std::max(std::abs(dVecN.m_x * nx + dVecN.m_y * ny + dVecN.m_z * nz), 1e-6);
 
-        // 3D 场景下，正交分解得到的 |E| 模长，本身即为真实的有效正交表面积
+        // 3D 场景下，正交分解得到�?|E| 模长，本身即为真实的有效正交表面�?
         double area = face.vectorE.Mag();
 
         // 写入结果 (数组索引 i 直接严格对齐 Face 的全局数组索引)
@@ -145,10 +146,10 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(cons
     const auto& globalEdges = frNet.getGlobalEdges();
     const auto& fracElements = frNet.getOrderedFractureElements();
 
-    // [Fix-1] 使用真实 solver offset，而不是假定 nMat
+    // [Fix-1] 使用真实 solver offset，而不是假�?nMat
     const int solverOffset = frNet.getSolverIndexOffset();
 
-    // --- 获取场数据 ---
+    // --- 获取场数�?---
     auto p_Kt = fieldMgr.getFractureScalar(fracStr.k_t_tag);
     auto p_Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag);
     auto p_LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag);
@@ -178,7 +179,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(cons
     auto& T_FI_Flow = p_T_Flow->data;
     auto& T_FI_Heat = p_T_Heat->data;
 
-    // [Fix-3] 每次调用先清零，避免 size 不变时残留旧值
+    // [Fix-3] 每次调用先清零，避免 size 不变时残留旧�?
     T_FI_Flow.assign(totalEdges, 0.0);
     T_FI_Heat.assign(totalEdges, 0.0);
 
@@ -190,13 +191,13 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(cons
         const int s1 = edge.ownerCell_solverIndex;
         const int s2 = edge.neighborCell_solverIndex;
 
-        // [Fix-5] owner/neighbor 任一无效都跳过
+        // [Fix-5] owner/neighbor 任一无效都跳�?
         if (s1 < 0 || s2 < 0) continue;
 
         const int fLoc1 = s1 - solverOffset;
         const int fLoc2 = s2 - solverOffset;
 
-        // [Fix-2] 增加 Wf.size() 与 fracElements.size() 的完整边界检查
+        // [Fix-2] 增加 Wf.size() �?fracElements.size() 的完整边界检�?
         if (fLoc1 < 0 || fLoc2 < 0 ||
             fLoc1 >= static_cast<int>(Kt.size()) || fLoc2 >= static_cast<int>(Kt.size()) ||
             fLoc1 >= static_cast<int>(Wf.size()) || fLoc2 >= static_cast<int>(Wf.size()) ||
@@ -208,7 +209,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(cons
         const auto* pElem2 = fracElements[fLoc2];
         if (!pElem1 || !pElem2) continue;
 
-        // [Fix-4] 插值系数限幅 + 距离/面积最小值保护
+        // [Fix-4] 插值系数限�?+ 距离/面积最小值保�?
         const double d_on = std::max(edge.ownerToNeighbor.Mag(), 1e-6);
         const double w = std::max(0.0, std::min(edge.f_linearInterpolationCoef, 1.0));
         const double d1 = std::max(d_on * w, 1e-6);
@@ -251,13 +252,14 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
     Fracture_string frac_str;
     Water waterStr;
 
-    // --- 获取场数据 (Direct Pointers) ---
     auto p_Kxx = fieldMgr.getMatrixScalar(rock_str.k_xx_tag);
     auto p_Kyy = fieldMgr.getMatrixScalar(rock_str.k_yy_tag);
     auto p_Kzz = fieldMgr.getMatrixScalar(rock_str.k_zz_tag);
     auto p_Lam_m = fieldMgr.getMatrixScalar(rock_str.lambda_tag);
 
-    if (!p_Kxx) { std::cerr << "[Error] Matrix Permeability missing!" << std::endl; return; }
+    if (!p_Kxx) {
+        throw std::runtime_error("[Solver 3D] Matrix permeability field k_xx is required for NNC.");
+    }
 
     const std::vector<double>& Kxx = p_Kxx->data;
     const std::vector<double>& Kyy = (p_Kyy) ? p_Kyy->data : Kxx;
@@ -265,78 +267,125 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
     const std::vector<double>* Lam_m = (p_Lam_m) ? &(p_Lam_m->data) : nullptr;
 
     auto p_Kf = fieldMgr.getFractureScalar(frac_str.k_n_tag);
-    if (!p_Kf) p_Kf = fieldMgr.getFractureScalar(frac_str.k_t_tag);
+    if (!p_Kf) {
+        throw std::runtime_error("[Solver 3D] Fracture normal permeability k_n is required for NNC.");
+    }
     auto p_Wf = fieldMgr.getFractureScalar(frac_str.aperture_tag);
-    auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag); // Solid thermal cond
-    auto p_Phi_f = fieldMgr.getFractureScalar(frac_str.phi_tag);    // [New] Porosity
-
-    // 获取流体热导率 lambda_w (Assume initialized)
+    auto p_Lam_f = fieldMgr.getFractureScalar(frac_str.lambda_tag);
+    auto p_Phi_f = fieldMgr.getFractureScalar(frac_str.phi_tag);
     auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
-    if (!p_Kf || !p_Wf) { std::cerr << "[Error] Frac properties missing!" << std::endl; return; }
+    if (!p_Wf) {
+        throw std::runtime_error("[Solver 3D] Fracture aperture is required for NNC.");
+    }
 
     const std::vector<double>& Kf = p_Kf->data;
     const std::vector<double>& Wf = p_Wf->data;
     const std::vector<double>* Lam_f = (p_Lam_f) ? &(p_Lam_f->data) : nullptr;
-    const std::vector<double>* Phi_f = (p_Phi_f) ? &(p_Phi_f->data) : nullptr;    // [New]
-    const std::vector<double>* LamFluid = (p_LamFluid) ? &(p_LamFluid->data) : nullptr; // [New]
+    const std::vector<double>* Phi_f = (p_Phi_f) ? &(p_Phi_f->data) : nullptr;
+    const std::vector<double>* LamFluid = (p_LamFluid) ? &(p_LamFluid->data) : nullptr;
 
-    // --- 输出场 ---
-    const std::string tag_T_NNC_Flow = "T_NNC_Flow";
-    const std::string tag_T_NNC_Heat = "T_NNC_Heat";
+    if (Kf.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] NNC requires same fracture field size for k_n and aperture.");
+    }
+    if (Lam_m && Lam_m->size() != Kxx.size()) {
+        throw std::runtime_error("[Solver 3D] Matrix lambda size mismatch with matrix permeability size.");
+    }
+    if (Lam_f && Lam_f->size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] Fracture lambda size mismatch with aperture size.");
+    }
+    if (Phi_f && Phi_f->size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] Fracture porosity size mismatch with aperture size.");
+    }
+    if (LamFluid && LamFluid->size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] Fluid lambda size mismatch with aperture size.");
+    }
 
-    auto& T_Flow = fieldMgr.createNNCScalar(tag_T_NNC_Flow, 0.0)->data;
-    auto& T_Heat = fieldMgr.createNNCScalar(tag_T_NNC_Heat, 0.0)->data;
+    auto& T_Flow = fieldMgr.createNNCScalar("T_NNC_Flow", 0.0)->data;
+    auto& T_Heat = fieldMgr.createNNCScalar("T_NNC_Heat", 0.0)->data;
 
     const auto& pairs = meshMgr.getInteractionPairs();
     const size_t numPairs = pairs.size();
-    if (T_Flow.size() != numPairs) { T_Flow.resize(numPairs); T_Heat.resize(numPairs); }
+    if (T_Flow.size() != numPairs) {
+        T_Flow.resize(numPairs, 0.0);
+        T_Heat.resize(numPairs, 0.0);
+    }
+
     const int nMat = static_cast<int>(meshMgr.mesh().getCells().size());
 
-    const double MIN_VAL = 1e-20;
+    struct NNCGeom {
+        int mIdx = -1;
+        int fLocIdx = -1;
+        double nx = 0.0;
+        double ny = 0.0;
+        double nz = 1.0;
+        double dist = 1e-6;
+        double area = 1e-12;
+    };
+
+    std::vector<NNCGeom> geom(numPairs);
+
+    for (size_t i = 0; i < numPairs; ++i) {
+        const auto& pair = pairs[i];
+        const int mIdx = pair.matrixSolverIndex;
+        const int fIdx = pair.fracCellSolverIndex;
+        const int fLocIdx = fIdx - nMat;
+
+        if (mIdx < 0 || mIdx >= static_cast<int>(Kxx.size())) {
+            throw std::runtime_error("[Solver 3D] NNC matrix index out of range.");
+        }
+        if (fLocIdx < 0 || fLocIdx >= static_cast<int>(Wf.size())) {
+            throw std::runtime_error("[Solver 3D] NNC fracture local index out of range.");
+        }
+
+        const double nxRaw = pair.polygonNormal.m_x;
+        const double nyRaw = pair.polygonNormal.m_y;
+        const double nzRaw = pair.polygonNormal.m_z;
+        const double nNorm = std::sqrt(nxRaw * nxRaw + nyRaw * nyRaw + nzRaw * nzRaw);
+        if (nNorm <= 1e-14) {
+            throw std::runtime_error("[Solver 3D] NNC polygon normal magnitude is zero.");
+        }
+
+        NNCGeom g;
+        g.mIdx = mIdx;
+        g.fLocIdx = fLocIdx;
+        g.nx = nxRaw / nNorm;
+        g.ny = nyRaw / nNorm;
+        g.nz = nzRaw / nNorm;
+        g.dist = std::max(pair.distMatrixToFracPlane, 1e-6);
+        g.area = std::max(pair.intersectionArea, 1e-12);
+        geom[i] = g;
+    }
 
 #pragma omp parallel for schedule(static)
-    for (long long i = 0; i < numPairs; ++i)
+    for (long long i = 0; i < static_cast<long long>(numPairs); ++i)
     {
-        const auto& pair = pairs[i];
-        int mIdx = pair.matrixSolverIndex;
-        int fIdx = pair.fracCellSolverIndex;
+        const auto& g = geom[i];
 
-        int fLocIdx = fIdx - nMat;
+        const double k_m_dir =
+            (g.nx * g.nx * Kxx[g.mIdx]) +
+            (g.ny * g.ny * Kyy[g.mIdx]) +
+            (g.nz * g.nz * Kzz[g.mIdx]);
 
-        // 1. Matrix Directional Permeability
-        double nx = pair.polygonNormal.m_x;
-        double ny = pair.polygonNormal.m_y;
-        double nz = pair.polygonNormal.m_z;
-        double k_m_dir = (nx * nx * Kxx[mIdx]) + (ny * ny * Kyy[mIdx]) + (nz * nz * Kzz[mIdx]);
+        T_Flow[i] = FVM_Ops::Op_Math_Transmissibility(g.dist, k_m_dir, Wf[g.fLocIdx] * 0.5, Kf[g.fLocIdx], g.area);
 
-        // 2. Flow Transmissibility
-        double dist = std::max(pair.distMatrixToFracPlane, 1e-6);
-        // 调用底层算子，裂缝侧物理距离为 Wf/2.0
-        T_Flow[i] = FVM_Ops::Op_Math_Transmissibility(dist, k_m_dir, Wf[fLocIdx] / 2.0, Kf[fLocIdx], pair.intersectionArea);
-
-        // 3. Heat Transmissibility [Modified]
-        // 使用有效热导率：lam_eff = phi * lam_fluid + (1-phi) * lam_solid
         if (Lam_m && Lam_f && Phi_f && LamFluid) {
-            double lam_m_val = (*Lam_m)[mIdx];
-            double phi_val = (*Phi_f)[fLocIdx];
-            double lam_fluid_val = (*LamFluid)[fLocIdx];
-            double lam_solid_val = (*Lam_f)[fLocIdx];
+            const double lam_m_val = (*Lam_m)[g.mIdx];
+            const double phi_val = (*Phi_f)[g.fLocIdx];
+            const double lam_fluid_val = (*LamFluid)[g.fLocIdx];
+            const double lam_solid_val = (*Lam_f)[g.fLocIdx];
+            const double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
 
-            // 计算裂缝侧有效热导率
-            double lam_f_eff = phi_val * lam_fluid_val + (1.0 - phi_val) * lam_solid_val;
-            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(dist, lam_m_val, Wf[fLocIdx] / 2.0, lam_f_eff, pair.intersectionArea);
+            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(g.dist, lam_m_val, Wf[g.fLocIdx] * 0.5, lam_f_eff, g.area);
         }
-        else if (Lam_m && Lam_f) // Fallback for pure solid conduction (Compatibility)
-        {
-            double lam_m_val = (*Lam_m)[mIdx];
-            double lam_f_val = (*Lam_f)[fLocIdx];
-
-            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(dist, lam_m_val, Wf[fLocIdx] / 2.0, lam_f_val, pair.intersectionArea);
+        else if (Lam_m && Lam_f) {
+            const double lam_m_val = (*Lam_m)[g.mIdx];
+            const double lam_f_val = (*Lam_f)[g.fLocIdx];
+            T_Heat[i] = FVM_Ops::Op_Math_Transmissibility(g.dist, lam_m_val, Wf[g.fLocIdx] * 0.5, lam_f_val, g.area);
         }
-
     }
-    std::cout << "[Solver] NNC Done (" << numPairs << " pairs)." << std::endl;
+
+    std::cout << "[Solver 3D] NNC Done (" << numPairs << " pairs)." << std::endl;
 }
 
 
@@ -344,13 +393,13 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(const MeshManager
 // 静态传导率计算：FF (Fracture - Fracture 3D Star-Delta Model)
 // =========================================================================
 /**
- * @brief 计算 3D 裂缝-裂缝 (FF) 星角变换传导率 (Industrial-Grade)
+ * @brief 计算 3D 裂缝-裂缝 (FF) 星角变换传导�?(Industrial-Grade)
  * @details
- * 1. 端点量化无向线段键聚类 (Quantized Undirected Segment Key)，确保交线簇识别的绝对鲁棒。
- * 2. 几何要素同步锁定，保留交线簇中最大线段的严格起止坐标。
- * 3. 物理场解耦过滤：Flow 和 Heat 各自独立判定有效性，Heat 缺失自动回退置 0，绝不影响 Flow 拓扑。
- * 4. 强确定性排序 (Deterministic Ordering)：消除哈希迭代的随机性，保证 CSV 报表和矩阵装配绝对可复现。
- * @param meshMgr 3D 网格管理器
+ * 1. 端点量化无向线段键聚�?(Quantized Undirected Segment Key)，确保交线簇识别的绝对鲁棒�?
+ * 2. 几何要素同步锁定，保留交线簇中最大线段的严格起止坐标�?
+ * 3. 物理场解耦过滤：Flow �?Heat 各自独立判定有效性，Heat 缺失自动回退�?0，绝不影�?Flow 拓扑�?
+ * 4. 强确定性排�?(Deterministic Ordering)：消除哈希迭代的随机性，保证 CSV 报表和矩阵装配绝对可复现�?
+ * @param meshMgr 3D 网格管理�?
  * @param fieldMgr 3D 场管理器
  */
 void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_3D& meshMgr, FieldManager_3D& fieldMgr)
@@ -363,11 +412,9 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     const auto& frNet = meshMgr.fracture_network();
     const auto& ffIntersections = frNet.ffIntersections;
     const auto& fracElements = frNet.getOrderedFractureElements();
-
-    // 获取底层统一设定的索引偏移量
+    const auto& globalEdges = frNet.getGlobalEdges();
     const int offset = frNet.getSolverIndexOffset();
 
-    // --- 获取并校验场数据 ---
     auto p_Kt = fieldMgr.getFractureScalar(fracStr.k_t_tag);
     auto p_Wf = fieldMgr.getFractureScalar(fracStr.aperture_tag);
     auto p_LamF = fieldMgr.getFractureScalar(fracStr.lambda_tag);
@@ -375,8 +422,7 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     auto p_LamFluid = fieldMgr.getFractureScalar(waterStr.k_tag);
 
     if (!p_Kt || !p_Wf) {
-        std::cerr << "[Error] Critical fracture properties (Kt/Wf) missing for FF!" << std::endl;
-        return;
+        throw std::runtime_error("[Solver 3D] Critical fracture properties k_t/aperture missing for FF.");
     }
 
     const auto& Kt = p_Kt->data;
@@ -384,63 +430,88 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     const auto& vLamF = (p_LamF) ? p_LamF->data : std::vector<double>();
     const auto& vPhiF = (p_PhiF) ? p_PhiF->data : std::vector<double>();
     const auto& vLamFluid = (p_LamFluid) ? p_LamFluid->data : std::vector<double>();
+    const bool hasGlobalHeat = (!vLamF.empty() && !vPhiF.empty() && !vLamFluid.empty());
 
-    bool hasGlobalHeat = (!vLamF.empty() && !vPhiF.empty() && !vLamFluid.empty());
+    if (Kt.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] FF requires same fracture field size for k_t and aperture.");
+    }
+    if (!vLamF.empty() && vLamF.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] FF fracture lambda size mismatch.");
+    }
+    if (!vPhiF.empty() && vPhiF.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] FF fracture porosity size mismatch.");
+    }
+    if (!vLamFluid.empty() && vLamFluid.size() != Wf.size()) {
+        throw std::runtime_error("[Solver 3D] FF fluid lambda size mismatch.");
+    }
 
-    // =====================================================================
-    // 步骤 1：基于端点量化的无向线段键聚类
-    // =====================================================================
+    auto makePairKey = [](int a, int b) -> std::uint64_t {
+        const std::uint32_t i = static_cast<std::uint32_t>(std::min(a, b));
+        const std::uint32_t j = static_cast<std::uint32_t>(std::max(a, b));
+        return (static_cast<std::uint64_t>(i) << 32) | static_cast<std::uint64_t>(j);
+    };
+
+    std::unordered_set<std::uint64_t> fiPairs;
+    fiPairs.reserve(globalEdges.size() * 2 + 1);
+    for (const auto& edge : globalEdges) {
+        const int s1 = edge.ownerCell_solverIndex;
+        const int s2 = edge.neighborCell_solverIndex;
+        if (s1 < 0 || s2 < 0) {
+            continue;
+        }
+        fiPairs.insert(makePairKey(s1, s2));
+    }
+
     struct JunctionCluster {
         Vector start;
         Vector end;
         double length = -1.0;
         std::vector<int> solverIndices;
     };
-    std::unordered_map<std::string, JunctionCluster> clusterMap;
-    const double TOL = 1e-4;
 
-    auto quantize = [TOL](const Vector& v) -> std::tuple<long long, long long, long long> {
+    std::unordered_map<std::string, JunctionCluster> clusterMap;
+    const double tol = 1e-4;
+
+    auto quantize = [tol](const Vector& v) -> std::tuple<long long, long long, long long> {
         return std::make_tuple(
-            static_cast<long long>(std::floor(v.m_x / TOL + 0.5)),
-            static_cast<long long>(std::floor(v.m_y / TOL + 0.5)),
-            static_cast<long long>(std::floor(v.m_z / TOL + 0.5))
+            static_cast<long long>(std::floor(v.m_x / tol + 0.5)),
+            static_cast<long long>(std::floor(v.m_y / tol + 0.5)),
+            static_cast<long long>(std::floor(v.m_z / tol + 0.5))
         );
-        };
+    };
 
     auto getUndirectedKey = [&](const Vector& p1, const Vector& p2) -> std::string {
-        auto q1 = quantize(p1), q2 = quantize(p2);
-        if (q1 > q2) std::swap(q1, q2);
+        auto q1 = quantize(p1);
+        auto q2 = quantize(p2);
+        if (q1 > q2) {
+            std::swap(q1, q2);
+        }
         return std::to_string(std::get<0>(q1)) + "_" + std::to_string(std::get<1>(q1)) + "_" + std::to_string(std::get<2>(q1)) + "-" +
             std::to_string(std::get<0>(q2)) + "_" + std::to_string(std::get<1>(q2)) + "_" + std::to_string(std::get<2>(q2));
-        };
+    };
 
     for (const auto& inter : ffIntersections) {
         for (const auto& seg : inter.segments) {
             std::string key = getUndirectedKey(seg.start, seg.end);
             auto& cluster = clusterMap[key];
 
-            // [修复 1] 几何一致性：只在捕捉到更长的代表性线段时，同步更新长度与起止坐标
             if (seg.length > cluster.length) {
                 cluster.start = seg.start;
                 cluster.end = seg.end;
                 cluster.length = seg.length;
             }
 
-            if (seg.solverIndex_1 >= 0) {
-                if (std::find(cluster.solverIndices.begin(), cluster.solverIndices.end(), seg.solverIndex_1) == cluster.solverIndices.end())
-                    cluster.solverIndices.push_back(seg.solverIndex_1);
+            if (seg.solverIndex_1 >= 0 &&
+                std::find(cluster.solverIndices.begin(), cluster.solverIndices.end(), seg.solverIndex_1) == cluster.solverIndices.end()) {
+                cluster.solverIndices.push_back(seg.solverIndex_1);
             }
-            if (seg.solverIndex_2 >= 0) {
-                if (std::find(cluster.solverIndices.begin(), cluster.solverIndices.end(), seg.solverIndex_2) == cluster.solverIndices.end())
-                    cluster.solverIndices.push_back(seg.solverIndex_2);
+            if (seg.solverIndex_2 >= 0 &&
+                std::find(cluster.solverIndices.begin(), cluster.solverIndices.end(), seg.solverIndex_2) == cluster.solverIndices.end()) {
+                cluster.solverIndices.push_back(seg.solverIndex_2);
             }
         }
     }
 
-    // =====================================================================
-    // 步骤 2：确定性排序与有效性过滤 (Deterministic Ordering & Validation)
-    // =====================================================================
-    // [修复 3] 提取所有 Key 并字典序排序，保证后续计算和配对的绝对确定性可复现
     std::vector<std::string> sortedKeys;
     sortedKeys.reserve(clusterMap.size());
     for (const auto& kv : clusterMap) {
@@ -449,35 +520,49 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
     std::sort(sortedKeys.begin(), sortedKeys.end());
 
     std::vector<JunctionCluster> validClusters;
-    size_t totalFFPairs = 0;
+    validClusters.reserve(sortedKeys.size());
 
+    size_t totalFFPairs = 0;
     for (const auto& key : sortedKeys) {
-        auto& cluster = clusterMap[key];
+        auto cluster = clusterMap[key];
         std::vector<int> validIndices;
+        validIndices.reserve(cluster.solverIndices.size());
 
         for (int sIdx : cluster.solverIndices) {
-            int fLoc = sIdx - offset;
-
-            // 基础渗流越界检查 (Flow 属性是拓扑存活的唯一判据)
-            if (fLoc < 0 || fLoc >= (int)Kt.size() || fLoc >= (int)Wf.size() || fLoc >= (int)fracElements.size()) continue;
-
-            const auto* pElem = fracElements[fLoc];
-            if (!pElem) continue;
-
-            // [修复 2] 将 Heat 的越界检查从外部循环剥离，仅作为局部的可用性 flag 参与运算
+            const int fLoc = sIdx - offset;
+            if (fLoc < 0 || fLoc >= static_cast<int>(Kt.size()) || fLoc >= static_cast<int>(Wf.size()) || fLoc >= static_cast<int>(fracElements.size())) {
+                continue;
+            }
+            if (!fracElements[fLoc]) {
+                continue;
+            }
             validIndices.push_back(sIdx);
         }
-        std::sort(validIndices.begin(), validIndices.end()); // <-- 新增
-        cluster.solverIndices = validIndices;
 
-        size_t n = validIndices.size();
-        if (n >= 2) {
-            totalFFPairs += n * (n - 1) / 2;
-            validClusters.push_back(cluster); // 压入的顺序自然就是确定性的
+        std::sort(validIndices.begin(), validIndices.end());
+        validIndices.erase(std::unique(validIndices.begin(), validIndices.end()), validIndices.end());
+
+        if (validIndices.size() < 2) {
+            continue;
         }
+
+        cluster.solverIndices = std::move(validIndices);
+        if (cluster.length <= 1e-14) {
+            cluster.length = 1e-6;
+        }
+
+        for (size_t i = 0; i < cluster.solverIndices.size(); ++i) {
+            for (size_t j = i + 1; j < cluster.solverIndices.size(); ++j) {
+                if (fiPairs.find(makePairKey(cluster.solverIndices[i], cluster.solverIndices[j])) != fiPairs.end()) {
+                    continue;
+                }
+                ++totalFFPairs;
+            }
+        }
+
+        validClusters.push_back(std::move(cluster));
     }
 
-    // --- 分配内存 ---
     auto p_T_Flow = fieldMgr.createFFScalar("T_FF_Flow", 0.0);
     auto p_T_Heat = fieldMgr.createFFScalar("T_FF_Heat", 0.0);
     auto& T_FF_Flow = p_T_Flow->data;
@@ -488,15 +573,13 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
         T_FF_Heat.assign(totalFFPairs, 0.0);
     }
 
-    // =====================================================================
-    // 步骤 3：遍历合法枢纽，执行 Star-Delta 星角变换
-    // =====================================================================
     size_t ffIdx = 0;
     fieldMgr.ff_topology.clear();
     fieldMgr.ff_topology.reserve(totalFFPairs);
 
     for (const auto& cluster : validClusters) {
-        size_t nElems = cluster.solverIndices.size();
+        const size_t nElems = cluster.solverIndices.size();
+        const double segLength = std::max(cluster.length, 1e-6);
 
         std::vector<double> half_T_Flow(nElems, 0.0);
         std::vector<double> half_T_Heat(nElems, 0.0);
@@ -504,49 +587,51 @@ void TransmissibilitySolver_3D::Calculate_Transmissibility_FF(const MeshManager_
         double sum_T_Heat = 0.0;
 
         for (size_t i = 0; i < nElems; ++i) {
-            int fLoc = cluster.solverIndices[i] - offset;
+            const int fLoc = cluster.solverIndices[i] - offset;
             const auto* pElem = fracElements[fLoc];
 
-            double d = std::max(Geometry_3D::PointToSegmentDistance(pElem->centroid, cluster.start, cluster.end), 1e-6);
+            const double d = std::max(Geometry_3D::PointToSegmentDistance(pElem->centroid, cluster.start, cluster.end), 1e-6);
 
-            // Flow
-            double cond_flow = Kt[fLoc] * Wf[fLoc];
-            double t_f = (cond_flow * cluster.length) / d;
-            half_T_Flow[i] = t_f;
-            sum_T_Flow += t_f;
+            const double cond_flow = Kt[fLoc] * Wf[fLoc];
+            const double t_flow = (cond_flow * segLength) / d;
+            half_T_Flow[i] = t_flow;
+            sum_T_Flow += t_flow;
 
-            // [修复 2 延续] 独立的 Heat 判定：当前支路是否同时拥有完备的热学数据？
-            bool branchHasHeat = hasGlobalHeat && (fLoc < (int)vLamF.size()) && (fLoc < (int)vPhiF.size()) && (fLoc < (int)vLamFluid.size());
+            const bool branchHasHeat = hasGlobalHeat &&
+                (fLoc < static_cast<int>(vLamF.size())) &&
+                (fLoc < static_cast<int>(vPhiF.size())) &&
+                (fLoc < static_cast<int>(vLamFluid.size()));
+
             if (branchHasHeat) {
-                double lam_eff = vPhiF[fLoc] * vLamFluid[fLoc] + (1.0 - vPhiF[fLoc]) * vLamF[fLoc];
-                double cond_heat = lam_eff * Wf[fLoc];
-                double t_h = (cond_heat * cluster.length) / d;
-                half_T_Heat[i] = t_h;
-                sum_T_Heat += t_h;
-            }
-            else {
-                half_T_Heat[i] = 0.0; // 缺失热学数据，仅流体连通，热连通阻断
+                const double lam_eff = vPhiF[fLoc] * vLamFluid[fLoc] + (1.0 - vPhiF[fLoc]) * vLamF[fLoc];
+                const double cond_heat = lam_eff * Wf[fLoc];
+                const double t_heat = (cond_heat * segLength) / d;
+                half_T_Heat[i] = t_heat;
+                sum_T_Heat += t_heat;
             }
         }
 
-        // Star-Delta 展开
-
         for (size_t i = 0; i < nElems; ++i) {
             for (size_t j = i + 1; j < nElems; ++j) {
+                const int sI = cluster.solverIndices[i];
+                const int sJ = cluster.solverIndices[j];
+                if (fiPairs.find(makePairKey(sI, sJ)) != fiPairs.end()) {
+                    continue;
+                }
+
                 T_FF_Flow[ffIdx] = (sum_T_Flow > 1e-25) ? ((half_T_Flow[i] * half_T_Flow[j]) / sum_T_Flow) : 0.0;
                 T_FF_Heat[ffIdx] = (sum_T_Heat > 1e-25) ? ((half_T_Heat[i] * half_T_Heat[j]) / sum_T_Heat) : 0.0;
 
-                fieldMgr.ff_topology.emplace_back(cluster.solverIndices[i], cluster.solverIndices[j]);
-
-                ffIdx++;
+                fieldMgr.ff_topology.emplace_back(sI, sJ);
+                ++ffIdx;
             }
         }
     }
 
     if (ffIdx != totalFFPairs) {
-        throw std::runtime_error("[Solver 3D] FF topology size mismatch with totalFFPairs.");
+        throw std::runtime_error("[Solver 3D] FF topology size mismatch with filtered totalFFPairs.");
     }
 
     std::cout << "[Solver 3D] FF Done (" << totalFFPairs << " Deterministic Star-Delta pairs over "
-        << validClusters.size() << " valid junctions)." << std::endl;
+              << validClusters.size() << " valid junctions)." << std::endl;
 }

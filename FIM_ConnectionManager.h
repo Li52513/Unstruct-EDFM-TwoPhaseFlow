@@ -79,8 +79,10 @@ public:
                 << ", geometric_duplicate=" << stats_.geometric_duplicate_by_type[t]
                 << "\n";
         }
+    }
+    void ReserveRawConnections(size_t expected) {
+        rawBuffer_.reserve(expected);
     }
-
 
     void PushConnection(int nodeI, int nodeJ, double t_flow, double t_heat, double aux_area, double aux_dist, ConnectionType type) {
         if (nodeI < 0 || nodeJ < 0 || nodeI == nodeJ) return;

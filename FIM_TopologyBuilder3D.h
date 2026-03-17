@@ -1,6 +1,6 @@
 /**
  * @file FIM_TopologyBuilder3D.h
- * @brief 3D 拓扑数据至代数连接的组装器
+ * @brief 3D topology to algebraic connections.
  */
 
 #pragma once
@@ -12,6 +12,22 @@
 class FIM_TopologyBuilder3D {
 public:
     static void LoadAllConnections(FIM_ConnectionManager& connMgr, const MeshManager_3D& meshMgr, const FieldManager_3D& fieldMgr) {
+        size_t expected = 0;
+
+        const auto& faces = meshMgr.mesh().getFaces();
+        for (const auto& face : faces) {
+            if (!face.isBoundary()) ++expected;
+        }
+
+        const auto& edges = meshMgr.fracture_network().getGlobalEdges();
+        for (const auto& edge : edges) {
+            if (edge.ownerCell_solverIndex >= 0 && edge.neighborCell_solverIndex >= 0) ++expected;
+        }
+
+        expected += meshMgr.getInteractionPairs().size();
+        expected += fieldMgr.ff_topology.size();
+        connMgr.ReserveRawConnections(expected);
+
         _loadMatrix(connMgr, meshMgr, fieldMgr);
         _loadFI(connMgr, meshMgr, fieldMgr);
         _loadNNC(connMgr, meshMgr, fieldMgr);
@@ -28,6 +44,10 @@ private:
         const auto& cells = meshMgr.mesh().getCells();
         const auto& cellId2Idx = meshMgr.mesh().getCellId2Index();
 
+        if (pFlow->data.size() != faces.size() || pHeat->data.size() != faces.size()) {
+            throw std::runtime_error("[Build 3D] Matrix face field size mismatch with mesh faces.");
+        }
+
         for (size_t i = 0; i < faces.size(); ++i) {
             if (faces[i].isBoundary()) continue;
             int nodeI = static_cast<int>(cellId2Idx.at(faces[i].ownerCell));
@@ -36,7 +56,7 @@ private:
             double dist = (faces[i].midpoint - cells[nodeI].center).Mag() +
                 (cells[nodeJ].center - faces[i].midpoint).Mag();
 
-            connMgr.PushConnection(nodeI, nodeJ, pFlow->data[i], pHeat->data[i], faces[i].vectorE.Mag(), dist, ConnectionType::Matrix_Matrix);
+            connMgr.PushConnection(nodeI, nodeJ, pFlow->data[i], pHeat->data[i], faces[i].vectorE.Mag(), std::max(dist, 1e-12), ConnectionType::Matrix_Matrix);
         }
     }
 
@@ -52,6 +72,7 @@ private:
         for (size_t i = 0; i < edges.size(); ++i) {
             int nodeI = edges[i].ownerCell_solverIndex;
             int nodeJ = edges[i].neighborCell_solverIndex;
+            if (nodeI < 0 || nodeJ < 0) continue;
             connMgr.PushConnection(nodeI, nodeJ, pFlow->data[i], pHeat->data[i], edges[i].length, edges[i].length, ConnectionType::Fracture_Internal);
         }
     }
@@ -115,5 +136,4 @@ private:
             );
         }
     }
-
 };
