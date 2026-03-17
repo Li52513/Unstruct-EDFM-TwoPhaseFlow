@@ -173,7 +173,7 @@ namespace FIM_Engine {
         if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
 
         std::vector<double> P_ref(totalBlocks, ic.P_init);
-        for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i]; // ʹ�ó�ʼ����Ϊѹ��ϵ������Ĳο�ѹ��
+        for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i]; 
 
         double t = 0.0;
         double dt = params.dt_init;
@@ -442,7 +442,6 @@ namespace FIM_Engine {
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
                     auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
 
-                    // ������ʯѹ���ԣ����� P �����ݶ� 1.0��phi �Զ��̳ж�ѹ���ĵ��� c_r * phi_ref
                     ADVar<N> phi = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P - ADVar<N>(P_ref[bi])));
                     ADVar<N> phi_old = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P_old - ADVar<N>(P_ref[bi])));
 

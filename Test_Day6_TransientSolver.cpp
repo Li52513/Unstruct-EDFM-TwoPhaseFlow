@@ -31,43 +31,43 @@ namespace Test_Day6 {
         // 3. Rock/Fracture Properties Setup
         // =====================================================================
         auto preset = FIM_CaseKit::MakeDefaultPropertyPreset2D();
-        preset.enable_rock_region = false;
-        preset.rock_bg.phi_r = 0.12;
-        preset.rock_bg.kxx = 5.0e-14;
-        preset.rock_bg.kyy = 5.0e-14;
-        preset.rock_bg.kzz = 5.0e-14;
-        preset.rock_bg.compressibility = 5.0e-9;
-        preset.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
+		preset.enable_rock_region = false;  // 2D case with uniform rock properties for simplicity
+        preset.rock_bg.phi_r = 0.12;        // 孔隙度
+        preset.rock_bg.kxx = 1.0e-13; 
+        preset.rock_bg.kyy = 1.0e-13;
+		preset.rock_bg.kzz = 1.0e-13;       // 渗透率，单位 m^2，约等于 0.5 mD
+		preset.rock_bg.compressibility = 5.0e-9;  // Pa^-1, 约等于 5e-6 MPa^-1，保持适度压缩性以观察压力传播和孔隙体积变化的影响
+		preset.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water; // 使用 CO2 作为单相流体，具有较高的可压缩性和温度敏感性，能够更明显地展示压力和温度变化的耦合效应
 
         // =====================================================================
         // 4. Initial Conditions (IC)
         // =====================================================================
         FIM_Engine::InitialConditions ic;
-        ic.P_init = 25.0e6;
-        ic.T_init = 360.0;
+        ic.P_init = 30.0e6;    // 30 MPa  (深储层，>Pc 裕量×4)
+        ic.T_init = 380.0;     // 380 K   (≈107°C，深3km地热，>Tc 裕量+76K)
         ic.Sw_init = 1.0;
 
         // =====================================================================
         // 5. External BC (Dirichlet / Neumann / Robin)
         // =====================================================================
-        BoundarySetting::BoundaryConditionManager bcP;
-        BoundarySetting::BoundaryConditionManager bcT;
+		BoundarySetting::BoundaryConditionManager bcP;  // 压力 BC 管理器
+		BoundarySetting::BoundaryConditionManager bcT;  // 温度 BC 管理器
         bcP.Clear();
         bcT.Clear();
 
         // Pressure: closed (no-flow) on all sides
-        bcP.SetNeumannBC(MeshTags::LEFT, 0.0);
-        bcP.SetNeumannBC(MeshTags::RIGHT, 0.0);
-        bcP.SetNeumannBC(MeshTags::BOTTOM, 0.0);
-        bcP.SetNeumannBC(MeshTags::TOP, 0.0);
+        bcP.SetNeumannBC(MeshTags::LEFT, 0.0);          // 压力左边界
+		bcP.SetNeumannBC(MeshTags::RIGHT, 0.0);         // 压力右边界
+		bcP.SetNeumannBC(MeshTags::BOTTOM, 0.0);        // 压力底边界
+		bcP.SetNeumannBC(MeshTags::TOP, 0.0);           // 压力上边界
 
         // Temperature: adiabatic on all sides
-        bcT.SetNeumannBC(MeshTags::LEFT, 0.0);
-        bcT.SetNeumannBC(MeshTags::RIGHT, 0.0);
-        bcT.SetNeumannBC(MeshTags::BOTTOM, 0.0);
-        bcT.SetNeumannBC(MeshTags::TOP, 0.0);
+        bcT.SetNeumannBC(MeshTags::LEFT, 0.0);          // 左边界    
+		bcT.SetNeumannBC(MeshTags::RIGHT, 0.0);         // 右边界
+		bcT.SetNeumannBC(MeshTags::BOTTOM, 0.0);        // 底边界
+		bcT.SetNeumannBC(MeshTags::TOP, 0.0);           // 上边界
 
-        auto modules = FIM_CaseKit::BuildModules2D(preset, &bcP, &bcT, nullptr);
+		auto modules = FIM_CaseKit::BuildModules2D(preset, &bcP, &bcT, nullptr); // 创建模型
 
         // =====================================================================
         // 6. Wells Setup
@@ -88,29 +88,30 @@ namespace Test_Day6 {
             return best;
             };
 
-        const int injCell = findNearestCell(25.0, 25.0);
-        const int prodCell = findNearestCell(75.0, 75.0);
+        const int injCell = findNearestCell(15.0, 15.0);   // 移至单元中心(i=1,j=1)，避开y=10单元边界，且位于对角裂缝路径上
+        const int prodCell = findNearestCell(85.0, 95.0);  // 明确落于顶行单元中心
 
         WellScheduleStep w1, w2;
         w1.well_name = "INJ_CO2_2D";
         w1.domain = WellTargetDomain::Matrix;
-        w1.control_mode = WellControlMode::Rate;
-        w1.target_value = -0.03;   // kg/s, softened startup stiffness for Day6 baseline
-        w1.component_mode = WellComponentMode::Gas;
+        w1.control_mode = WellControlMode::BHP;
+        w1.target_value = 33.0e6;  // 31 MPa = P_init + 1 MPa，限制最大注入压力
+        w1.component_mode = WellComponentMode::Water;
         w1.completion_id = injCell;
-        w1.frac_w = 0.0;
-        w1.frac_g = 1.0;
-        w1.injection_temperature = 320.0;
-        w1.injection_is_co2 = true;
+        w1.frac_w = 1.0;
+        w1.frac_g = 0.0;
+        w1.injection_temperature = 375.0;   // 375 K，比储层低 5K，热前缘平缓
+        w1.injection_is_co2 = false;
+
 
         w2.well_name = "PROD_CO2_2D";
         w2.domain = WellTargetDomain::Matrix;
         w2.control_mode = WellControlMode::BHP;
-        w2.target_value = 24.95e6; // Pa, keep drawdown moderate in closed boundary domain
-        w2.component_mode = WellComponentMode::Gas;
+        w2.target_value = 27.0e6;  // 29 MPa = P_init - 1 MPa，限制最大膨胀幅度
+        w2.component_mode = WellComponentMode::Water;
         w2.completion_id = prodCell;
-        w2.frac_w = 0.0;
-        w2.frac_g = 1.0;
+        w2.frac_w = 1.0;
+        w2.frac_g = 0.0;
 
         // =====================================================================
         // 7. Solver Parameters Setup
@@ -152,7 +153,7 @@ namespace Test_Day6 {
         params.long_profile.rel_update_tol = 1e-3;
         params.long_profile.ptc_lambda_init = 0.5;
         params.long_profile.ptc_lambda_decay = 0.7;
-        params.long_profile.ptc_lambda_min = 5.0e-3; // 加强long stage对角正则化，防止能量方程在高刚性时失稳
+        params.long_profile.ptc_lambda_min = 5.0e-2; // 加强long stage对角正则化，防止能量方程在高刚性时失稳
         params.long_profile.dt_relres_iter_grow_hi = 8;
         params.long_profile.dt_relres_iter_neutral_hi = 14;
         params.long_profile.dt_relres_iter_soft_shrink_hi = 18;
@@ -162,6 +163,9 @@ namespace Test_Day6 {
         params.long_profile.dt_relres_hard_shrink_factor = 0.90;
         params.rollback_shrink_factor = 0.85;
         params.clamp_state_to_eos_bounds = true; // Keep single-phase CO2 state inside EOS table bounds.
+
+        // 降低Newton溫度更新上限：预设2K/iter过大，在偽临界區域（∂h/∂T極大）會過衝
+        params.max_dT = 5;   // 从 0.5 放宽到 5K/iter，远离拟临界不再需要极小步
 
         // Issue#12: 切换至 CPR-AMG 求解器，验证全流程稳定性
         params.lin_solver = FIM_Engine::LinearSolverType::AMGCL_CPR;
