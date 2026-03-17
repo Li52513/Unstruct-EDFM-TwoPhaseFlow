@@ -191,17 +191,25 @@ namespace FIM_Engine {
         double t_floor = 273.15;
         double t_ceil = std::numeric_limits<double>::max();
         if (params.clamp_state_to_eos_bounds) {
-            const auto& wt_table = WaterPropertyTable::instance();
-            p_floor = std::max(p_floor, wt_table.minPressure() + 1.0);
-            p_ceil = std::min(p_ceil, wt_table.maxPressure() - 1.0);
-            t_floor = std::max(t_floor, wt_table.minTemperature() + 1.0e-6);
-            t_ceil = std::min(t_ceil, wt_table.maxTemperature() - 1.0e-6);
+            auto merge_table_bounds = [&](const auto& table) {
+                p_floor = std::max(p_floor, table.minPressure() + 1.0);
+                p_ceil = std::min(p_ceil, table.maxPressure() - 1.0);
+                t_floor = std::max(t_floor, table.minTemperature() + 1.0e-6);
+                t_ceil = std::min(t_ceil, table.maxTemperature() - 1.0e-6);
+                };
+
             if constexpr (N == 3) {
-                const auto& gt_table = CO2PropertyTable::instance();
-                p_floor = std::max(p_floor, gt_table.minPressure() + 1.0);
-                p_ceil = std::min(p_ceil, gt_table.maxPressure() - 1.0);
-                t_floor = std::max(t_floor, gt_table.minTemperature() + 1.0e-6);
-                t_ceil = std::min(t_ceil, gt_table.maxTemperature() - 1.0e-6);
+                // Two-phase: enforce the intersection of water and CO2 EOS domains.
+                merge_table_bounds(WaterPropertyTable::instance());
+                merge_table_bounds(CO2PropertyTable::instance());
+            }
+            else if (sp_use_co2) {
+                // Single-phase CO2 (N=2): clamp to CO2 EOS bounds.
+                merge_table_bounds(CO2PropertyTable::instance());
+            }
+            else {
+                // Single-phase water (N=2): clamp to water EOS bounds.
+                merge_table_bounds(WaterPropertyTable::instance());
             }
             if (!(p_floor < p_ceil)) { p_floor = 1.0e4; p_ceil = std::numeric_limits<double>::max(); }
             if (!(t_floor < t_ceil)) { t_floor = 273.15; t_ceil = std::numeric_limits<double>::max(); }
@@ -1850,8 +1858,32 @@ namespace FIM_Engine {
                     state = old_state;
                     step--;
                     std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
-                    if (dt <= params.dt_min && total_rollbacks > 20) throw std::runtime_error("[FAIL] dt reached lower bound with repeated rollback.");
-                    if (total_rollbacks > 80) throw std::runtime_error("[FAIL] Max rollbacks exceeded.");
+                    auto export_crash_vtk = [&]() {
+                        try {
+                            SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                            const std::string cfname = "Test/Transient/Day6/" + caseName + "/crash.vtk";
+                            if constexpr (std::is_same_v<MeshMgrType, MeshManager>)
+                                PostProcess_2D(mgr, fm).ExportVTK(cfname, t);
+                            else
+                                PostProcess_3D(mgr, fm).ExportVTK(cfname, t);
+                            VerifyVtkExport(cfname, N == 3);
+                            std::cout << "    [VTK Export PASS] " << cfname << " (crash snapshot t=" << std::scientific << t << "s)\n";
+                        }
+                        catch (const std::exception& ex) {
+                            std::cout << "    [VTK Export FAIL] crash snapshot reason=" << ex.what() << "\n";
+                        }
+                        catch (...) {
+                            std::cout << "    [VTK Export FAIL] crash snapshot reason=unknown\n";
+                        }
+                        };
+                    if (dt <= params.dt_min && total_rollbacks > 20) {
+                        export_crash_vtk();
+                        throw std::runtime_error("[FAIL] dt reached lower bound with repeated rollback.");
+                    }
+                    if (total_rollbacks > 80) {
+                        export_crash_vtk();
+                        throw std::runtime_error("[FAIL] Max rollbacks exceeded.");
+                    }
                 }
             }
             else {
@@ -1942,6 +1974,12 @@ namespace FIM_Engine {
                     params.enable_two_stage_profile
                     ? (use_startup_stage ? params.startup_vtk_output_interval_s : params.long_vtk_output_interval_s)
                     : ((params.long_vtk_output_interval_s > 0.0) ? params.long_vtk_output_interval_s : params.startup_vtk_output_interval_s);
+
+                // Ensure at least one recoverable snapshot exists even if the run fails
+                // before the first time-based VTK interval is reached.
+                if (vtk_export_count == 0) {
+                    export_vtk_snapshot("/step_" + std::to_string(step) + ".vtk");
+                }
 
                 if (active_vtk_interval_s > 0.0) {
                     if (!(next_vtk_output_time_s > 0.0)) {

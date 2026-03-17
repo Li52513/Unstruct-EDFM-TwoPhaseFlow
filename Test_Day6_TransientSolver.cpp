@@ -116,10 +116,10 @@ namespace Test_Day6 {
         // 7. Solver Parameters Setup
         // =====================================================================
         const double horizon_years = 1.0;
-        const double startup_seconds = 0.2;
-        const double startup_days = startup_seconds / 86400.0;
-        const double startup_vtk_interval_days = 0.5;
-        const double long_vtk_interval_days = 30.0;
+        // Startup: 30天，让温度斜坡在startup内完整走完，避免切换长阶段时的28.8K硬跳变
+        const double startup_days = 30.0;
+        const double startup_vtk_interval_days = 5.0;   // 30天startup内每5天出一帧
+        const double long_vtk_interval_days = 5.0;
 
         auto params = FIM_CaseKit::BuildLongRunTemplate(
             FIM_CaseKit::LongRunScenario::S2D_SP,
@@ -145,12 +145,14 @@ namespace Test_Day6 {
         params.startup_profile.dt_relres_neutral_factor = 1.02;
         params.startup_profile.dt_relres_soft_shrink_factor = 0.995;
         params.startup_profile.dt_relres_hard_shrink_factor = 0.92;
+        // 100步完成斜坡（~4天 @ dt_max=3600s），远早于30天startup结束，消除切换时硬跳变
+        params.startup_profile.control_ramp_steps = 100;
 
-		params.long_profile.max_newton_iter = 24; // Allow moderate Newton iterations for long-term stability, but keep it in check to prevent excessive runtime in this test scenario.
+        params.long_profile.max_newton_iter = 36; // Allow deeper nonlinear progress in late stiff periods.
         params.long_profile.rel_update_tol = 1e-3;
         params.long_profile.ptc_lambda_init = 0.5;
         params.long_profile.ptc_lambda_decay = 0.7;
-        params.long_profile.ptc_lambda_min = 1.0e-3;
+        params.long_profile.ptc_lambda_min = 5.0e-3; // 加强long stage对角正则化，防止能量方程在高刚性时失稳
         params.long_profile.dt_relres_iter_grow_hi = 8;
         params.long_profile.dt_relres_iter_neutral_hi = 14;
         params.long_profile.dt_relres_iter_soft_shrink_hi = 18;
@@ -158,7 +160,8 @@ namespace Test_Day6 {
         params.long_profile.dt_relres_neutral_factor = 1.02;
         params.long_profile.dt_relres_soft_shrink_factor = 0.90;
         params.long_profile.dt_relres_hard_shrink_factor = 0.90;
-        params.rollback_shrink_factor = 0.7;
+        params.rollback_shrink_factor = 0.85;
+        params.clamp_state_to_eos_bounds = true; // Keep single-phase CO2 state inside EOS table bounds.
 
         // Issue#12: 切换至 CPR-AMG 求解器，验证全流程稳定性
         params.lin_solver = FIM_Engine::LinearSolverType::AMGCL_CPR;

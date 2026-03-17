@@ -134,17 +134,17 @@ Evidence (fill):
 Status: `[ ]`
 
 Implementation checklist:
-- [x] Add runnable Day6 dispatcher entries for full scenario matrix:
+- [ ] Add runnable Day6 dispatcher entries for full scenario matrix:
   - `day6_transient_2d_sp_injprod`
   - `day6_transient_2d_tp_injprod`
   - `day6_transient_2d_tp_multiwell`
   - `day6_transient_3d_sp_injprod`
   - `day6_transient_3d_tp_injprod`
   - `day6_transient_3d_tp_multiwell`
-- [x] Add Newton/FIM or IMPES iteration logs per step: `step, iter, residual, dt, rollback`
-- [x] Add limiter / adaptive-dt / rollback triggers and explicit trigger counters in logs
-- [x] Enforce physical guards (`S in [0,1]`, pressure/temperature lower bounds, no NaN/Inf)
-- [x] Integrate PostProcess VTK export in Day6 transient cases:
+- [ ] Add Newton/FIM or IMPES iteration logs per step: `step, iter, residual, dt, rollback`
+- [ ] Add limiter / adaptive-dt / rollback triggers and explicit trigger counters in logs
+- [ ] Enforce physical guards (`S in [0,1]`, pressure/temperature lower bounds, no NaN/Inf)
+- [ ] Integrate PostProcess VTK export in Day6 transient cases:
   - 2D: use `PostProcess_2D::ExportVTK(...)`
   - 3D: use `PostProcess_3D::ExportVTK(...)`
   - output fields include at least `P`, `T`, (`S_w` for two-phase), optional `DomainID`/well source markers
