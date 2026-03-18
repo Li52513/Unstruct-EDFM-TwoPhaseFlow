@@ -107,7 +107,7 @@ namespace FVM_Ops {
         const ADVarType& mass_flux,
         const ADVarType& upwind_enthalpy)
     {
-        ADVarType q_cond = (Temp_i - Temp_j) * T_heat;
+        ADVarType q_cond = (Temp_j - Temp_i) * T_heat;
         ADVarType q_conv = mass_flux * upwind_enthalpy;
         return q_cond + q_conv;
     }
@@ -124,7 +124,7 @@ namespace FVM_Ops {
         const ADVarType& upwind_enthalpy_w,
         const ADVarType& upwind_enthalpy_co2)
     {
-        ADVarType q_cond = (Temp_i - Temp_j) * T_heat;
+        ADVarType q_cond = (Temp_j - Temp_i) * T_heat;
         ADVarType q_conv = (mass_flux_w * upwind_enthalpy_w) +
             (mass_flux_co2 * upwind_enthalpy_co2);
         return q_cond + q_conv;

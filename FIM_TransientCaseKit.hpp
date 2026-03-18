@@ -229,7 +229,7 @@ inline FIM_Engine::TransientSolverParams BuildLongRunTemplate(
     const double year_s = 365.0 * 86400.0;
     const double target_end_time_s = years * year_s;
 
-    double dt_init = 5.0e-2;
+    double dt_init = 3600;
     if (twoPhase && !is3d) dt_init = 1.0e-2;
     if (!twoPhase && is3d) dt_init = 1.0e-2;
     if (twoPhase && is3d) dt_init = 5.0e-3;

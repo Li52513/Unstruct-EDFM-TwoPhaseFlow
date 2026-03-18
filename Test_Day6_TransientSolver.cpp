@@ -113,8 +113,8 @@ namespace Test_Day6 {
         WellScheduleStep w1, w2;
         w1.well_name = "INJ_CO2_2D";
         w1.domain = WellTargetDomain::Matrix;
-        w1.control_mode = WellControlMode::Rate;
-        w1.target_value = -0.01;  // 31 MPa = P_init + 1 MPa，限制最大注入压力
+        w1.control_mode = WellControlMode::BHP;
+        w1.target_value = 31.0e6;  // 31 MPa
         w1.component_mode = WellComponentMode::Water;
         w1.completion_id = injCell;
         w1.frac_w = 1.0;
@@ -125,12 +125,13 @@ namespace Test_Day6 {
 
         w2.well_name = "PROD_CO2_2D";
         w2.domain = WellTargetDomain::Matrix;
-        w2.control_mode = WellControlMode::Rate;
-        w2.target_value = 0.01;  // 29 MPa = P_init - 1 MPa，限制最大膨胀幅度
+        w2.control_mode = WellControlMode::BHP;
+        w2.target_value = 29.0e6;  // 29 MPa
         w2.component_mode = WellComponentMode::Water;
         w2.completion_id = prodCell;
         w2.frac_w = 1.0;
         w2.frac_g = 0.0;
+        
 
         // =====================================================================
         // 7. Solver Parameters Setup
@@ -154,8 +155,8 @@ namespace Test_Day6 {
         params.gravity_vector = Vector(0.0, 0.0, 0.0);
 
         // Keep startup short and allow dt growth when iter~14.
-        params.startup_profile.max_newton_iter = 18;
-        params.startup_profile.ptc_lambda_init = 1.0;
+		params.startup_profile.max_newton_iter = 18; // Startup阶段允许更深入的非线性迭代，以更快地适应初始条件和边界条件，促进时间步长增长
+		params.startup_profile.ptc_lambda_init = 1.0; // 初始PTC lambda较大，提供更强的正则化以稳定初始迭代，促进时间步长增长
         params.startup_profile.ptc_lambda_decay = 0.70;
         params.startup_profile.ptc_lambda_min = 0.02;
         params.startup_profile.dt_relres_iter_grow_hi = 12;
@@ -166,8 +167,8 @@ namespace Test_Day6 {
         params.startup_profile.dt_relres_soft_shrink_factor = 0.995;
         params.startup_profile.dt_relres_hard_shrink_factor = 0.92;
         // 100步完成斜坡（~4天 @ dt_max=3600s），远早于30天startup结束，消除切换时硬跳变
-        params.startup_profile.control_ramp_steps = 100;
-        params.startup_profile.rel_res_tol = 1e-3;
+        params.startup_profile.control_ramp_steps = 10;
+		params.startup_profile.rel_res_tol = 1e-3; // Startup阶段使用较严格的相对残差容忍度，以确保初始非线性收敛质量，促进时间步长增长
 
 
         params.long_profile.max_newton_iter = 36; // Allow deeper nonlinear progress in late stiff periods.

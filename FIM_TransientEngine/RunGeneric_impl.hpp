@@ -472,8 +472,8 @@ namespace FIM_Engine {
                     if constexpr (N == 2) {
                         ADVar<N> m_w = pW.rho * phi, m_w_old = pW_old.rho * phi_old;
                         acc_eqs[0] = (m_w - m_w_old) * (vols[bi] / dt);
-                        ADVar<N> e_w = m_w * (pW.h - P / pW.rho) + ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
-                        ADVar<N> e_w_old = m_w_old * (pW_old.h - P_old / pW_old.rho) + ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
+                        ADVar<N> e_w = m_w * (pW.h - P / pW.rho) + ADVar<N>((1.0 - phi_ref) * rho_r * c_pr) * T;
+                        ADVar<N> e_w_old = m_w_old * (pW_old.h - P_old / pW_old.rho) + ADVar<N>((1.0 - phi_ref) * rho_r * c_pr) * T_old;
                         acc_eqs[1] = (e_w - e_w_old) * (vols[bi] / dt);
                     }
                     else {
@@ -494,8 +494,8 @@ namespace FIM_Engine {
                         acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi_old * Sg_old) * (vols[bi] / dt);
                         ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - Pg / pG.rho);
                         ADVar<N> e_fluid_old = pW_old.rho * Sw_old * (pW_old.h - P_old / pW_old.rho) + pG_old.rho * Sg_old * (pG_old.h - Pg_old / pG_old.rho);
-                        ADVar<N> e_rock = ADVar<N>((1.0 - phi) * rho_r * c_pr) * T;
-                        ADVar<N> e_rock_old = ADVar<N>((1.0 - phi_old) * rho_r * c_pr) * T_old;
+                        ADVar<N> e_rock = ADVar<N>((1.0 - phi_ref) * rho_r * c_pr) * T;
+                        ADVar<N> e_rock_old = ADVar<N>((1.0 - phi_ref) * rho_r * c_pr) * T_old;
                         acc_eqs[2] = ((e_fluid * phi + e_rock) - (e_fluid_old * phi_old + e_rock_old)) * (vols[bi] / dt);
                     }
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleAccumulation(bi, acc_eqs, probe_mat);
