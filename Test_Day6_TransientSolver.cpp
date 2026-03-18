@@ -94,8 +94,8 @@ namespace Test_Day6 {
         WellScheduleStep w1, w2;
         w1.well_name = "INJ_CO2_2D";
         w1.domain = WellTargetDomain::Matrix;
-        w1.control_mode = WellControlMode::BHP;
-        w1.target_value = 33.0e6;  // 31 MPa = P_init + 1 MPa，限制最大注入压力
+        w1.control_mode = WellControlMode::Rate;
+        w1.target_value = -0.01;  // 31 MPa = P_init + 1 MPa，限制最大注入压力
         w1.component_mode = WellComponentMode::Water;
         w1.completion_id = injCell;
         w1.frac_w = 1.0;
@@ -107,7 +107,7 @@ namespace Test_Day6 {
         w2.well_name = "PROD_CO2_2D";
         w2.domain = WellTargetDomain::Matrix;
         w2.control_mode = WellControlMode::BHP;
-        w2.target_value = 27.0e6;  // 29 MPa = P_init - 1 MPa，限制最大膨胀幅度
+        w2.target_value = 29.0e6;  // 29 MPa = P_init - 1 MPa，限制最大膨胀幅度
         w2.component_mode = WellComponentMode::Water;
         w2.completion_id = prodCell;
         w2.frac_w = 1.0;
@@ -119,7 +119,7 @@ namespace Test_Day6 {
         const double horizon_years = 1.0;
         // Startup: 30天，让温度斜坡在startup内完整走完，避免切换长阶段时的28.8K硬跳变
         const double startup_days = 30.0;
-        const double startup_vtk_interval_days = 5.0;   // 30天startup内每5天出一帧
+        const double startup_vtk_interval_days = 0.5;   // 30天startup内每5天出一帧
         const double long_vtk_interval_days = 5.0;
 
         auto params = FIM_CaseKit::BuildLongRunTemplate(
@@ -148,6 +148,8 @@ namespace Test_Day6 {
         params.startup_profile.dt_relres_hard_shrink_factor = 0.92;
         // 100步完成斜坡（~4天 @ dt_max=3600s），远早于30天startup结束，消除切换时硬跳变
         params.startup_profile.control_ramp_steps = 100;
+        params.startup_profile.rel_res_tol = 1e-3;
+
 
         params.long_profile.max_newton_iter = 36; // Allow deeper nonlinear progress in late stiff periods.
         params.long_profile.rel_update_tol = 1e-3;
@@ -163,7 +165,8 @@ namespace Test_Day6 {
         params.long_profile.dt_relres_hard_shrink_factor = 0.90;
         params.rollback_shrink_factor = 0.85;
         params.clamp_state_to_eos_bounds = true; // Keep single-phase CO2 state inside EOS table bounds.
-
+        params.long_profile.rel_res_tol = 1e-2;
+        
         // 降低Newton溫度更新上限：预设2K/iter过大，在偽临界區域（∂h/∂T極大）會過衝
         params.max_dT = 5;   // 从 0.5 放宽到 5K/iter，远离拟临界不再需要极小步
 

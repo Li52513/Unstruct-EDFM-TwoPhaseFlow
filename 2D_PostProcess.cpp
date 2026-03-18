@@ -317,7 +317,7 @@ void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
         out << "3\n";                  // VTK_LINE
     }
 
-    // 5. CELL_DATA (物理场)
+    // 5. CELL_DATA (离散标记场)
     out << "CELL_DATA " << totalCells << "\n";
 
     // 隐式域标记 (0: 基岩, 1: 裂缝)
@@ -325,36 +325,61 @@ void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
     for (size_t i = 0; i < numMatrixCells; ++i) out << "0\n";
     for (size_t i = 0; i < totalFracCells; ++i) out << "1\n";
 
+    // 6. POINT_DATA (物理场平滑过渡)
+    out << "POINT_DATA " << totalNodes << "\n";
+
     for (const auto& name : varNames) {
         out << "SCALARS " << name << " double 1\nLOOKUP_TABLE default\n";
 
-        // [高危修复1] 严格限定写出次数等于 totalCells 的拆分，防溢出和断档
+        // --- 1. 基岩节点场 (Cell-to-Node 平均) ---
+        std::vector<double> matVals(numMatrixNodes, 0.0);
+        std::vector<int> matCounts(numMatrixNodes, 0);
         auto matField = fieldMgr_.getMatrixScalar(name);
+
         if (matField) {
-            for (size_t i = 0; i < numMatrixCells; ++i) {
-                double val = (i < matField->data.size()) ? matField->data[i] : 0.0;
-                out << (std::isfinite(val) ? val : 0.0) << "\n";
+            for (size_t c = 0; c < numMatrixCells; ++c) {
+                double val = (c < matField->data.size()) ? matField->data[c] : 0.0;
+                if (!std::isfinite(val)) val = 0.0;
+                // 将单元中心的值累加到其包含的所有节点上
+                for (int id : matrixCells[c].CellNodeIDs) {
+                    auto it = nodeID2Index.find(id);
+                    if (it != nodeID2Index.end()) {
+                        int pIdx = it->second;
+                        matVals[pIdx] += val;
+                        matCounts[pIdx]++;
+                    }
+                }
+            }
+            // 对每个节点的值取平均
+            for (size_t p = 0; p < numMatrixNodes; ++p) {
+                if (matCounts[p] > 0) matVals[p] /= matCounts[p];
             }
         }
-        else {
-            for (size_t i = 0; i < numMatrixCells; ++i) out << "0.0\n";
+        for (size_t p = 0; p < numMatrixNodes; ++p) {
+            out << matVals[p] << "\n";
         }
 
+        // --- 2. 裂缝节点场 ---
+        // 2D代码中裂缝微元有完全独立的端点(totalFracNodes = totalFracCells * 2)
+        // 每个微元的两端点直接继承该微元的值即可
         auto fracField = fieldMgr_.getFractureScalar(name);
         if (fracField) {
-            for (size_t i = 0; i < totalFracCells; ++i) {
-                double val = (i < fracField->data.size()) ? fracField->data[i] : 0.0;
-                out << (std::isfinite(val) ? val : 0.0) << "\n";
+            for (size_t c = 0; c < totalFracCells; ++c) {
+                double val = (c < fracField->data.size()) ? fracField->data[c] : 0.0;
+                if (!std::isfinite(val)) val = 0.0;
+                // 每个裂缝微元对应输出 2 个节点数据
+                out << val << "\n" << val << "\n";
             }
         }
         else {
-            for (size_t i = 0; i < totalFracCells; ++i) out << "0.0\n";
+            for (size_t c = 0; c < totalFracCells; ++c) {
+                out << "0.0\n0.0\n";
+            }
         }
     }
 
     out.close();
-    std::cout << "[PostProcess_2D] VTK Export completed successfully.\n";
-}
+    std::cout << "[PostProcess_2D] VTK Export completed successfully with Point Interpolation.\n"; }
 
 // ==============================================================================
 // 内部辅助函数
