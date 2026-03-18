@@ -61,7 +61,8 @@ private:
                 nI, nJ,
                 pFlow->data[i], pHeat->data[i],
                 faces[i].vectorE.Mag(), std::max(dist, 1e-12),
-                ConnectionType::Matrix_Matrix
+                ConnectionType::Matrix_Matrix,
+                faces[i].vectorT  // non-orthogonal correction vector (Step 2)
             );
         }
     }

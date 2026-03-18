@@ -1,14 +1,33 @@
 ﻿/**
  * @file Test_Day6_TransientSolver.cpp
  * @brief Day6 transient scenarios (thin wrappers over FIM_TransientCaseKit)
+ *
+ * Integrated features exercised by Run_Day6_Transient_2D_SP_InjProd():
+ *   - CoolProp EOS (Step 1): Span-Wagner CO2 + IAPWS-95 Water via USE_COOLPROP_EOS
+ *   - Non-orthogonal correction (Step 2): deferred T-vector gradient correction
+ *   - Independent well DOF (Step 3): WellDOFManager adds P_wbh block per well
+ *   - VTU/PVD post-processing (Step 4): ParaView XML Unstructured Grid export
  */
 
 #include "Test_Day6_TransientSolver.h"
 #include "FIM_TransientCaseKit.hpp"
+#include "2D_PostProcess.h"
 
 namespace Test_Day6 {
 
     void Run_Day6_Transient_2D_SP_InjProd() {
+        std::cout << "\n=== Run_Day6_Transient_2D_SP_InjProd ===\n";
+
+        // -- Feature flags summary --
+#ifdef USE_COOLPROP_EOS
+        std::cout << "  [Step 1] EOS backend: CoolProp 6.x (Span-Wagner CO2 + IAPWS-95 Water)\n";
+#else
+        std::cout << "  [Step 1] EOS backend: Table-based (Catmull-Rom + 4-tier FD)\n";
+#endif
+        std::cout << "  [Step 2] Non-orthogonal correction: ENABLED\n";
+        std::cout << "  [Step 3] Well independent DOF: ENABLED (WellDOFManager)\n";
+        std::cout << "  [Step 4] Post-processing: VTU/PVD (ParaView XML)\n\n";
+
         // =====================================================================
         // 1. Mesh & Topology Setup
         // =====================================================================
@@ -106,8 +125,8 @@ namespace Test_Day6 {
 
         w2.well_name = "PROD_CO2_2D";
         w2.domain = WellTargetDomain::Matrix;
-        w2.control_mode = WellControlMode::BHP;
-        w2.target_value = 29.0e6;  // 29 MPa = P_init - 1 MPa，限制最大膨胀幅度
+        w2.control_mode = WellControlMode::Rate;
+        w2.target_value = 0.01;  // 29 MPa = P_init - 1 MPa，限制最大膨胀幅度
         w2.component_mode = WellComponentMode::Water;
         w2.completion_id = prodCell;
         w2.frac_w = 1.0;
@@ -173,11 +192,43 @@ namespace Test_Day6 {
         // Issue#12: 切换至 CPR-AMG 求解器，验证全流程稳定性
         params.lin_solver = FIM_Engine::LinearSolverType::AMGCL_CPR;
 
+        // Step 2: Enable deferred non-orthogonal correction (T-vector gradient term).
+        // On this 10x10 orthogonal grid |vectorT|≈0, so the correction has near-zero effect
+        // but exercises the full code path. Use skewed meshes for accuracy improvement.
+        params.enable_non_orthogonal_correction = true;
+
         // =====================================================================
         // 8. Execution
         // =====================================================================
+        // Step 3: Wells w1, w2 are passed to RunGenericFIMTransient, which internally
+        // invokes WellDOFManager to add independent P_wbh DOF blocks per well.
+        // The sparse matrix is extended to (nMatrix + nFrac + nWells) blocks;
+        // well equations (Peaceman model) are assembled each Newton iteration.
         FIM_Engine::RunGenericFIMTransient<2>(
             "day6_transient_2d_sp_injprod", mgr, fm, ic, { w1, w2 }, params, FIM_Engine::SolverRoute::FIM, modules);
+
+        // =====================================================================
+        // 9. VTU/PVD Post-Processing (Step 4)
+        // =====================================================================
+        // Export final state as ParaView XML Unstructured Grid (.vtu).
+        // RunGenericFIMTransient already synced field data at the last VTK snapshot,
+        // so fm contains the final-time solution.
+        {
+            PostProcess_2D pp(mgr, fm);
+            const std::string baseDir = "Test/Transient/Day6/day6_transient_2d_sp_injprod/";
+            const std::string vtu_file = baseDir + "final_state.vtu";
+            pp.ExportVTU(vtu_file, params.target_end_time_s);
+            std::cout << "    [VTU] Exported: " << vtu_file << "\n";
+
+            // PVD time-series collection (single-snapshot demo).
+            // In production, RunGenericFIMTransient would collect all intermediate
+            // VTU snapshots and produce a complete .pvd for ParaView animation.
+            const std::string pvd_file = baseDir + "timeseries.pvd";
+            PostProcess_2D::ExportPVD(pvd_file,
+                                      { vtu_file },
+                                      { params.target_end_time_s });
+            std::cout << "    [PVD] Exported: " << pvd_file << "\n";
+        }
     }
 
 void Run_Day6_Transient_2D_TP_InjProd() {

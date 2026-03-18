@@ -11,6 +11,7 @@
 #include "../TransmissibilitySolver_3D.h"
 #include "../2D_PostProcess.h"
 #include "../3D_PostProcess.h"
+#include "../WellDOFManager.h"
 
 #include <algorithm>
 
@@ -73,8 +74,16 @@ namespace FIM_Engine {
 
         const int totalBlocks = mgr.getTotalDOFCount();
         const int totalEq = mgr.getTotalEquationDOFs();
+
+        // ── Step 3: Well independent DOF setup ──────────────────────────────────
+        WellDOFManager<N> well_mgr;
+        well_mgr.Setup(wells, totalBlocks);
+        const int totalBlocksWithWells = well_mgr.TotalBlocksWithWells();
+        const int totalEqWithWells     = totalBlocksWithWells * N;
+        // ───────────────────────────────────────────────────────────────────────
+
         FIM_StateMap<N> state;
-        state.InitSizes(totalBlocks);
+        state.InitSizes(totalBlocksWithWells);
 
         const auto pEqCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
         const auto tEqCfg = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
@@ -83,13 +92,13 @@ namespace FIM_Engine {
         const int saturationDof = (N == 3) ? 1 : -1;
         const int temperatureDof = (N == 3) ? 2 : 1;
 
-        for (int i = 0; i < totalBlocks; ++i) {
+        for (int i = 0; i < totalBlocksWithWells; ++i) {
             state.P[i] = ic.P_init;
             state.T[i] = ic.T_init;
             if constexpr (N == 3) state.Sw[i] = ic.Sw_init;
         }
 
-        std::vector<double> vols(totalBlocks, 1.0);
+        std::vector<double> vols(totalBlocksWithWells, 1.0);
         const int nMat = MatrixBlockCount(mgr);
         for (size_t i = 0; i < mgr.mesh().getCells().size(); ++i) vols[i] = mgr.mesh().getCells()[i].volume;
         for (size_t i = 0; i < mgr.fracture_network().getOrderedFractureElements().size(); ++i) {
@@ -104,7 +113,7 @@ namespace FIM_Engine {
             }
         }
 
-        std::vector<Vector> blockCenters(totalBlocks, Vector(0.0, 0.0, 0.0));
+        std::vector<Vector> blockCenters(totalBlocksWithWells, Vector(0.0, 0.0, 0.0));
         for (size_t i = 0; i < mgr.mesh().getCells().size(); ++i) blockCenters[i] = mgr.mesh().getCells()[i].center;
         if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
             const auto& orderedFrac = mgr.fracture_network().getOrderedFractureElements();
@@ -131,6 +140,17 @@ namespace FIM_Engine {
             std::cout << "[Init] External state initializer injected.\n";
         }
 
+        // ── Step 3: init well BHP state; set well block centers to comp_cell center ──
+        well_mgr.InitWellState(state, ic.P_init, ic.T_init, ic.Sw_init, wells);
+        for (int w = 0; w < well_mgr.NumWells(); ++w) {
+            const auto& e = well_mgr.GetEntry(w);
+            if (e.comp_cell >= 0 && e.comp_cell < static_cast<int>(blockCenters.size())) {
+                blockCenters[e.block_idx] = blockCenters[e.comp_cell];
+            }
+        }
+        well_mgr.PrintSummary();
+        // ──────────────────────────────────────────────────────────────────────────
+
         const Vector gravityVec = params.gravity_vector;
 
         FIM_ConnectionManager connMgr;
@@ -150,11 +170,14 @@ namespace FIM_Engine {
         }
         connMgr.FinalizeAndAggregate();
 
-        FIM_BlockSparseMatrix<N> global_mat(totalBlocks);
+        FIM_BlockSparseMatrix<N> global_mat(totalBlocksWithWells);
         for (const auto& conn : connMgr.GetConnections()) {
             global_mat.AddOffDiagBlock(conn.nodeI, conn.nodeJ, Eigen::Matrix<double, N, N>::Zero());
             global_mat.AddOffDiagBlock(conn.nodeJ, conn.nodeI, Eigen::Matrix<double, N, N>::Zero());
         }
+        // ── Step 3: register well ↔ reservoir off-diagonal blocks in pattern ──
+        well_mgr.RegisterPatternConnections(global_mat);
+        // ────────────────────────────────────────────────────────────────────────
         global_mat.FreezePattern();
 
         const auto str_rock = PhysicalProperties_string_op::Rock();
@@ -172,8 +195,8 @@ namespace FIM_Engine {
         auto cr_frac = fm.getFractureScalar(str_frac.c_r_tag);
         if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
 
-        std::vector<double> P_ref(totalBlocks, ic.P_init);
-        for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i]; 
+        std::vector<double> P_ref(totalBlocksWithWells, ic.P_init);
+        for (int i = 0; i < totalBlocksWithWells; ++i) P_ref[i] = state.P[i];
 
         double t = 0.0;
         double dt = params.dt_init;
@@ -417,7 +440,7 @@ namespace FIM_Engine {
 
             // Residual probe used by Armijo line search.
             auto compute_residual_inf_for_state = [&](const FIM_StateMap<N>& eval_state) -> double {
-                FIM_BlockSparseMatrix<N> probe_mat(totalBlocks);
+                FIM_BlockSparseMatrix<N> probe_mat(totalBlocksWithWells);
                 probe_mat.SetZero();
 
                 // 1) accumulation
@@ -613,7 +636,7 @@ namespace FIM_Engine {
                 iter_used++;
                 global_mat.SetZero();
 
-                std::vector<EqContrib> eq_contribs(totalEq);
+                std::vector<EqContrib> eq_contribs(totalEqWithWells);
 
                 // [V3] Diagnostics counters for summary and incident triggers
                 const bool track_eos_domain = params.enforce_eos_domain || (params.diag_level != DiagLevel::Off);
@@ -761,6 +784,51 @@ namespace FIM_Engine {
                     }
                 }
 
+                // ── Step 2: Non-orthogonal deferred correction ─────────────────────────
+                // Pre-compute cell-centre gradients for P (and T, Sw) using Green-Gauss
+                // integration.  These are used EXPLICITLY after AssembleFlux for each
+                // Matrix-Matrix connection that has a non-zero vectorT.
+                // For orthogonal grids |vectorT|=0 everywhere → zero overhead / effect.
+                std::vector<Vector> nonorth_grad_P(nMat, Vector(0.0, 0.0, 0.0));
+                std::vector<Vector> nonorth_grad_T_cell(nMat, Vector(0.0, 0.0, 0.0));
+                std::vector<Vector> nonorth_grad_Sw(nMat, Vector(0.0, 0.0, 0.0));
+                if (params.enable_non_orthogonal_correction &&
+                    std::is_same_v<MeshMgrType, MeshManager>)
+                {
+                    const auto& mesh_faces = mgr.mesh().getFaces();
+                    for (size_t fi = 0; fi < mesh_faces.size(); ++fi) {
+                        const Face& mf = mesh_faces[fi];
+                        if (mf.isBoundary()) continue;
+                        const int nI = mf.ownerCell_index;
+                        const int nJ = mf.neighborCell_index;
+                        if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+                        // Face-arithmetic-mean values
+                        const double Pf  = 0.5 * (state.P[nI] + state.P[nJ]);
+                        const double Tf  = 0.5 * (state.T[nI] + state.T[nJ]);
+                        // Area vector Aj = normal * length (owner→neighbor direction)
+                        const double Ax = mf.normal.m_x * mf.length;
+                        const double Ay = mf.normal.m_y * mf.length;
+                        const double vol_I = vols[nI], vol_J = vols[nJ];
+                        // Green-Gauss: grad_phi = (1/V) * sum_f(phi_f * Aj)
+                        nonorth_grad_P[nI].m_x += Pf * Ax / vol_I;
+                        nonorth_grad_P[nI].m_y += Pf * Ay / vol_I;
+                        nonorth_grad_P[nJ].m_x -= Pf * Ax / vol_J;
+                        nonorth_grad_P[nJ].m_y -= Pf * Ay / vol_J;
+                        nonorth_grad_T_cell[nI].m_x += Tf * Ax / vol_I;
+                        nonorth_grad_T_cell[nI].m_y += Tf * Ay / vol_I;
+                        nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
+                        nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
+                        if constexpr (N == 3) {
+                            const double Swf = 0.5 * (state.Sw[nI] + state.Sw[nJ]);
+                            nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
+                            nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
+                            nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
+                            nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
+                        }
+                    }
+                }
+                // ───────────────────────────────────────────────────────────────────────
+
                 for (const auto& conn : connMgr.GetConnections()) {
                     audit_stats[conn.type].conn_count++;
                     audit_stats[conn.type].sum_abs_tflow += std::abs(conn.T_Flow);
@@ -866,6 +934,55 @@ namespace FIM_Engine {
                     auto f_wrt_i = evalFlux(true);
                     auto f_wrt_j = evalFlux(false);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, global_mat);
+
+                    // ── Step 2: non-orthogonal deferred correction ────────────────────
+                    if (params.enable_non_orthogonal_correction &&
+                        conn.type == ConnectionType::Matrix_Matrix &&
+                        i < nMat && j < nMat)
+                    {
+                        const double vT_mag = conn.vectorT.Mag();
+                        if (vT_mag > 1e-15) {
+                            // Face-interpolated cell-centre gradients (arithmetic mean)
+                            const double gP_x = 0.5*(nonorth_grad_P[i].m_x + nonorth_grad_P[j].m_x);
+                            const double gP_y = 0.5*(nonorth_grad_P[i].m_y + nonorth_grad_P[j].m_y);
+                            const double gT_x = 0.5*(nonorth_grad_T_cell[i].m_x + nonorth_grad_T_cell[j].m_x);
+                            const double gT_y = 0.5*(nonorth_grad_T_cell[i].m_y + nonorth_grad_T_cell[j].m_y);
+                            // Tangential correction scalars: grad · vectorT  [Pa], [K]
+                            const double corr_P = gP_x * conn.vectorT.m_x + gP_y * conn.vectorT.m_y;
+                            const double corr_T = gT_x * conn.vectorT.m_x + gT_y * conn.vectorT.m_y;
+                            // Effective permeability: K_eff = T_Flow * dist / |vectorE|
+                            const double K_eff = (conn.aux_area > 1e-12)
+                                ? conn.T_Flow * conn.aux_dist / conn.aux_area : 0.0;
+                            // Upwind water mobility (from per-cell cache; potential-based)
+                            const double g_dx_w =
+                                gravityVec * (blockCenters[j] - blockCenters[i]);
+                            const double dPhi_w_sign = (state.P[j] - state.P[i])
+                                - 0.5*(cprop[i].rho_w + cprop[j].rho_w) * g_dx_w;
+                            const double mob_w = (dPhi_w_sign < 0.0)
+                                ? cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
+                                : cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
+                            // Correction contributions (explicit → residual only, no Jacobian)
+                            const double mass_w_corr = K_eff * mob_w * corr_P;
+                            const double heat_corr   = conn.T_Heat * corr_T;
+                            global_mat.AddResidual(i, 0,   mass_w_corr);
+                            global_mat.AddResidual(j, 0,  -mass_w_corr);
+                            global_mat.AddResidual(i, N-1, heat_corr);
+                            global_mat.AddResidual(j, N-1,-heat_corr);
+                            if constexpr (N == 3) {
+                                // CO2 mass correction
+                                const double dPhi_g_sign = (state.P[j] - state.P[i])
+                                    + (cprop[j].Pc - cprop[i].Pc)
+                                    - 0.5*(cprop[i].rho_g + cprop[j].rho_g) * g_dx_w;
+                                const double mob_g = (dPhi_g_sign < 0.0)
+                                    ? cprop[i].rho_g / std::max(cprop[i].mu_g, 1e-20)
+                                    : cprop[j].rho_g / std::max(cprop[j].mu_g, 1e-20);
+                                const double mass_g_corr = K_eff * mob_g * corr_P;
+                                global_mat.AddResidual(i, 1,  mass_g_corr);
+                                global_mat.AddResidual(j, 1, -mass_g_corr);
+                            }
+                        }
+                    }
+                    // ─────────────────────────────────────────────────────────────────
 
                     const double abs_mass_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[0].val);
@@ -979,6 +1096,16 @@ namespace FIM_Engine {
                 else {
                     std::cout << "    [WellJac] max|dR/dT|=" << std::scientific << max_abs_well_dt << "\n";
                 }
+
+                // ── Step 3: assemble independent well DOF equations ────────────────
+                if (!well_mgr.Empty()) {
+                    well_mgr.AssembleWellEquations(
+                        global_mat, state, active_wells,
+                        w_res, w_jac3, mgr,
+                        kWellSourceSign);
+                }
+                // ────────────────────────────────────────────────────────────────────
+
                 auto assembleBoundaryField = [&](const BoundarySetting::BoundaryConditionManager* bcMgr,
                     int dofOffset,
                     const std::string& fieldName,
@@ -1323,7 +1450,7 @@ namespace FIM_Engine {
 
                 const auto linear_t0 = std::chrono::steady_clock::now();
                 const auto linear_result = detail::SolveLinearSystem<N>(
-                    A, b, eq_contribs, totalEq, params, linear_solver_cache);
+                    A, b, eq_contribs, totalEqWithWells, params, linear_solver_cache);
                 const auto linear_t1 = std::chrono::steady_clock::now();
 
                 Eigen::VectorXd dx = linear_result.dx;
@@ -1558,7 +1685,8 @@ namespace FIM_Engine {
                             t_ceil,
                             out_state,
                             limiter_added_local,
-                            rel_update_inf);
+                            rel_update_inf,
+                            well_mgr.NumWells()); // Step 3: update well BHP DOFs
                     };
                 const FIM_StateMap<N> state_before_update = state;
                 double accepted_alpha = alpha;

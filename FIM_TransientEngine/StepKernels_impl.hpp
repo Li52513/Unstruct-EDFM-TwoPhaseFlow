@@ -240,7 +240,8 @@ namespace FIM_Engine {
             double t_ceil,
             FIM_StateMap<N>& out_state,
             int& limiter_added_local,
-            double& rel_update_inf) {
+            double& rel_update_inf,
+            int num_well_blocks = 0) {
 
             out_state = base_state;
             limiter_added_local = 0;
@@ -282,6 +283,19 @@ namespace FIM_Engine {
                     if (out_state.T[bi] < t_floor) { out_state.T[bi] = t_floor; limiter_added_local++; }
                     if (out_state.T[bi] > t_ceil) { out_state.T[bi] = t_ceil; limiter_added_local++; }
                 }
+            }
+
+            // ── Well block pressure update (bypasses mgr.getEquationIndex) ────
+            // Well blocks occupy indices [totalBlocks, totalBlocks + num_well_blocks).
+            // Interleaved storage: DOF 0 of block wb is at position wb * N + 0.
+            for (int w = 0; w < num_well_blocks; ++w) {
+                const int wb    = totalBlocks + w;
+                const int eq_p  = wb * N;  // DOF 0 (pressure) of well block
+                if (eq_p >= static_cast<int>(dx.size())) continue;
+                out_state.P[wb] += alpha_try * dx[eq_p];
+                if (!std::isfinite(out_state.P[wb])) return false;
+                // Clamp well BHP to physical range for stability.
+                out_state.P[wb] = std::max(1.0e2, std::min(2.0e8, out_state.P[wb]));
             }
 
             return true;

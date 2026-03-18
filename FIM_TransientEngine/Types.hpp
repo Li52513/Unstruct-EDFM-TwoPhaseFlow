@@ -161,6 +161,11 @@ namespace FIM_Engine {
         int    amgcl_cpr_maxiter = 300;
         bool   amgcl_cpr_use_fallback_sparselu = true;
 
+        /// Deferred non-orthogonal correction (Step 2).
+        /// Uses Green-Gauss gradient pre-computation before each Newton flux loop.
+        /// For purely orthogonal grids |vectorT|=0 so this has zero cost/effect.
+        bool enable_non_orthogonal_correction = false;
+
         DiagLevel diag_level = DiagLevel::Summary;
         int diag_print_every_iter = 1;
         double diag_blowup_factor = 5.0;

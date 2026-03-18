@@ -209,6 +209,31 @@ template <int N, typename ADVarType>
         return (q_mass_w * h_w) + (q_mass_g * h_g);
     }
 
+    /**
+     * @brief Non-orthogonal correction operator (deferred correction, scalar helper)
+     * @details
+     * Computes the tangential pressure correction:
+     *   corr = grad_phi_f · vectorT
+     * where grad_phi_f is the face-interpolated gradient and vectorT is the
+     * non-orthogonal tangential vector (from Face::computeFaceVectors).
+     *
+     * This is an EXPLICIT scalar correction (constant wrt AD variables) — it
+     * only contributes to the residual, not to the Jacobian.  The full flux
+     * correction for the mass equation is:
+     *   q_corr = K_eff_corr * mob_upwind * Op_NonOrthogonal_PressureCorr(...)
+     * where K_eff_corr = T_Flow * aux_dist / aux_area.
+     *
+     * @param grad_phi_f  Face-interpolated cell-centre gradient [quantity/m]
+     * @param vectorT     Non-orthogonal correction vector [m] (from Connection)
+     * @return double     Dot product [quantity] (same units as pressure difference ΔP)
+     */
+    inline double Op_NonOrthogonal_PressureCorr(const Vector& grad_phi_f, const Vector& vectorT)
+    {
+        return grad_phi_f.m_x * vectorT.m_x
+             + grad_phi_f.m_y * vectorT.m_y
+             + grad_phi_f.m_z * vectorT.m_z;
+    }
+
 } // namespace FVM_Ops
 
 #endif // FVM_OPS_AD_H
