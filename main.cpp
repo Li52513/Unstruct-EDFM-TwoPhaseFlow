@@ -27,6 +27,7 @@
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
 #include "ADVar.hpp"
+#include "test_MartixAssemble.h"
 
 #include <exception>
 #include <functional>
@@ -215,3 +216,9 @@ int main (int argc, char** argv) {
     PrintCases(cases);
     return 2;
 }
+
+//int main()
+//{
+//    MatrixAssemblerTest::Test_BlockSparseMatrix();
+//    return 0;
+//}

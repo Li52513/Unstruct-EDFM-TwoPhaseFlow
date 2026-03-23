@@ -1335,9 +1335,8 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
                 const double p_eval = (step.control_mode == WellControlMode::BHP) ? step.target_value : pField_P->data[localIdx];
                 if (q_mass_w.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
-                    hw = (step.injection_is_co2
-                        ? AD_Fluid::Evaluator::evaluateCO2<1>(P_inj, T_inj)
-                        : AD_Fluid::Evaluator::evaluateWater<1>(P_inj, T_inj)).h.val;
+                    // injection_is_co2 governs gas phase only; water slot always uses water EOS
+                    hw = AD_Fluid::Evaluator::evaluateWater<1>(P_inj, T_inj).h.val;
                 }
                 if (q_mass_g.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
@@ -1583,9 +1582,8 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
                 const double p_eval = (step.control_mode == WellControlMode::BHP) ? step.target_value : pField_P->data[localIdx];
                 if (q_mass_w.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
-                    hw = (step.injection_is_co2
-                        ? AD_Fluid::Evaluator::evaluateCO2<1>(P_inj, T_inj)
-                        : AD_Fluid::Evaluator::evaluateWater<1>(P_inj, T_inj)).h.val;
+                    // injection_is_co2 governs gas phase only; water slot always uses water EOS
+                    hw = AD_Fluid::Evaluator::evaluateWater<1>(P_inj, T_inj).h.val;
                 }
                 if (q_mass_g.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
@@ -1806,9 +1804,11 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
             const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
             ADVar<3> P_inj_const = MakeConstAD3(p_inj);
-            const bool inj_w_co2 = step.injection_is_co2 || (!has_sw && single_phase_use_co2);
+            // injection_is_co2 governs gas phase only; water slot EOS is determined solely by
+            // whether the w-slot is physically CO2 (single-phase CO2 mode with no Sw equation).
+            const bool water_slot_is_co2 = (!has_sw && single_phase_use_co2);
             if (q_mass_w.val < 0.0) {
-                h_w_well = (inj_w_co2
+                h_w_well = (water_slot_is_co2
                     ? AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj)
                     : AD_Fluid::Evaluator::evaluateWater<3>(P_inj_const, T_inj)).h;
             }
@@ -2035,9 +2035,11 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
             const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
             ADVar<3> P_inj_const = MakeConstAD3(p_inj);
-            const bool inj_w_co2 = step.injection_is_co2 || (!has_sw && single_phase_use_co2);
+            // injection_is_co2 governs gas phase only; water slot EOS is determined solely by
+            // whether the w-slot is physically CO2 (single-phase CO2 mode with no Sw equation).
+            const bool water_slot_is_co2 = (!has_sw && single_phase_use_co2);
             if (q_mass_w.val < 0.0) {
-                h_w_well = (inj_w_co2
+                h_w_well = (water_slot_is_co2
                     ? AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj)
                     : AD_Fluid::Evaluator::evaluateWater<3>(P_inj_const, T_inj)).h;
             }

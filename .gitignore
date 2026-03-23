@@ -608,3 +608,10 @@ FodyWeavers.xsd
 /3D_EDFM_PostTest
 /Test
 /3D_PropTest_Output.dat
+/FVM_Ops_AD.h.md
+/代码模块梳理.md
+/运行质量.md
+/问题.md
+/方程梳理/1.1压力方程-对流项及通量离散与计算.md
+/方程梳理/组装.md
+/help/Intro_FVMandSolverProcess.md

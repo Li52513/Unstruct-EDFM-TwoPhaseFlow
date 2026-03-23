@@ -964,10 +964,10 @@ namespace FIM_Engine {
                             // Correction contributions (explicit → residual only, no Jacobian)
                             const double mass_w_corr = K_eff * mob_w * corr_P;
                             const double heat_corr   = conn.T_Heat * corr_T;
-                            global_mat.AddResidual(i, 0,   mass_w_corr);
-                            global_mat.AddResidual(j, 0,  -mass_w_corr);
-                            global_mat.AddResidual(i, N-1, heat_corr);
-                            global_mat.AddResidual(j, N-1,-heat_corr);
+                            global_mat.AddResidual(i, 0,  -mass_w_corr);
+                            global_mat.AddResidual(j, 0,   mass_w_corr);
+                            global_mat.AddResidual(i, N-1,-heat_corr);
+                            global_mat.AddResidual(j, N-1, heat_corr);
                             if constexpr (N == 3) {
                                 // CO2 mass correction
                                 const double dPhi_g_sign = (state.P[j] - state.P[i])
@@ -977,8 +977,8 @@ namespace FIM_Engine {
                                     ? cprop[i].rho_g / std::max(cprop[i].mu_g, 1e-20)
                                     : cprop[j].rho_g / std::max(cprop[j].mu_g, 1e-20);
                                 const double mass_g_corr = K_eff * mob_g * corr_P;
-                                global_mat.AddResidual(i, 1,  mass_g_corr);
-                                global_mat.AddResidual(j, 1, -mass_g_corr);
+                                global_mat.AddResidual(i, 1, -mass_g_corr);
+                                global_mat.AddResidual(j, 1,  mass_g_corr);
                             }
                         }
                     }
@@ -1011,12 +1011,12 @@ namespace FIM_Engine {
                             int g_eq_i = mgr.getEquationIndex(i, eq);
                             int g_eq_j = mgr.getEquationIndex(j, eq);
                             if (g_eq_i >= 0 && g_eq_i < eq_contribs.size()) {
-                                eq_contribs[g_eq_i].R_flux += f_wrt_i[eq].val;
-                                eq_contribs[g_eq_i].D_flux += f_wrt_i[eq].grad[eq];
+                                eq_contribs[g_eq_i].R_flux -= f_wrt_i[eq].val;
+                                eq_contribs[g_eq_i].D_flux -= f_wrt_i[eq].grad[eq];
                             }
                             if (g_eq_j >= 0 && g_eq_j < eq_contribs.size()) {
-                                eq_contribs[g_eq_j].R_flux -= f_wrt_j[eq].val;      // ??? j ???? -F
-                                eq_contribs[g_eq_j].D_flux -= f_wrt_j[eq].grad[eq]; // ??????????????
+                                eq_contribs[g_eq_j].R_flux += f_wrt_j[eq].val;
+                                eq_contribs[g_eq_j].D_flux += f_wrt_j[eq].grad[eq];
                             }
                         }
                     }
@@ -1041,7 +1041,7 @@ namespace FIM_Engine {
                 double max_abs_well_dt = 0.0;
 
                 // BoundaryAssembler returns well terms in outflow-positive convention.
-                // Residual here is assembled as Acc + Flux + Q_out = 0 by default.
+                // Residual here is assembled as Acc - Flux_inflow + Q_out = 0.
                 // Keep sign configurable for compatibility with custom conventions.
                 const double kWellSourceSign = params.well_source_sign;
 

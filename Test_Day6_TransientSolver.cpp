@@ -119,7 +119,7 @@ namespace Test_Day6 {
         w1.completion_id = injCell;
         w1.frac_w = 1.0;
         w1.frac_g = 0.0;
-        w1.injection_temperature = 375.0;   // 375 K，比储层低 5K，热前缘平缓
+        w1.injection_temperature = 340.0;   // 340 K，比储层低 40K，观察冷注降温效果
         w1.injection_is_co2 = false;
 
 

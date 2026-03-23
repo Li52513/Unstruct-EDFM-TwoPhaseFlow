@@ -1,36 +1,23 @@
-/**
- * @file FIM_BlockSparseMatrix.h
- * @brief ȫ��ʽ�������ϡ��������Ҷ������� (Block Sparse Matrix for FIM)
- * @details
- * רΪ N ����ϵͳ��ƣ���Ӳ����
- * 1. ǿ�ƷǷ�����(�� -1)��Խ���顣
- * 2. ��֤�ǶԽǿ鰴���ʼ����
- * 3. ��֤������ Eigen ����ṹȷ���������ȶ� (�ϸ� CSR ��ʽ)��
- * 4. ֧�� Pattern Freeze (���˶���)����ֹ�Ƿ����ε����������ɡ�
- * 5. �ϸ��� STL ������ Eigen �̶�ά������ڴ�������⡣
- * 6. �Ϸ������ģ������װ���������ɶ���� 32 λ���ͷ�Χ��
- */
-
 #pragma once
 #include <vector>
 #include <unordered_map>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
-#include <Eigen/StdVector> // [�޸� High] ���������ͷ�ļ���֧�� Eigen STL ����
+#include <Eigen/StdVector> 
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
 #include <cassert>
 #include <algorithm>
 #include <string>
-#include <limits> // [�޸� High] ����������
+#include <limits> 
 
 template <int N>
 class FIM_BlockSparseMatrix {
     static_assert(N > 0, "FIM_BlockSparseMatrix requires N > 0.");
 
 public:
-    // [�޸� High] �������밲ȫ�����ͱ���
+    
     using BlockMat = Eigen::Matrix<double, N, N>;
     using BlockVec = Eigen::Matrix<double, N, 1>;
     using OffDiagMap = std::unordered_map<
@@ -40,21 +27,19 @@ public:
     using SparseMat = Eigen::SparseMatrix<double, Eigen::RowMajor, int>;
 
 private:
-    int total_blocks_;                                                            ///< ϵͳ�ܿ���
-    bool is_pattern_frozen_;                                                      ///< �Ƿ񶳽�����
+    int total_blocks_;                                                            
+    bool is_pattern_frozen_;                                                      
 
-    // [�޸� High] ��� Eigen �̶���С�ṹǿ��ʹ�ö��������
-    std::vector<BlockMat, Eigen::aligned_allocator<BlockMat>> diag_blocks_;       ///< ���Խǿ�����
-    std::vector<OffDiagMap> off_diag_blocks_;                                     ///< �ǶԽǿ�����
-    std::vector<BlockVec, Eigen::aligned_allocator<BlockVec>> residual_;          ///< �Ҷ��� (�в�) ����
+    std::vector<BlockMat, Eigen::aligned_allocator<BlockMat>> diag_blocks_;       
+    std::vector<OffDiagMap> off_diag_blocks_;                                     
+    std::vector<BlockVec, Eigen::aligned_allocator<BlockVec>> residual_;          
 
-    // --- CSR ����£�FreezePattern ���ε� GetFrozenMatrix() ʱ����£������ valuePtr ���£�---
+    
     mutable bool     csr_cache_built_ = false;
     mutable SparseMat frozen_mat_;
-    // col_block_rank_[i][j] = ���� j ������ i ������˳������е����� (0-based)
     mutable std::vector<std::unordered_map<int, int>> col_block_rank_;
 
-    // --- �ڲ���ȫ���� ---
+    
     inline void CheckBlockIndex(int idx, const char* context) const {
         if (idx < 0 || idx >= total_blocks_) {
             throw std::out_of_range(std::string(context) + ": Block index out of range: " + std::to_string(idx));
@@ -150,10 +135,6 @@ private:
     }
 
 public:
-    /**
-     * @brief ���캯������ʼ������ߴ�
-     * @param total_blocks ϵͳ�����ɶȿ���
-     */
     explicit FIM_BlockSparseMatrix(int total_blocks) : total_blocks_(total_blocks), is_pattern_frozen_(false) {
         if (total_blocks_ < 0) {
             throw std::invalid_argument("Total blocks cannot be negative.");
@@ -184,9 +165,7 @@ public:
         col_block_rank_.clear();
     }
 
-    /**
-     * @brief ��վ���Ͳв����������������ڴ��Ա���һţ�ٲ�ʹ�ã�
-     */
+
     void SetZero() {
         for (int i = 0; i < total_blocks_; ++i) {
             diag_blocks_[i].setZero();
@@ -197,7 +176,6 @@ public:
         }
     }
 
-    // --- ��Ԫ���ۼӽӿ� ---
 
     inline void AddResidual(int block_idx, int dof_idx, double val) {
         CheckBlockIndex(block_idx, "AddResidual");
@@ -235,7 +213,6 @@ public:
         it->second(row_dof, col_dof) += val;
     }
 
-    // --- �����ۼӽӿ� ---
 
     inline void AddResidualBlock(int block_idx, const BlockVec& vec) {
         CheckBlockIndex(block_idx, "AddResidualBlock");
@@ -268,8 +245,6 @@ public:
         it->second += mat;
     }
 
-    // --- Getter �ӿ� ---
-
     inline const BlockVec& GetResidualBlock(int block_idx) const {
         CheckBlockIndex(block_idx, "GetResidualBlock");
         return residual_[block_idx];
@@ -284,11 +259,6 @@ public:
         return off_diag_blocks_[block_idx].size();
     }
 
-    // --- �����ӿ� ---
-
-    /**
-     * @brief ����Ϊ Eigen::SparseMatrix (CSR ��ʽ)�������������ʹ��
-     */
     SparseMat ExportEigenSparseMatrix() const {
         std::vector<Eigen::Triplet<double>> triplets;
         const size_t reserve_nnz =
@@ -327,14 +297,6 @@ public:
         return mat;
     }
 
-    /**
-     * @brief ������½��豸�ö CSR ����ȫ���á�
-     *
-     * ��һ�ε��ó���ʱ O(nnz log nnz) ������ CSR ������Ψ�ͷ����ˣ���
-     * ����ε��ó���ʱ O(nnz) ���¡�
-     * ���÷����ͨ�� auto A = GetFrozenMatrix() ��ȡ�壨ÿ������ O(nnz) memcpy����
-     * ����Ȩ PTC ��Ȼ�Ժ��ĸ�������ǰ�˵ΰ硣
-     */
     const SparseMat& GetFrozenMatrix() const {
         if (!is_pattern_frozen_)
             throw std::logic_error("GetFrozenMatrix() requires FreezePattern() to have been called.");

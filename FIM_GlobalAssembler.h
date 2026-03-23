@@ -1,8 +1,8 @@
 /**
  * @file FIM_GlobalAssembler.h
- * @brief È«ÒşÊ½Çó½âÆ÷È«¾Ö×é×°Æ÷ (Global Assembler for FIM)
- * @details ¸ºÔğ½« AD ÎïÀíËã×ÓµÄ¾Ö²¿¼ÆËã½á¹û (Accumulation, Flux, Source)
- * ¸ßĞ§¡¢°²È«µØ×°ÅäÈë FIM_BlockSparseMatrix¡£ÒÑ¿ªÆôÑÏ¸ñµÄ³ß´ç¶ÏÑÔÓëÍ¨Á¿Ò»ÖÂĞÔ¼ì²é¡£
+ * @brief È«ï¿½ï¿½Ê½ï¿½ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½×°ï¿½ï¿½ (Global Assembler for FIM)
+ * @details ï¿½ï¿½ï¿½ï¿½ AD ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÓµÄ¾Ö²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ (Accumulation, Flux, Source)
+ * ï¿½ï¿½Ğ§ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½×°ï¿½ï¿½ï¿½ï¿½ FIM_BlockSparseMatrixï¿½ï¿½ï¿½Ñ¿ï¿½ï¿½ï¿½ï¿½Ï¸ï¿½Ä³ß´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¨ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ô¼ï¿½é¡£
  */
 
 #pragma once
@@ -15,10 +15,12 @@
 template <int N, typename ADVarType>
 class FIM_GlobalAssembler {
 public:
-    /**
-     * @brief ×é×°»ıÀÛÏî (Accumulation)
-     * @details Ô¼¶¨£º²Ğ²î R_i += Accumulation_i
-     */
+
+	/**
+	 * @brief ç´¯ç§¯é¡¹è£…é… (Accumulation)
+	 * @details R_i += Accum_i
+	 *          J_ii += d(Accum_i)/d(Phi_i)  (ä»…å¯¹ä¸»å˜é‡ Phi_i æœ‰å¯¼æ•°è´¡çŒ®)
+	 */
     static void AssembleAccumulation(int block_idx,
         const std::vector<ADVarType>& accum_eqs,
         FIM_BlockSparseMatrix<N>& global_mat)
@@ -36,8 +38,10 @@ public:
     }
 
     /**
-     * @brief ×é×°Í¨Á¿Ïî (Flux: MM / FI / NNC / FF)
-     * @details Ô¼¶¨£ºÍ¨Á¿¶¨ÒåÎª i Á÷Ïò j¡£R_i += Flux_ij, R_j -= Flux_ij
+     * @brief Flux assembly (MM / FI / NNC / FF)
+     * @details flux = mob * (Phi_j - Phi_i) * T  (positive = inflow to i)
+     *          R_i -= Flux (inflow reduces residual)
+     *          R_j += Flux (inflow to i = outflow from j)
      */
     static void AssembleFlux(int block_i, int block_j,
         const std::vector<ADVarType>& flux_wrt_i,
@@ -57,22 +61,22 @@ public:
                 throw std::runtime_error("AssembleFlux: inconsistent flux values between seeds.");
             }
 
-            global_mat.AddResidual(block_i, eq, f_i);
-            global_mat.AddResidual(block_j, eq, -f_i);
+            global_mat.AddResidual(block_i, eq, -f_i);
+            global_mat.AddResidual(block_j, eq,  f_i);
 
             for (int var = 0; var < N; ++var) {
-                global_mat.AddDiagJacobian(block_i, eq, var, flux_wrt_i[eq].grad(var));
-                global_mat.AddOffDiagJacobian(block_i, block_j, eq, var, flux_wrt_j[eq].grad(var));
+                global_mat.AddDiagJacobian(block_i, eq, var, -flux_wrt_i[eq].grad(var));
+                global_mat.AddOffDiagJacobian(block_i, block_j, eq, var, -flux_wrt_j[eq].grad(var));
 
-                global_mat.AddOffDiagJacobian(block_j, block_i, eq, var, -flux_wrt_i[eq].grad(var));
-                global_mat.AddDiagJacobian(block_j, eq, var, -flux_wrt_j[eq].grad(var));
+                global_mat.AddOffDiagJacobian(block_j, block_i, eq, var,  flux_wrt_i[eq].grad(var));
+                global_mat.AddDiagJacobian(block_j, eq, var,  flux_wrt_j[eq].grad(var));
             }
         }
     }
 
     /**
-     * @brief ×é×°Ô´»ãÏî (Source: Well / Boundary / Leakoff)
-     * @details Ô¼¶¨£ºÔ´Ïî¶¨ÒåÎª×¢ÈëÎªÕı¡£R_i -= Source_i
+     * @brief ï¿½ï¿½×°Ô´ï¿½ï¿½ï¿½ï¿½ (Source: Well / Boundary / Leakoff)
+     * @details Ô¼ï¿½ï¿½ï¿½ï¿½Ô´ï¿½î¶¨ï¿½ï¿½Îª×¢ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½R_i -= Source_i
      */
     static void AssembleSource(int block_idx,
         const std::vector<ADVarType>& source_wrt_i,

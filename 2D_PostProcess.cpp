@@ -320,15 +320,32 @@ void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
         out << "3\n";                  // VTK_LINE
     }
 
-    // 5. CELL_DATA (��ɢ��ǳ�)
+    // 5. CELL_DATA (cell-centered fields for accurate well/fracture visualization)
     out << "CELL_DATA " << totalCells << "\n";
 
-    // ��ʽ���� (0: ����, 1: �ѷ�)
+    // Domain tag (0: matrix, 1: fracture)
     out << "SCALARS DomainID int 1\nLOOKUP_TABLE default\n";
     for (size_t i = 0; i < numMatrixCells; ++i) out << "0\n";
     for (size_t i = 0; i < totalFracCells; ++i) out << "1\n";
 
-    // 6. POINT_DATA (������ƽ������)
+    // Cell-centered physical fields (no interpolation — exact solver values)
+    for (const auto& name : varNames) {
+        out << "SCALARS cell_" << name << " double 1\nLOOKUP_TABLE default\n";
+        auto matField = fieldMgr_.getMatrixScalar(name);
+        for (size_t c = 0; c < numMatrixCells; ++c) {
+            double val = (matField && c < matField->data.size()) ? matField->data[c] : 0.0;
+            if (!std::isfinite(val)) val = 0.0;
+            out << val << "\n";
+        }
+        auto fracField = fieldMgr_.getFractureScalar(name);
+        for (size_t c = 0; c < totalFracCells; ++c) {
+            double val = (fracField && c < fracField->data.size()) ? fracField->data[c] : 0.0;
+            if (!std::isfinite(val)) val = 0.0;
+            out << val << "\n";
+        }
+    }
+
+    // 6. POINT_DATA (node-averaged interpolation)
     out << "POINT_DATA " << totalNodes << "\n";
 
     for (const auto& name : varNames) {
