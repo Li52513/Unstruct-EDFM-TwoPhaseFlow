@@ -69,6 +69,18 @@ namespace FIM_Engine {
         const ADVar<N>& P,
         const ADVar<N>& T)
     {
+        if (model == SinglePhaseFluidModel::ConstantWater) {
+            AD_Fluid::ADFluidProperties<N> props;
+            props.rho = ADVar<N>(1000.0);
+            props.mu = ADVar<N>(1.0e-3);
+            props.cp = ADVar<N>(4200.0);
+            props.cv = ADVar<N>(4182.0);
+            props.h = ADVar<N>(1.0e5);
+            props.k = ADVar<N>(0.6);
+            props.isFallback = false;
+            props.near_bound = false;
+            return props;
+        }
         if (model == SinglePhaseFluidModel::CO2) {
             return AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
         }

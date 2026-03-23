@@ -16,7 +16,7 @@ namespace FIM_Engine {
     enum class DiagLevel { Off, Summary, Hotspot, Forensic };
     enum class SolverRoute { FIM, IMPES };
     enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL, AMGCL_CPR };
-    enum class SinglePhaseFluidModel { Water, CO2 };
+    enum class SinglePhaseFluidModel { Water, CO2, ConstantWater };
 
     struct InitialConditions {
         double P_init = 2.0e5;

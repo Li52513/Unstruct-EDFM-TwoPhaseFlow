@@ -31,4 +31,18 @@ namespace Test_Day6 {
     /** @brief 运行 3D 矩阵审计测试，检查 NNC/FF 系数装配是否正常 */
     void Run_Day6_MatrixAudit_3D_EDFM();
 
+    /** @brief Day6 campaign (2D): 16 physical scenarios × F0/F1/F2 topology axis with fail-fast gating */
+    void Run_Day6_Campaign_2D_All_TxxFy();
+
+    /** @brief Day6 campaign (3D mirror): 16 physical scenarios × F0/F1/F2 topology axis with fail-fast gating */
+    void Run_Day6_Campaign_3D_All_TxxFy();
+
+    /** @brief Immediate T1 split gates (run after T1_F0): no-fracture/single-fracture/cross-fracture */
+    void Run_Day6_Campaign_2D_T01_F0();
+    void Run_Day6_Campaign_2D_T01_F1();
+    void Run_Day6_Campaign_2D_T01_F2();
+
+    /** @brief T1 baseline: 2D no-well single-phase pressure diffusion (constant fluid + constant rock) with Fourier analytical check */
+    void Run_Day6_T1_2D_SP_NoWell_Analytical();
+
 } // namespace Test_Day6

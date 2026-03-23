@@ -75,6 +75,11 @@ It must cover:
 
 | Case | Command | Purpose | Pass Criteria |
 |---|---|---|---|
+| Day6 T1 F0 | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_t01_f0` | T01 no-fracture baseline (pressure/transport sanity) | No `Error/Exception/Fatal`; `Test/Transient/Day6/Campaign/2D/T01_F0/metrics.csv` exists with `topology=F0` |
+| Day6 T1 F1 | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_t01_f1` | T01 single-fracture gate after F0 | No `Error/Exception/Fatal`; `metrics.csv` exists with `topology=F1`; `final.vtk` exists |
+| Day6 T1 F2 | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_t01_f2` | T01 cross-fracture gate after F1 | No `Error/Exception/Fatal`; `metrics.csv` exists with `topology=F2`; `final.vtk` exists |
+| Day6 2D Campaign Full | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_campaign_2d_all` | Full 2D campaign: `T01..T16 x (F0,F1,F2)` fail-fast gating | All `Txx` print pass logs; each `Txx_Fy` has `convergence.log`, `metrics.csv`, `final.vtk`; milestone matrix-audit + issue11/12 pass |
+| Day6 3D Campaign Full | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_campaign_3d_all` | Full 3D mirror campaign: `T01..T16 x (F0,F1,F2)` fail-fast gating | All `Txx` print pass logs; each `Txx_Fy` has `convergence.log`, `metrics.csv`, `final.vtk`; milestone matrix-audit + issue11/12 pass |
 | Day6 2D Single-Phase Inj/Prod | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_transient_2d_sp_injprod` | 2D single-phase transient stability + well response + VTK export | `>=50` steps stable, no `Error/Exception/Fatal`, VTK exported |
 | Day6 2D Two-Phase Inj/Prod | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_transient_2d_tp_injprod` | 2D two-phase transient stability + S/T coupling + VTK export | `>=50` steps stable, no `Error/Exception/Fatal`, VTK with `P/T/S_w` |
 | Day6 2D Two-Phase Multiwell | `.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_transient_2d_tp_multiwell` | 2D multi-well interference/plume transient + VTK export | `>=50` steps stable, no `Error/Exception/Fatal`, VTK exported |
@@ -85,6 +90,7 @@ It must cover:
 Note (ParaView acceptance):
 - Load exported `.vtk` from `Test/Transient/Day6/...` in ParaView.
 - Verify scalar fields render correctly (`P`,`T`,`S_w` when applicable) and flow/thermal trends are physically consistent.
+- Day6 campaign metrics are stored under `Test/Transient/Day6/Campaign/<2D|3D>/Txx_Fy/metrics.csv` with mandatory `topology` column.
 
 ---
 ## 2.6 Day7 Explicit Dispatcher Cases (Mandatory for Closed-Loop/WAG Regression Edits)
@@ -155,10 +161,10 @@ R5 trans_3d: PASS/FAIL
 D5a day5_block_matrix_robust: PASS/FAIL
 D5b day5_global_jac_2d: PASS/FAIL
 D5c day5_global_jac_3d: PASS/FAIL
-D6a day6_transient_2d_sp_injprod: PASS/FAIL
-D6b day6_transient_2d_tp_multiwell: PASS/FAIL
-D6c day6_transient_3d_sp_injprod: PASS/FAIL
-D6d day6_transient_3d_tp_multiwell: PASS/FAIL
+D6a day6_t01_f0: PASS/FAIL
+D6b day6_t01_f1: PASS/FAIL
+D6c day6_t01_f2: PASS/FAIL
+D6d day6_campaign_2d_all: PASS/FAIL
 D7a day7_closedloop_2d_tp_wag_singlewell: PASS/FAIL
 D7b day7_closedloop_2d_tp_wag_multiwell: PASS/FAIL
 D7c day7_closedloop_3d_tp_wag_singlewell: PASS/FAIL

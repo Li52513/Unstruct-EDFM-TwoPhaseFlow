@@ -4,374 +4,350 @@
 
 | Item | Value |
 |---|---|
-| Last Updated | 2026-03-10 (Asia/Shanghai, Day6 static implementation aligned: dispatcher/cases/log-guards/VTK pipeline + plan-consistency fixes) |
-| Git Branch | `main` |
-| Git Commit | `dirty working tree (2026-03-10, Day6 static deviations fixed; dynamic gates pending manual run)` |
-| Owner / Maintainer | Yongwei (请按实际维护人更新) |
+| Last Updated | 2026-03-23 (Asia/Shanghai) |
+| Source of Truth | 当前工作区代码（`main.cpp` + `FIM_TransientEngine/*` + 核心头文件） |
+| Git State | `dirty working tree`（含 Day6/FIM 相关未提交改动） |
 | Project Root | `2D-Unstr-Quadrilateral-EDFM` |
-| Current Entry Mode | `main.cpp` 已支持参数化 dispatcher（`--case=...` / `--list` / `--help`） |
+| Entry | `main.cpp`（支持 `--list` / `--case` / `--help`） |
+| Default Case | `day2_fvm_ad` |
+
+> 说明：若文档与代码不一致，以 `main.cpp` dispatcher 和实现代码为准。
 
 ---
 
-## 1. 项目目标与论文章节映射
+## 1. 工程目标与论文映射
 
-### 1.1 章节一（已实现）
+### 1.1 章节一：非结构网格 EDFM 快速嵌入与耦合（主链路已形成）
 
-**非结构化网格嵌入式离散裂缝模型的快速生成与耦合技术**
+- 2D：2D 基岩 + 1D 裂缝（DFN），支持 AABB/Bin、DDA、8DOP 候选筛选与精确求交。
+- 3D：3D 基岩 + 2D 裂缝独立网格，支持 Octree/14-DOP/光栅化预筛，重构基岩-裂缝交互多边形。
+- NNC 几何量（交互面积、法向、距离、拓扑）可直接用于传导率和方程装配。
 
-- 2D：2D 基岩 + 1D 裂缝（DFN），已实现 AABB/网格索引/8DOP/DDA 等候选筛选与精确求交流程。
-- 3D：3D 基岩 + 2D 裂缝独立网格，已实现八叉树、14-DOP、光栅化等加速候选筛选与交互多边形重构。
-- 已形成可导出、可诊断的 NNC 几何数据（交互面积、法向、距离、拓扑映射）。
+对应代码：
 
-对应代码主干：
+- 2D：`MeshManager.*`, `mesh.*`, `FractureNetwork.*`
+- 3D：`3D_MeshManager.*`, `2D_FractureNetwork.*`, `EDFM_Geometry_3D.*`, `FaceIndexedOctree.h`
 
-- 2D 几何/拓扑：`MeshManager.h`, `mesh.h`, `FractureNetwork.h`, `2D_EDFM_test.h`, `2D_EDFM_MeshTest_Benchmark.h`
-- 3D 几何/拓扑：`3D_MeshManager.h`, `EDFM_Geometry_3D.h`, `FaceIndexedOctree.h`, `3D_Improved_EDFM_test.h`, `3D_EDFM_MeshTest_Benchmark.h`
+### 1.2 章节二：单相热-流耦合（框架齐备，持续增强）
 
-### 1.2 章节二（在研，基础框架已具备）
+- 已联通场管理、物性、边界、静态传导率（MM/FI/NNC/FF）。
+- 已具备统一瞬态入口骨架，可承载单相与两相扩展。
 
-**裂缝性储层超临界 CO2 单相热-流耦合数值模型**
+对应代码：
 
-- 已具备：场管理、变量初始化、物性管理、边界条件统一管理、静态传导率（Matrix/FI/NNC/FF）模块。
-- 在研重点：把静态几何传导率 + 动态物性/状态方程 + 时间推进/非线性求解完整闭环化。
+- 场管理：`2D_FieldManager.h`, `3D_FieldManager.h`, `FieldRegistry.h`
+- 物性：`2D_PhysicalPropertiesManager.*`, `3D_PhysicalPropertiesManager.*`
+- 传导率：`TransmissibilitySolver_2D.*`, `TransmissibilitySolver_3D.*`
 
-对应代码主干：
+### 1.3 章节三：CO2-水两相渗流-传热（FIM 主干已工程化）
 
-- 场管理：`2D_FieldManager.h`, `3D_FieldManager.h`
-- 初始化：`2D_VariableInitializer.h`, `3D_VariableInitializer.h`
-- 物性：`2D_PhysicalPropertiesManager.h`, `3D_PhysicalPropertiesManager.h`, `CO2PropertyTable.*`, `WaterPropertyTable.*`
-- 静态传导率：`TransmissibilitySolver_2D.*`, `TransmissibilitySolver_3D.*`
+- 两相本构：VG 毛管压 + Mualem 相对渗透率。
+- AD 物性桥接：`AD_FluidEvaluator.h`（表格查值/鲁棒差分，支持 `USE_COOLPROP_EOS`）。
+- FIM 链路：连接聚合、块稀疏冻结、Newton+线搜索+自适应 dt、井独立 DOF、矩阵审计。
 
-### 1.3 章节三（在研，求解骨架已搭建）
-
-**非饱和裂缝性储层中超临界 CO2-水两相渗流-传热耦合模型（EDFM-IMPES/FIM）**
-
-- 已具备：
-  - 两相本构（VG 毛细压力、相对渗透率）
-  - AD 基础设施（`ADVar`, `AD_FluidEvaluator`）
-  - FIM 连接聚合器与 2D/3D 拓扑装载器
-  - 上游判据/势能差/热通量算子
-- 在研重点：IMPES/FIM 全流程算例驱动、强重力分异和交替注采工况的系统验证。
-
-对应代码主干：
+对应代码：
 
 - 两相本构：`CapRelPerm_HD.h`, `CapRelPerm_HD_AD.h`
-- AD 算子：`FVM_Ops_AD.h`, `AD_FluidEvaluator.h`
-- FIM 连接层：`FIM_ConnectionManager.h`, `FIM_TopologyBuilder2D.h`, `FIM_TopologyBuilder3D.h`, `Test_FIM_Topology.h`
+- AD/FVM 算子：`ADVar.hpp`, `FVM_Ops.h`, `FVM_Ops_AD.h`
+- FIM：`FIM_ConnectionManager.h`, `FIM_TopologyBuilder2D.h`, `FIM_TopologyBuilder3D.h`, `FIM_BlockSparseMatrix.h`, `WellDOFManager.h`, `FIM_TransientEngine/*`
 
-### 1.4 章节四（待开展参数化分析）
+### 1.4 章节四：WAG/闭环策略优化（待系统化）
 
-**CO2-H2O 交替注采取热过程与运行策略优化**
-
-- 当前仓库已具备执行参数化研究的几何/拓扑/传导率/场管理骨架。
-- 下一阶段需补充统一 case 管理、批处理驱动、指标提取与自动化统计流程。
+- 已具备参数化研究基础（几何-物性-求解）。
+- 待补齐统一闭环 case 编排、指标统计与自动化报告链路。
 
 ---
 
-## 2. 代码架构（按当前仓库）
+## 2. 代码架构总览（当前仓库）
 
 ```text
 2D-Unstr-Quadrilateral-EDFM/
-├─ main.cpp                                  # 参数化测试调度入口（--case / --list / --help）
-├─ 2D-Unstr-Quadrilateral-EDFM.sln/.vcxproj  # VS 工程
-├─ mesh.*, node.*, face.*, cell.*            # 基岩网格与几何拓扑
-├─ MeshManager.*                             # 2D EDFM 管理器（2D基岩-1D裂缝）
-├─ 3D_MeshManager.*                          # 3D EDFM 管理器（3D基岩-2D裂缝）
-├─ Fracture*.*/2D_Fracture*.*                # 裂缝网络与裂缝单元
-├─ EDFM_Geometry_3D.*                        # 3D Type1/2/3 几何求交核心
-├─ FaceIndexedOctree.h + 8_DOP/14_DOP        # 空间索引/几何加速
-├─ 2D_FieldManager.h / 3D_FieldManager.h     # 三域场管理（Matrix/Fracture/Interaction）
-├─ 2D_VariableInitializer.* / 3D_*           # 主变量场初始化
-├─ 2D_PhysicalPropertiesManager.* / 3D_*     # 物性门面管理器
-├─ TransmissibilitySolver_2D.* / 3D.*        # 静态传导率求解器
-├─ FVM_Ops.h / FVM_Ops_AD.h / FVM_Grad.*     # 离散算子
-├─ FIM_ConnectionManager.h                   # FIM 连接聚合器
-├─ FIM_TopologyBuilder2D.h / 3D.h            # 拓扑到代数连接装载
-├─ 2D_PostProcess.* / 3D_PostProcess.*       # 结果导出与可视化（Tecplot / VTK）
-├─ test_*.h / *_test.h                       # 各模块验证与基准
-└─ Test/                                     # 导出结果与可视化脚本目录
+├─ main.cpp                                  # 统一 dispatcher（真实 case 源）
+├─ mesh.*, Node.*, Face.*, Cell.*            # 基岩网格、几何拓扑、Bin 索引
+├─ MeshManager.*                             # 2D EDFM 管理器（2D matrix + 1D fracture）
+├─ 3D_MeshManager.*                          # 3D EDFM 管理器（3D matrix + 2D fracture）
+├─ FractureNetwork.*                         # 2D 线裂缝网络（globalFFPts 等）
+├─ 2D_FractureNetwork.*                      # 3D 场景下的 2D 裂缝网格网络（ffIntersections/globalEdges）
+├─ 2D_FieldManager.h / 3D_FieldManager.h     # Matrix/Fracture/NNC 三域场 + face/edge 场
+├─ SolverContrlStrName_op.h                  # 字段名约定
+├─ TransmissibilitySolver_2D.* / _3D.*       # MM/FI/NNC/FF 静态传导率
+├─ FIM_ConnectionManager.h                   # 连接聚合、去重、统计
+├─ FIM_TopologyBuilder2D.h / 3D.h            # 从字段装载代数连接
+├─ FIM_BlockSparseMatrix.h                   # 块稀疏矩阵 + Pattern Freeze + CSR cache
+├─ FIM_GlobalAssembler.h                     # Acc/Flux/Source 装配接口
+├─ BoundaryAssembler.h                       # 边界与井源 FullJac 装配
+├─ WellDOFManager.h                          # 井独立 BHP DOF
+├─ FIM_StateMap.h                            # 轻量状态容器（P/T/(Sw) 标量）
+├─ FIM_TransientEngine/
+│  ├─ Types.hpp                              # 求解参数与求解路线
+│  ├─ StateSync.hpp                          # state↔field 同步、静态物性注入
+│  ├─ StepKernels.hpp/_impl.hpp              # 线性求解、行缩放、trial update
+│  ├─ Diagnostics.hpp                        # 预检查、matrix audit
+│  └─ RunGeneric.hpp/_impl.hpp               # 通用瞬态 FIM 驱动
+├─ 2D_PostProcess.* / 3D_PostProcess.*       # Tecplot/VTK/VTU/PVD 导出
+└─ Test_*.h / *_test.h                       # Day1-Day6 与模块测试
 ```
 
 ---
 
-## 3. 核心类与数据结构
+## 3. `main.cpp` dispatcher（真实入口）
 
-### 3.1 网格与裂缝对象
+### 3.1 参数行为
+
+- `--list`：列出可运行 case。
+- `--case=<name>` / `--case <name>`：运行指定 case。
+- 无 `--case`：默认 `day2_fvm_ad`。
+
+### 3.2 当前已注册 case（2026-03-23）
+
+- Day1：`day1_arch_conn`, `day1_arch_conn_repro`
+- Day2：`day2_fvm_ad`
+- Day3：`day3_bc_patch`, `day3_leakoff_switch`, `day3_viz`
+- Day4：`day4_well_patch`, `day4_well_viz`
+- Day5：`day5_block_matrix_robust`, `day5_global_jac_2d`, `day5_global_jac_3d`
+- Issue 回归：`issue11_frozen_matrix`, `issue12_linear_solver`
+- Day6 瞬态与 campaign：
+  - 常规：`day6_transient_2d_sp_injprod`, `day6_transient_2d_tp_injprod`, `day6_transient_2d_tp_multiwell`
+  - 常规：`day6_transient_3d_sp_injprod`, `day6_transient_3d_tp_injprod`, `day6_transient_3d_tp_multiwell`
+  - 审计：`day6_matrix_audit_2d_edfm`, `day6_matrix_audit_3d_edfm`
+  - Campaign：`day6_campaign_2d_all`, `day6_campaign_3d_all`
+  - T01 快速门：`day6_t01_f0`, `day6_t01_f1`, `day6_t01_f2`
+  - 解析校核：`day6_t1_2d_sp_nowell_analytical`
+- 几何/物性/算子基准：
+  - `2d_edfm_single`, `2d_edfm_dfn`, `2d_geom_benchmark_dfn`
+  - `3d_twist_intersection`, `3d_edfm_improved`, `3d_distance_accuracy`, `3d_nnc_ff_static`, `3d_mesh_benchmark`
+  - `init_single_frac`, `init_dfn`, `property_sweep`, `boundary_export`
+  - `grad_2d`, `grad_3d`, `grad_all`
+  - `dof_mapper`, `advar`, `prop_init_3d`, `fluid_eval`, `complex_frac_benchmark`
+  - `trans_2d`, `trans_3d`, `trans_all`
+
+### 3.3 文档一致性提醒
+
+- 当前 dispatcher **未注册** Day7 `day7_closedloop_*` case。
+- 若其他文档出现 Day7 case，应标注为计划项，不可当作现有可执行入口。
+
+---
+
+## 4. 关键流程（几何到求解）
+
+### 4.1 2D EDFM 主链
+
+1. `MeshManager::BuildSolidMatrixGrid_2D`
+2. 加裂缝（`addFracture`/DFN）
+3. `DetectAndSubdivideFractures(...)`
+4. `BuildGlobalSystemIndexing()`
+5. `BuildFracturetoFractureTopology()`
+6. `TransmissibilitySolver_2D::{Matrix,FI,NNC,FF}`
+7. `FIM_TopologyBuilder2D::LoadAllConnections`
+8. `FIM_ConnectionManager::FinalizeAndAggregate`
+
+### 4.2 3D EDFM 主链
+
+1. `MeshManager_3D::BuildSolidMatrixGrid_3D`
+2. `addFracturetoFractureNetwork`
+3. `meshAllFracturesinNetwork`
+4. `setupGlobalIndices`
+5. `DetectFractureFractureIntersectionsInNetwork`
+6. `SolveIntersection3D_improved_twist_accleration`
+7. `removeDuplicateInteractions`
+8. `resolveCoplanarInteractions`
+9. `buildTopologyMaps`
+10. `TransmissibilitySolver_3D::{Matrix,FI,NNC,FF}`
+11. `FIM_TopologyBuilder3D::LoadAllConnections`
+12. `FIM_ConnectionManager::FinalizeAndAggregate`
+
+### 4.3 通用瞬态 FIM 主链（`RunGenericFIMTransient`）
+
+1. `InjectStaticProperties` + 可选 `property_initializer`
+2. 构建 MM/FI/NNC/FF 连接并聚合
+3. `WellDOFManager::Setup` 扩展井 block
+4. `FIM_BlockSparseMatrix` 注册 pattern 后 `FreezePattern`
+5. Newton + 时间推进：
+   - 累积/通量/边界/井项装配
+   - 可选非正交修正（`enable_non_orthogonal_correction`）
+   - 可选矩阵审计（`enable_matrix_audit`）
+   - 线性求解（`SparseLU`/`BiCGSTAB`/`AMGCL`/`AMGCL_CPR`）
+   - 线搜索、PTC、dt 自适应
+6. `SyncStateToFieldManager` + VTK/VTU 导出
+
+---
+
+## 5. 核心类与数据结构
+
+### 5.1 网格与裂缝
 
 - `Mesh`
-  - 存储 `nodes_`, `faces_`, `cells_`
-  - 负责 2D/3D 网格生成、拓扑构建、AABB/Bin 索引、cell-face 映射
-  - 维护 2D NNC 快速映射：`CellLocalIndexToFracElemSolverIndexMap_`
-- `MeshManager`（2D）
-  - 组织 2D 基岩 + 1D 裂缝全流程
-  - 管理全局 `solverIndex`（先基岩后裂缝）
-  - 提供 DOF 映射：`getEquationIndex(solverIndex, dofOffset)`
-- `MeshManager_3D`（3D）
-  - 组织 3D 基岩 + 2D 裂缝全流程
-  - 核心产物：`interactionPairs_`（Level-3 基岩-裂缝交互多边形）
-  - 提供 `mat2InteractionMap_` / `frac2InteractionMap_` 双向快速映射
-- `FractureNetwork` / `FractureNetwork_2D`
-  - 管理宏观裂缝、微元、FF 交点/交线与 solverIndex 缓存
+  - 持有 `nodes_ / faces_ / cells_`
+  - 2D face-bin（`faceBins_`）与 3D cell-bin（`cellBins_`）空间索引
+  - 2D NNC 映射：`CellLocalIndexToFracElemSolverIndexMap_`
 
-### 3.2 三域场管理
+- `MeshManager`（2D）
+  - 2D matrix + 1D fracture 管理
+  - 统一 `solverIndex`（matrix 在前，fracture 在后）
+  - `getEquationIndex(solverIndex, dofOffset)`
+
+- `MeshManager_3D`
+  - 3D matrix + 2D fracture 管理
+  - `interactionPairs_` 为核心几何交互容器
+  - `mat2InteractionMap_` / `frac2InteractionMap_` 双向拓扑加速
+
+- `FractureNetwork` / `FractureNetwork_2D`
+  - 维护 FF 拓扑、全局边、solver index cache（`getOrderedFractureElements`）
+
+### 5.2 场管理
+
+- `FieldRegistry` / `FaceFieldRegistry`
+  - 名称到场对象映射，支持 `create/get/getOrCreate/has`
 
 - `FieldManager_2D` / `FieldManager_3D`
-  - `matrixFields`：基岩单元场
-  - `fractureFields`：裂缝微元场
-  - `nncFields`：NNC/FF 交互场
-  - `matrixFaceFields` / `fractureFaceFields(fractureEdgeFields)`：面（边）场
-  - `ff_topology`：FF 星-三角展开后的连接对（solverIndex 对）
+  - `matrixFields`, `fractureFields`, `nncFields`
+  - `matrixFaceFields`, `fractureFaceFields`(2D) / `fractureEdgeFields`(3D)
+  - `ff_topology`（FF solver index 对）
 
-### 3.3 变量初始化与物性
+### 5.3 状态与 AD
 
-- `VariableInitializer_2D/3D`
-  - `InitSinglePhaseState`, `InitIMPESState`, `InitFIMState<N>`
-  - 支持 AD 种子注入（P/S/T 的梯度分量）
-- `PhysicalPropertiesManager_2D/3D`
-  - 静态：岩石/裂缝属性初始化
-  - 动态：CO2/Water EOS 更新（double 与 AD 两套）
-  - 有效热物性更新：`UpdateEffectiveThermal_*`
+- `ADVar<N>`：前向自动微分基础类型。
+- `volScalarField`, `volADField<N>`, `faceScalarField`, `faceADField<N>`。
+- `FIM_StateMap<N>`：仅保存 `P/T/(Sw)` 标量，不做全局驻留 AD。
 
-### 3.4 FIM 连接层
+### 5.4 连接与全局装配
 
-- `FIM_TopologyBuilder2D/3D`：从 T 字段装载 MM/FI/NNC/FF 连接
-- `FIM_ConnectionManager`：连接去重、聚合、守恒检查、排序输出
+- `FIM_TopologyBuilder2D/3D`：从 `T_*` 字段构建 MM/FI/NNC/FF 连接。
+- `FIM_ConnectionManager`：
+  - 连接类型：`Matrix_Matrix`, `Fracture_Internal`, `Matrix_Fracture`, `Fracture_Fracture`
+  - NNC/FF 可并联聚合；MM/FI 重复连接直接报错
+- `FIM_BlockSparseMatrix<N>`：
+  - block Jacobian/Residual 容器
+  - `FreezePattern()` 后禁止新增连接
+  - `GetFrozenMatrix()` 走 CSR cache（Issue11 关键）
+- `FIM_GlobalAssembler`：`AssembleAccumulation`, `AssembleFlux`, `AssembleSource`
+- `BoundaryAssembler`：2D/3D 边界与井源 FullJac 装配
+- `WellDOFManager<N>`：每口井追加独立 BHP block
 
-### 3.5 后处理与可视化导出
+### 5.5 瞬态引擎子模块（`FIM_TransientEngine/`）
 
-- `PostProcess_2D`（`2D_PostProcess.h/.cpp`）
-  - 当前能力：`ExportTecplot(...)` + `ExportVTK(...)`，输出 2D 基岩 + 1D 裂缝
-  - 支持 `SyncADFieldToScalar<N>(...)`，将 ADVar 场降维到标量场后再导出
-  - Day4 可视化验收已使用固定路径导出：`Test/BoundaryTest/day4_well_viz_2d.vtk`
-- `PostProcess_3D`（`3D_PostProcess.h/.cpp`）
-  - 当前能力：`ExportTecplot(...)` + `ExportVTK(...)`
-  - `ExportVTK(...)` 采用 `UNSTRUCTURED_GRID`，输出基岩+裂缝混合网格、`CELL_TYPES` 与 `DomainID`
-  - 同样支持 `SyncADFieldToScalar<N>(...)` 以解耦求解层与导出层
-
----
-
-## 4. 主流程（当前入口逻辑）
-
-### 4.1 `main.cpp` 当前行为（非常关键）
-
-- 当前默认执行：`--case` 未指定时运行 `day2_fvm_ad`（即 `Test_FVM::Run_All_Day2_Tests<3, ADVar<3>>()`）。
-- 支持参数化调度：
-  - `--list`：列出全部可运行 case
-  - `--case=<name>` 或 `--case <name>`：运行指定 case
-  - `--help`：输出用法与 case 列表
-- Day1 显式验收入口：
-  - `--case=day1_arch_conn`：串行执行 R4(`trans_2d`) + R5(`trans_3d`)
-  - `--case=day1_arch_conn_repro`：执行 `trans_2d x2 + trans_3d x2` 用于可复现性检查
-- Day4 显式验收入口：
-  - `--case=day4_well_patch`：执行 Well(BHP/Rate) 算子、2D 井装配（Matrix+Fracture, Mass+Energy）与 CSV 驱动 WAG 切换骨架测试
-  - `--case=day4_well_viz`：固定路径导出 Day4 2D/3D 井源 VTK（`Test/BoundaryTest/day4_well_viz_2d.vtk`, `Test/BoundaryTest/day4_well_viz_3d.vtk`）
-- Day5 显式验收入口：
-  - `--case=day5_block_matrix_robust`：块稀疏矩阵基础设施鲁棒性门禁
-  - `--case=day5_global_jac_2d`：2D 全局组装 + FD vs AD Jacobian 门禁
-  - `--case=day5_global_jac_3d`：3D 全局组装 + FD vs AD Jacobian 门禁
-- Day6 验收入口（已实现，待执行动态验收，当前不收敛）：
-  - `--case=day6_transient_2d_sp_injprod`
-  - `--case=day6_transient_2d_tp_injprod`
-  - `--case=day6_transient_2d_tp_multiwell`
-  - `--case=day6_transient_3d_sp_injprod`
-  - `--case=day6_transient_3d_tp_injprod`
-  - `--case=day6_transient_3d_tp_multiwell`
-  - 要求：每个 case 支持 PostProcess VTK 导出并完成 ParaView 可视化验收
-- Day7 验收模板入口（待实现）：
-  - `--case=day7_closedloop_2d_sp_baseline`
-  - `--case=day7_closedloop_2d_tp_wag_singlewell`
-  - `--case=day7_closedloop_2d_tp_wag_multiwell`
-  - `--case=day7_closedloop_3d_sp_baseline`
-  - `--case=day7_closedloop_3d_tp_wag_singlewell`
-  - `--case=day7_closedloop_3d_tp_wag_multiwell`
-  - 要求：输出 WAG 阶段日志、论文指标时间序列、VTK 快照并完成 ParaView 验收
-- 结论：`main.cpp` 已从“注释开关板”升级为可脚本化的 case dispatcher。
-
-### 4.2 典型调用链（3D 几何+耦合）
-
-```mermaid
-flowchart TD
-    accTitle: 3D EDFM Core Pipeline
-    accDescr: From matrix mesh and fracture meshing to interaction pair construction and topology maps for solver use.
-
-    A[BuildSolidMatrixGrid_3D] --> B[addFracturetoFractureNetwork]
-    B --> C[meshAllFracturesinNetwork]
-    C --> D[setupGlobalIndices]
-    D --> E[DetectFractureFractureIntersectionsInNetwork]
-    E --> F[SolveIntersection3D_improved_twist_accleration]
-    F --> G[removeDuplicateInteractions]
-    G --> H[resolveCoplanarInteractions]
-    H --> I[buildTopologyMaps]
-    I --> J[TransmissibilitySolver_3D]
-    J --> K[FIM_TopologyBuilder3D]
-    K --> L[FIM_ConnectionManager]
-```
-
-### 4.3 典型调用链（2D 几何+耦合）
-
-- `BuildSolidMatrixGrid_2D`
-- `addFracture / generateDFN`
-- `DetectAndSubdivideFractures`
-- `BuildGlobalSystemIndexing`
-- `BuildFracturetoFractureTopology`
-- `TransmissibilitySolver_2D::*`
-- `FIM_TopologyBuilder2D::LoadAllConnections`
+- `Types.hpp`：`TransientSolverParams`、`LinearSolverType`、诊断开关
+- `StateSync.hpp`：`InjectStaticProperties`, `SyncStateToFieldManager`
+- `StepKernels.hpp/_impl.hpp`：线性求解与 trial update 内核
+- `Diagnostics.hpp`：3D precheck + `RunMatrixAssemblyAudit`
+- `RunGeneric.hpp/_impl.hpp`：通用 FIM 瞬态主循环
 
 ---
 
-## 5. 关键公式到代码映射
+## 6. 理论公式与代码映射
 
-| 物理/离散对象 | 公式或思想 | 代码实现 |
+| 对象 | 公式/思想 | 代码实现 |
 |---|---|---|
-| 两点串联阻力/传导率 | `T = Area / (d1/K1 + d2/K2)` | `FVM_Ops::Op_Math_Transmissibility` in `FVM_Ops.h` |
-| Matrix-Matrix 静态传导率 | 基岩内部面正交距离 + 投影渗透率 | `TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix`, `TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix` |
-| Matrix-Fracture (NNC) | `A_int / (d_m/K_mn + w_f/(2K_f))` | `Calculate_Transmissibility_NNC` (2D/3D) |
-| Fracture Internal (FI) | 相邻裂缝微元串联阻力 | `Calculate_Transmissibility_FractureInternal` (2D/3D) |
-| Fracture-Fracture (FF) | Junction/Intersection 上 Star-Delta 展开 | `Calculate_Transmissibility_FF` (2D/3D) |
-| 势能差 | `ΔΦ = ΔP - ρ g·Δx` | `Compute_Potential_Diff` in `FVM_Ops_AD.h` |
-| 上游选择 | 根据势能差符号选择 upwind 侧 | `Op_Upwind_AD` in `FVM_Ops_AD.h` |
-| 非结构网格梯度 | Green-Gauss / Least-Squares | `FVM_Grad` (`FVM_Grad.h/.cpp`) |
-| 两相本构 | VG 毛细压力与相对渗透率 | `CapRelPerm_HD.h` |
-| AD 流体物性桥接 | EOS 表查 + 鲁棒差分导数 + 链式组装 | `AD_FluidEvaluator.h` |
+| 两点串联阻力 | `R = d1/K1 + d2/K2` | `FVM_Ops::Op_Math_SeriesResistance` |
+| 两点传导率 | `T = A / R` | `FVM_Ops::Op_Math_Transmissibility` |
+| MM 传导率 | 面法向距离 + 投影渗透率 | `TransmissibilitySolver_2D/3D::Calculate_Transmissibility_Matrix` |
+| FI 传导率 | 邻接裂缝微元串联阻力 | `Calculate_Transmissibility_FractureInternal` |
+| NNC 传导率 | `A_int / (d_m/K_m + w_f/(2K_f))` | `Calculate_Transmissibility_NNC` |
+| FF 传导率 | 交汇处 Star-Delta 展开 | `Calculate_Transmissibility_FF` + `ff_topology` |
+| 势能差 | `ΔΦ = ΔP - ρ g·Δx` | `FVM_Ops::Compute_Potential_Diff` |
+| 上游选择 | `ΔΦ` 符号判定迎风侧 | `FVM_Ops::Op_Upwind_AD` |
+| 非正交修正 | `corr = ∇φ_f · vectorT` | `FVM_Ops::Op_NonOrthogonal_PressureCorr` |
+| 两相本构 | VG `Pc(Sw)` + Mualem `krw/krg` | `CapRelPerm_HD.h` |
+| AD 物性桥接 | 表格/解析 EOS + 鲁棒导数 + 链式组装 | `AD_FluidEvaluator.h` |
+| 井 BHP 方程 | `R_well = P_wbh - P_target` | `WellDOFManager::AssembleWellEquations` |
+| 井 Rate 方程 | `R_well = WI_mob(P_res-P_wbh)-q_spec` | `WellDOFManager::AssembleWellEquations` |
 
 ---
 
-## 6. I/O、配置与命名约定
+## 7. Day6 Campaign 事实快照（当前实现）
 
-### 6.1 边界 Tag
+### 7.1 场景定义
 
-- `MeshDefinitions.h` 中定义：`LEFT=1`, `RIGHT=2`, `BOTTOM=3`, `TOP=4`, `TAG_FRONT=5`, `TAG_BACK=6`。
+- 物理场景：`T01..T16`（4 个布尔轴组合）
+  - `variable_properties`
+  - `with_wells`
+  - `two_phase`
+  - `heat_enabled`
+- 拓扑轴：`F0`（无裂缝）/`F1`（单裂缝）/`F2`（交叉裂缝）
 
-### 6.2 场名字符串统一来源
+### 7.2 闯关与回归联动
 
-- `SolverContrlStrName_op.h` 统一管理：
-  - 岩石：`K_xx`, `K_yy`, `K_zz`, `phi`, `lambda_r`
-  - 流体：`rho_w/rho_g`, `mu_w/mu_g`, `h_w/h_g`, `lambda_w/lambda_g`
-  - 主变量：`p_w`, `s_w`, `T` 及 `*_old`, `*_prev`
+- 每个 `Txx` 必须 `F0 -> F1 -> F2` 全通过（fail-fast）。
+- 里程碑 `T04/T08/T12/T16` 自动触发：
+  - `day6_matrix_audit_*`
+  - `issue11_frozen_matrix`
+  - `issue12_linear_solver`
 
-### 6.3 测试输出目录（当前已使用）
+### 7.3 输出结构
 
-- `Test/MeshTest/2D-EDFM`
-- `Test/MeshTest/3D-EDFM`
-- `Test/MeshTest/GeomIndexTest/2D_EDFM`
-- `Test/MeshTest/GeomIndexTest/3D_EDFM`
-- `Test/NNCTest/2D_EDFM`
-- `Test/NNCTest/3D_EDFM`
-- `Test/BoundaryTest`
-- `Test/FieldOperator`
-- `Test/PropertyTest`
+- 单 case：`Test/Transient/Day6/<2D|3D>_Txx_Fy/`
+  - `convergence.log`
+  - `final.vtk`
+- Campaign 指标：`Test/Transient/Day6/Campaign/<2D|3D>/Txx_Fy/metrics.csv`
+  - 含 `topology` 字段
 
-### 6.4 外部依赖（按 `.vcxproj`）
+---
+
+## 8. I/O、命名与依赖
+
+### 8.1 边界 Tag
+
+- `MeshDefinitions.h`：`LEFT=1`, `RIGHT=2`, `BOTTOM=3`, `TOP=4`, `TAG_FRONT=5`, `TAG_BACK=6`
+
+### 8.2 字段命名统一来源
+
+- `SolverContrlStrName_op.h`
+- 主变量：`p_w`, `s_w`, `T`
+- 典型物性：`rho_w/rho_g`, `mu_w/mu_g`, `h_w/h_g`, `lambda_*`, `K_xx/K_yy/K_zz`, `phi`
+
+### 8.3 后处理能力
+
+- `PostProcess_2D`：`ExportTecplot`, `ExportVTK`, `ExportVTU`, `ExportPVD`, `SyncADFieldToScalar`
+- `PostProcess_3D`：`ExportTecplot`, `ExportVTK`, `SyncADFieldToScalar`
+- VTK 支持 `DomainID` 分域可视化
+
+### 8.4 构建依赖（VS 工程）
 
 - Visual Studio v143 / MSBuild
 - Eigen
 - Gmsh (`gmsh.lib`)
 - OpenMP
 
-工程文件内示例路径（本机配置）：
-
-- Gmsh include/lib: `D:\1gmesh\gmsh-source\...`
-- Eigen: `D:\1Eigen\eigen-5.0.0\...`
-
 ---
 
-## 7. 构建与运行
-
-### 7.1 构建（Windows + VS）
+## 9. 构建与运行
 
 ```powershell
 msbuild .\2D-Unstr-Quadrilateral-EDFM.sln /p:Configuration=Debug /p:Platform=x64
-```
-
-可执行文件默认在：
-
-- `x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe`
-
-### 7.2 运行方式（当前）
-
-- 查看可用 case：
-
-```powershell
 .\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --list
+.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day2_fvm_ad
+.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day6_campaign_2d_all
 ```
-
-- 运行默认回归入口（Day2 FVM-AD）：
-
-```powershell
-.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe
-```
-
-- 运行指定 case（示例）：
-
-```powershell
-.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day1_arch_conn
-.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=day1_arch_conn_repro
-.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=2d_edfm_dfn
-.\x64\Debug\Bin\2D-Unstr-Quadrilateral-EDFM.exe --case=trans_3d
-```
-
-- 最小回归矩阵见：`REGRESSION_CASES.md`
-- 每日执行与签收计划见：`PLAN_7D_CHECKLIST.md`
 
 ---
 
-## 8. 当前状态（面向新会话的事实快照）
+## 10. 风险与维护约定
 
-### 8.1 已完成
+- 风险1：其他文档可能保留 Day7 case 名称，但 dispatcher 目前未接入。
+- 风险2：`ff_topology` 与 `T_FF_*` 长度不一致会在 Builder 阶段抛错。
+- 风险3：`FreezePattern()` 后新增连接会报错，井耦合 pattern 必须提前注册。
+- 风险4：字段字符串变更需同步 `SolverContrlStrName_op.h` 与加载/装配调用端。
 
-- Day3 已新增 `BoundaryAssembler` 生产级边界/漏失装配入口，修复 Robin/Dirichlet 的除零风险与装配向量边界检查，并补齐两相 Leakoff AD 断言与 Day3 显式回归判据。
-- Day4 井控链路已通过验收：`--case=day4_well_patch` 输出 6 条 Day4 关键 PASS 行（WI 2D/3D、BHP/Rate 质量耦合、能量耦合、WAG 切换、Matrix+Fracture 完井），且 `--case=trans_2d`、`--case=trans_3d` 均 PASS。
-- Day4 可视化链路已通过验收：`--case=day4_well_viz` 成功导出 `Test/BoundaryTest/day4_well_viz_2d.vtk` 与 `Test/BoundaryTest/day4_well_viz_3d.vtk`，日志含 2D/3D 导出 PASS 行且无 Error/Exception/Fatal。
-- 章节一对应的 2D/3D EDFM 几何嵌入、候选筛选、交互重构、拓扑导出与一致性检查链条已成型。
-- 静态传导率四类机制（MM/FI/NNC/FF）在 2D/3D 均有对应实现与基准导出。
-- FIM 拓扑连接聚合链（Builder + ConnectionManager）可用于守恒检查与连接净化。
-- 3D 后处理已具备 Tecplot + VTK 双导出路径，可直接在 ParaView 做网格与场可视化检查。
+维护要求：
 
-### 8.2 进行中
-
-- 单相/两相热流耦合从“模块验证”向“统一时间推进求解入口”收敛。
-- 章节三的 IMPES/FIM 工程化主流程（强重力分异/滤失/交替注采）仍需系统串联与回归测试矩阵。
-- Day5-Day7 需要在现有 `day4_well_viz` 基础上扩展更多物理场（如相饱和度/温度演化）的时序可视化验收脚本。
-
-### 8.3 待开展
-
-- 章节四参数化分析与运行策略优化（批量算例、指标统计、策略扫描自动化）。
+1. 新增/删除 case 时，同步更新 `main.cpp --list` 与本文件第 3 节。
+2. 关键功能改动后，至少更新 Metadata 与风险/现状描述。
+3. 文档冲突时先修正代码事实，再回写文档，不反向“改代码迎合旧文档”。
 
 ---
 
-## 9. 关键风险与约定
-
-- `main.cpp` 已支持命令行调度，但 case 命名变更若不同步回归文档，会造成 CI/人工脚本失配。
-- FF/NNC 相关数组长度与拓扑映射必须严格一致，Builder 内有 runtime 检查，建议保留。
-- `FieldManager` 的 `ff_topology` 与 `T_FF_*` 字段必须同步生成、同步消费。
-- `TransmissibilitySolver` 与 `FIM_TopologyBuilder` 使用固定字段名，修改字符串需同步 `SolverContrlStrName_op.h` 与调用端。
-
----
-
-## 10. 新对话快速接手清单（先读这 7 个文件）
+## 11. 新会话快速接手建议（优先阅读）
 
 1. `main.cpp`
-   - 查看 `--list` 的 case 命名是否与当前回归文档一致。
-2. `MeshManager.h` + `3D_MeshManager.h`
-   - 明确 2D/3D 网格-裂缝耦合主流程与 solverIndex 规则。
-3. `TransmissibilitySolver_2D.cpp` + `TransmissibilitySolver_3D.cpp`
-   - 明确 MM/FI/NNC/FF 传导率实现细节与字段名。
-4. `2D_FieldManager.h` + `3D_FieldManager.h`
-   - 明确三域场注册与数据尺寸来源。
-5. `test_Transmissibility_2D.h` + `test_Transmissibility_3D.h`
-   - 获取“完整可运行样例流水线”（Stage 1~4）作为最稳妥回归入口。
-6. `REGRESSION_CASES.md`
-   - 按固定最小回归集执行并记录 PASS/FAIL。
-7. `PLAN_7D_CHECKLIST.md`
-   - 按“实现清单 + 严苛验收 + Evidence”推进当日工作并勾选状态。
-
----
-
-## 11. 后续维护规范（已落地）
-
-- `main.cpp` 已切换为参数化 dispatcher。新增测试入口时，必须同步更新 `--list` 可见 case 名称与描述。
-- 已新增 `REGRESSION_CASES.md`。每次重要改动后至少执行其中的最小回归集并记录结果。
-- `PROJECT_CONTEXT.md` 设为必更新文件：每次重要改动后至少更新 `Last Updated` 与 `Git Commit`（若未提交则标注 `dirty working tree`）。
-
-
-
+2. `FIM_TransientEngine/RunGeneric_impl.hpp`
+3. `FIM_TransientEngine/Types.hpp`
+4. `WellDOFManager.h`
+5. `FIM_BlockSparseMatrix.h`
+6. `TransmissibilitySolver_2D.cpp`
+7. `TransmissibilitySolver_3D.cpp`
+8. `FIM_TopologyBuilder2D.h`
+9. `FIM_TopologyBuilder3D.h`
+10. `FIM_ConnectionManager.h`
+11. `MeshManager.h`
+12. `3D_MeshManager.h`
+13. `Test_Day6_TransientSolver.cpp`

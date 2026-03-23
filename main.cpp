@@ -24,6 +24,7 @@
 #include "Test_FVM_Ops_AD.h"
 #include "Test_Day5_GlobalAssembly_Jacobian.h"
 #include "Test_Day6_TransientSolver.h"
+#include "Test_Day6_DebugLadder.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
 #include "ADVar.hpp"
@@ -121,6 +122,16 @@ int main (int argc, char** argv) {
         {"day6_transient_3d_tp_multiwell", "Day6: 3D multi-well interference transient + VTK export", []() { Test_Day6::Run_Day6_Transient_3D_TP_Multiwell(); return 0; }},
         {"day6_matrix_audit_2d_edfm", "Day6 explicit gate: 2D EDFM matrix assembly audit (NNC/FF)", []() { Test_Day6::Run_Day6_MatrixAudit_2D_EDFM(); return 0; }},
         {"day6_matrix_audit_3d_edfm", "Day6 explicit gate: 3D EDFM matrix assembly audit (NNC/FF)", []() { Test_Day6::Run_Day6_MatrixAudit_3D_EDFM(); return 0; }},
+        {"day6_campaign_2d_all", "Day6 campaign: 2D full T01..T16 with mandatory F0/F1/F2 gating", []() { Test_Day6::Run_Day6_Campaign_2D_All_TxxFy(); return 0; }},
+        {"day6_campaign_3d_all", "Day6 campaign: 3D full T01..T16 with mandatory F0/F1/F2 gating", []() { Test_Day6::Run_Day6_Campaign_3D_All_TxxFy(); return 0; }},
+        {"day6_t01_f0", "Day6 T01 immediate split gate: F0 no-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F0(); return 0; }},
+        {"day6_t01_f1", "Day6 T01 immediate split gate: F1 single-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F1(); return 0; }},
+        {"day6_t01_f2", "Day6 T01 immediate split gate: F2 crossing-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F2(); return 0; }},
+        {"day6_t1_2d_sp_nowell_analytical", "Day6 T1 baseline: 2D no-well single-phase diffusion with Fourier analytical validation", []() { Test_Day6::Run_Day6_T1_2D_SP_NoWell_Analytical(); return 0; }},
+        {"day6l1_2d_sp_co2_const_nowell_analytical", "Day6L1: 2D pressure-only constant-CO2 no-well analytical baseline (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical(); return 0; }},
+        {"day6l2_2d_sp_co2_const_nowell_grid", "Day6L2: 2D pressure-only constant-CO2 no-well grid convergence (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence(); return 0; }},
+        {"day6l3_2d_sp_co2_const_nowell_solver", "Day6L3: 2D pressure-only constant-CO2 no-well solver robustness (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness(); return 0; }},
+        {"day6ladder_2d_sp_co2_const_nowell_all", "Day6 ladder: run L1+L2+L3 pressure-only debug chain (forced non-orth + VTK)", []() { Test_Day6::Run_Day6Ladder_2D_SP_CO2Const_NoWell_All(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
