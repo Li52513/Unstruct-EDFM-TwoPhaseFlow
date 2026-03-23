@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "StepKernels.hpp"
 #include "../FIM_BlockSparseMatrix.h"
@@ -9,6 +9,7 @@
 #include "../FIM_TopologyBuilder3D.h"
 #include "../TransmissibilitySolver_2D.h"
 #include "../TransmissibilitySolver_3D.h"
+#include "../FVM_Grad.h"
 #include "../2D_PostProcess.h"
 #include "../3D_PostProcess.h"
 #include "../WellDOFManager.h"
@@ -170,8 +171,12 @@ namespace FIM_Engine {
             const auto str_frac = PhysicalProperties_string_op::Fracture_string();
             auto phi_mat = fm.getMatrixScalar(str_rock.phi_tag);
             auto cr_mat = fm.getMatrixScalar(str_rock.c_r_tag);
+            auto kxx_mat = fm.getMatrixScalar(str_rock.k_xx_tag);
+            auto kyy_mat = fm.getMatrixScalar(str_rock.k_yy_tag);
+            auto kzz_mat = fm.getMatrixScalar(str_rock.k_zz_tag);
             auto phi_frac = fm.getFractureScalar(str_frac.phi_tag);
             auto cr_frac = fm.getFractureScalar(str_frac.c_r_tag);
+            auto kt_frac = fm.getFractureScalar(str_frac.k_t_tag);
             if (!cr_mat) std::cout << "    [Warning] Matrix c_r field not found, defaulting to 0.0.\n";
             if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
 
@@ -210,6 +215,60 @@ namespace FIM_Engine {
                 return props;
             };
 
+            const auto p_cfg_n1 = PhysicalProperties_string_op::PressureEquation_String::FIM();
+            const auto t_cfg_n1 = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
+            const PhysicalProperties_string_op::Water w_cfg_n1;
+            auto sync_pressure_only_state_to_fields = [&]() {
+                if (use_eos) {
+                    SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
+                    return;
+                }
+
+                auto f_pw = fm.getOrCreateMatrixScalar(p_cfg_n1.pressure_field, 0.0);
+                auto f_T = fm.getOrCreateMatrixScalar(t_cfg_n1.temperatue_field, t_eval);
+                auto f_rhow = fm.getOrCreateMatrixScalar(w_cfg_n1.rho_tag, baseline_rho);
+                auto f_muw = fm.getOrCreateMatrixScalar(w_cfg_n1.mu_tag, baseline_mu);
+                auto f_hw = fm.getOrCreateMatrixScalar(w_cfg_n1.h_tag, 0.0);
+                auto f_lamw_mob = fm.getOrCreateMatrixScalar(w_cfg_n1.lambda_w_tag, 1.0 / std::max(baseline_mu, 1.0e-20));
+                auto f_kw = fm.getOrCreateMatrixScalar(w_cfg_n1.k_tag, 0.6);
+                auto f_P_viz = fm.getOrCreateMatrixScalar("P", 0.0);
+
+                auto frac_pw = fm.getOrCreateFractureScalar(p_cfg_n1.pressure_field, 0.0);
+                auto frac_T = fm.getOrCreateFractureScalar(t_cfg_n1.temperatue_field, t_eval);
+                auto frac_rhow = fm.getOrCreateFractureScalar(w_cfg_n1.rho_tag, baseline_rho);
+                auto frac_muw = fm.getOrCreateFractureScalar(w_cfg_n1.mu_tag, baseline_mu);
+                auto frac_hw = fm.getOrCreateFractureScalar(w_cfg_n1.h_tag, 0.0);
+                auto frac_lamw_mob = fm.getOrCreateFractureScalar(w_cfg_n1.lambda_w_tag, 1.0 / std::max(baseline_mu, 1.0e-20));
+                auto frac_kw = fm.getOrCreateFractureScalar(w_cfg_n1.k_tag, 0.6);
+                auto frac_P_viz = fm.getOrCreateFractureScalar("P", 0.0);
+
+                const double lam_w_mob = 1.0 / std::max(baseline_mu, 1.0e-20);
+                for (int i = 0; i < totalBlocks; ++i) {
+                    const double p = state.P[i];
+                    if (i < nMat) {
+                        if (f_pw && i < static_cast<int>(f_pw->data.size())) f_pw->data[i] = p;
+                        if (f_T && i < static_cast<int>(f_T->data.size())) f_T->data[i] = t_eval;
+                        if (f_rhow && i < static_cast<int>(f_rhow->data.size())) f_rhow->data[i] = baseline_rho;
+                        if (f_muw && i < static_cast<int>(f_muw->data.size())) f_muw->data[i] = baseline_mu;
+                        if (f_hw && i < static_cast<int>(f_hw->data.size())) f_hw->data[i] = 0.0;
+                        if (f_lamw_mob && i < static_cast<int>(f_lamw_mob->data.size())) f_lamw_mob->data[i] = lam_w_mob;
+                        if (f_kw && i < static_cast<int>(f_kw->data.size())) f_kw->data[i] = 0.6;
+                        if (f_P_viz && i < static_cast<int>(f_P_viz->data.size())) f_P_viz->data[i] = p;
+                    }
+                    else {
+                        const int fi = i - nMat;
+                        if (frac_pw && fi < static_cast<int>(frac_pw->data.size())) frac_pw->data[fi] = p;
+                        if (frac_T && fi < static_cast<int>(frac_T->data.size())) frac_T->data[fi] = t_eval;
+                        if (frac_rhow && fi < static_cast<int>(frac_rhow->data.size())) frac_rhow->data[fi] = baseline_rho;
+                        if (frac_muw && fi < static_cast<int>(frac_muw->data.size())) frac_muw->data[fi] = baseline_mu;
+                        if (frac_hw && fi < static_cast<int>(frac_hw->data.size())) frac_hw->data[fi] = 0.0;
+                        if (frac_lamw_mob && fi < static_cast<int>(frac_lamw_mob->data.size())) frac_lamw_mob->data[fi] = lam_w_mob;
+                        if (frac_kw && fi < static_cast<int>(frac_kw->data.size())) frac_kw->data[fi] = 0.6;
+                        if (frac_P_viz && fi < static_cast<int>(frac_P_viz->data.size())) frac_P_viz->data[fi] = p;
+                    }
+                }
+            };
+
             std::vector<double> P_ref(totalBlocks, ic.P_init);
             for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i];
 
@@ -242,7 +301,7 @@ namespace FIM_Engine {
 
             auto export_vtk_snapshot = [&](const std::string& tag, int step_idx) {
                 if (modules.disable_default_vtk_output) return;
-                SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
+                sync_pressure_only_state_to_fields();
                 const std::string fname = "Test/Transient/Day6/" + caseName + "/" + tag + ".vtk";
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                     PostProcess_2D(mgr, fm).ExportVTK(fname, t);
@@ -295,27 +354,67 @@ namespace FIM_Engine {
 
                     std::vector<Vector> nonorth_grad_P(nMat, Vector(0.0, 0.0, 0.0));
                     if (params.enable_non_orthogonal_correction && nMat > 0) {
-                        for (const auto& conn : connMgr.GetConnections()) {
-                            if (conn.type != ConnectionType::Matrix_Matrix) continue;
-                            const int nI = conn.nodeI, nJ = conn.nodeJ;
-                            if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
-                            const double volI = std::max(vols[nI], 1.0e-30);
-                            const double volJ = std::max(vols[nJ], 1.0e-30);
-                            const double pFace = 0.5 * (state.P[nI] + state.P[nJ]);
-                            // Connection does not store an explicit normal vector.
-                            // Reconstruct a consistent face-area direction from block-centre line.
-                            const Vector d_ij = blockCenters[nJ] - blockCenters[nI];
-                            double dmag = d_ij.Mag();
-                            if (dmag <= 1.0e-20) dmag = std::max(conn.aux_dist, 1.0e-20);
-                            const double inv_dmag = 1.0 / dmag;
-                            const double nx = d_ij.m_x * inv_dmag;
-                            const double ny = d_ij.m_y * inv_dmag;
-                            const double Ax = nx * conn.aux_area;
-                            const double Ay = ny * conn.aux_area;
-                            nonorth_grad_P[nI].m_x += pFace * Ax / volI;
-                            nonorth_grad_P[nI].m_y += pFace * Ay / volI;
-                            nonorth_grad_P[nJ].m_x -= pFace * Ax / volJ;
-                            nonorth_grad_P[nJ].m_y -= pFace * Ay / volJ;
+                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                            bool gg_ok = false;
+                            try {
+                                volScalarField p_tmp("n1_p_tmp", static_cast<size_t>(nMat), 0.0);
+                                for (int ci = 0; ci < nMat; ++ci) p_tmp[ci] = state.P[ci];
+                                const BoundarySetting::BoundaryConditionManager* bc_grad = modules.pressure_bc;
+                                FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_grad);
+                                auto grad_field = grad_solver.compute(p_tmp, FVM_Grad::Method::GreenGauss);
+                                if (grad_field && grad_field->data.size() >= static_cast<size_t>(nMat)) {
+                                    for (int ci = 0; ci < nMat; ++ci) {
+                                        nonorth_grad_P[ci] = (*grad_field)[ci];
+                                    }
+                                    gg_ok = true;
+                                }
+                            }
+                            catch (...) {
+                                gg_ok = false;
+                            }
+
+                            if (!gg_ok) {
+                                const auto& mesh_faces = mgr.mesh().getFaces();
+                                for (const auto& mf : mesh_faces) {
+                                    if (mf.isBoundary()) continue;
+                                    const int nI = mf.ownerCell_index;
+                                    const int nJ = mf.neighborCell_index;
+                                    if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+                                    const double volI = std::max(vols[nI], 1.0e-30);
+                                    const double volJ = std::max(vols[nJ], 1.0e-30);
+                                    const double pFace = 0.5 * (state.P[nI] + state.P[nJ]);
+                                    const double Ax = mf.normal.m_x * mf.length;
+                                    const double Ay = mf.normal.m_y * mf.length;
+                                    nonorth_grad_P[nI].m_x += pFace * Ax / volI;
+                                    nonorth_grad_P[nI].m_y += pFace * Ay / volI;
+                                    nonorth_grad_P[nJ].m_x -= pFace * Ax / volJ;
+                                    nonorth_grad_P[nJ].m_y -= pFace * Ay / volJ;
+                                }
+                            }
+                        }
+                        else {
+                            for (const auto& conn : connMgr.GetConnections()) {
+                                if (conn.type != ConnectionType::Matrix_Matrix) continue;
+                                const int nI = conn.nodeI, nJ = conn.nodeJ;
+                                if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+                                const double volI = std::max(vols[nI], 1.0e-30);
+                                const double volJ = std::max(vols[nJ], 1.0e-30);
+                                const double pFace = 0.5 * (state.P[nI] + state.P[nJ]);
+                                // 3D fallback: Connection lacks explicit face normal;
+                                // approximate area direction from centre-line.
+                                const Vector d_ij = blockCenters[nJ] - blockCenters[nI];
+                                double dmag = d_ij.Mag();
+                                if (dmag <= 1.0e-20) dmag = std::max(conn.aux_dist, 1.0e-20);
+                                const double inv_dmag = 1.0 / dmag;
+                                const double nx = d_ij.m_x * inv_dmag;
+                                const double ny = d_ij.m_y * inv_dmag;
+                                const double Ax = nx * conn.aux_area;
+                                const double Ay = ny * conn.aux_area;
+                                nonorth_grad_P[nI].m_x += pFace * Ax / volI;
+                                nonorth_grad_P[nI].m_y += pFace * Ay / volI;
+                                nonorth_grad_P[nJ].m_x -= pFace * Ax / volJ;
+                                nonorth_grad_P[nJ].m_y -= pFace * Ay / volJ;
+                            }
                         }
                     }
 
@@ -334,12 +433,24 @@ namespace FIM_Engine {
 
                         ADVar<1> P(state.P[bi]); P.grad(0) = 1.0;
                         ADVar<1> P_old(old_state.P[bi]);
-                        auto props = eval_pressure_props(P);
-                        auto props_old = eval_pressure_props(P_old);
+                        ADVar<1> acc(0.0);
 
-                        ADVar<1> phi = ADVar<1>(phi_ref) * (ADVar<1>(1.0) + ADVar<1>(c_r) * (P - ADVar<1>(P_ref[bi])));
-                        ADVar<1> phi_old = ADVar<1>(phi_ref) * (ADVar<1>(1.0) + ADVar<1>(c_r) * (P_old - ADVar<1>(P_ref[bi])));
-                        ADVar<1> acc = (props.rho * phi - props_old.rho * phi_old) * (vols[bi] / std::max(dt, 1.0e-20));
+                        if (!use_eos) {
+                            // Constant-baseline pressure-only route:
+                            // keep linear transient coefficient consistent with legacy Day6 ladder
+                            // (phi*ct) and avoid introducing extra phi(P) nonlinearity.
+                            const double ct_eff = std::max(c_r, 0.0);
+                            const double coeff = baseline_rho * phi_ref * ct_eff
+                                * (vols[bi] / std::max(dt, 1.0e-20));
+                            acc = ADVar<1>(coeff) * (P - P_old);
+                        }
+                        else {
+                            auto props = eval_pressure_props(P);
+                            auto props_old = eval_pressure_props(P_old);
+                            ADVar<1> phi = ADVar<1>(phi_ref) * (ADVar<1>(1.0) + ADVar<1>(c_r) * (P - ADVar<1>(P_ref[bi])));
+                            ADVar<1> phi_old = ADVar<1>(phi_ref) * (ADVar<1>(1.0) + ADVar<1>(c_r) * (P_old - ADVar<1>(P_ref[bi])));
+                            acc = (props.rho * phi - props_old.rho * phi_old) * (vols[bi] / std::max(dt, 1.0e-20));
+                        }
 
                         std::vector<ADVar<1>> acc_eqs(1);
                         acc_eqs[0] = acc;
@@ -394,54 +505,184 @@ namespace FIM_Engine {
                         if (params.enable_non_orthogonal_correction &&
                             conn.type == ConnectionType::Matrix_Matrix &&
                             i < nMat && j < nMat) {
-                            const double vT_mag = conn.vectorT.Mag();
-                            if (vT_mag > 1.0e-15) {
-                                const double gPx = 0.5 * (nonorth_grad_P[i].m_x + nonorth_grad_P[j].m_x);
-                                const double gPy = 0.5 * (nonorth_grad_P[i].m_y + nonorth_grad_P[j].m_y);
-                                const double corr_P = gPx * conn.vectorT.m_x + gPy * conn.vectorT.m_y;
-                                const double K_eff = (conn.aux_area > 1.0e-12)
-                                    ? conn.T_Flow * conn.aux_dist / conn.aux_area
-                                    : 0.0;
-                                const double gdx = gravityVec * (blockCenters[j] - blockCenters[i]);
-                                const double dPhi_sign = (state.P[j] - state.P[i]) - 0.5 * (cprop[i].rho + cprop[j].rho) * gdx;
-                                const double mob = (dPhi_sign < 0.0) ? cprop[i].mob : cprop[j].mob;
-                                const double mass_corr = K_eff * mob * corr_P;
-                                global_mat.AddResidual(i, 0, -mass_corr);
-                                global_mat.AddResidual(j, 0, mass_corr);
-                                if (eq_i >= 0 && eq_i < totalEq) eq_contribs[eq_i].R_flux += -mass_corr;
-                                if (eq_j >= 0 && eq_j < totalEq) eq_contribs[eq_j].R_flux += mass_corr;
+                            if constexpr (!std::is_same_v<MeshMgrType, MeshManager>) {
+                                const double vT_mag = conn.vectorT.Mag();
+                                if (vT_mag > 1.0e-15) {
+                                    const double gPx = 0.5 * (nonorth_grad_P[i].m_x + nonorth_grad_P[j].m_x);
+                                    const double gPy = 0.5 * (nonorth_grad_P[i].m_y + nonorth_grad_P[j].m_y);
+                                    const double corr_P = gPx * conn.vectorT.m_x + gPy * conn.vectorT.m_y;
+                                    const double K_eff = (conn.aux_area > 1.0e-12)
+                                        ? conn.T_Flow * conn.aux_dist / conn.aux_area
+                                        : 0.0;
+                                    const double gdx = gravityVec * (blockCenters[j] - blockCenters[i]);
+                                    const double dPhi_sign = (state.P[j] - state.P[i]) - 0.5 * (cprop[i].rho + cprop[j].rho) * gdx;
+                                    const double mob = (dPhi_sign < 0.0) ? cprop[i].mob : cprop[j].mob;
+                                    const double mass_corr = K_eff * mob * corr_P;
+                                    global_mat.AddResidual(i, 0, -mass_corr);
+                                    global_mat.AddResidual(j, 0, mass_corr);
+                                    if (eq_i >= 0 && eq_i < totalEq) eq_contribs[eq_i].R_flux += -mass_corr;
+                                    if (eq_j >= 0 && eq_j < totalEq) eq_contribs[eq_j].R_flux += mass_corr;
+                                }
+                            }
+                        }
+                    }
+
+                    if (params.enable_non_orthogonal_correction && nMat > 0) {
+                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                            const auto& mesh_faces = mgr.mesh().getFaces();
+                            for (const auto& face : mesh_faces) {
+                                if (face.isBoundary()) continue;
+                                const int owner = face.ownerCell_index;
+                                const int nei = face.neighborCell_index;
+                                if (owner < 0 || nei < 0 || owner >= nMat || nei >= nMat) continue;
+                                if (face.vectorT.Mag() <= 1.0e-15) continue;
+
+                                const double w = std::min(1.0, std::max(0.0, face.f_linearInterpolationCoef));
+                                const Vector grad_f = nonorth_grad_P[owner] * w + nonorth_grad_P[nei] * (1.0 - w);
+                                const double corr_p = grad_f * face.vectorT;
+
+                                double kxx_o = 1.0e-13, kyy_o = 1.0e-13, kzz_o = 1.0e-13;
+                                double kxx_n = 1.0e-13, kyy_n = 1.0e-13, kzz_n = 1.0e-13;
+                                if (kxx_mat && owner < static_cast<int>(kxx_mat->data.size())) kxx_o = std::max(kxx_mat->data[owner], 0.0);
+                                if (kyy_mat && owner < static_cast<int>(kyy_mat->data.size())) kyy_o = std::max(kyy_mat->data[owner], 0.0);
+                                if (kzz_mat && owner < static_cast<int>(kzz_mat->data.size())) kzz_o = std::max(kzz_mat->data[owner], 0.0);
+                                if (kxx_mat && nei < static_cast<int>(kxx_mat->data.size())) kxx_n = std::max(kxx_mat->data[nei], 0.0);
+                                if (kyy_mat && nei < static_cast<int>(kyy_mat->data.size())) kyy_n = std::max(kyy_mat->data[nei], 0.0);
+                                if (kzz_mat && nei < static_cast<int>(kzz_mat->data.size())) kzz_n = std::max(kzz_mat->data[nei], 0.0);
+
+                                const double nx = face.normal.m_x;
+                                const double ny = face.normal.m_y;
+                                const double nz = face.normal.m_z;
+                                double kn_o = nx * nx * kxx_o + ny * ny * kyy_o + nz * nz * kzz_o;
+                                double kn_n = nx * nx * kxx_n + ny * ny * kyy_n + nz * nz * kzz_n;
+                                if (kn_o <= 0.0) kn_o = std::max({ kxx_o, kyy_o, kzz_o, 1.0e-20 });
+                                if (kn_n <= 0.0) kn_n = std::max({ kxx_n, kyy_n, kzz_n, 1.0e-20 });
+
+                                const double m_o = kn_o * cprop[owner].rho / std::max(cprop[owner].mu, 1.0e-20);
+                                const double m_n = kn_n * cprop[nei].rho / std::max(cprop[nei].mu, 1.0e-20);
+                                const double m1 = std::max(m_o, 1.0e-30);
+                                const double m2 = std::max(m_n, 1.0e-30);
+                                const double mob_face = 2.0 * m1 * m2 / (m1 + m2);
+
+                                const double corr_mass = mob_face * corr_p;
+                                // Legacy-equivalent deferred correction in residual form:
+                                // rhs_owner -= corr, rhs_nei += corr  <=>  R_owner += corr, R_nei -= corr.
+                                global_mat.AddResidual(owner, 0, corr_mass);
+                                global_mat.AddResidual(nei, 0, -corr_mass);
+
+                                const int eq_owner = mgr.getEquationIndex(owner, 0);
+                                const int eq_nei = mgr.getEquationIndex(nei, 0);
+                                if (eq_owner >= 0 && eq_owner < totalEq) eq_contribs[eq_owner].R_flux += corr_mass;
+                                if (eq_nei >= 0 && eq_nei < totalEq) eq_contribs[eq_nei].R_flux += -corr_mass;
                             }
                         }
                     }
 
                     if (modules.pressure_bc) {
-                        SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
-                        std::vector<double> bc_res(totalEq, 0.0);
-                        std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
-                        const bool bc_use_co2 = use_eos || (modules.single_phase_fluid == SinglePhaseFluidModel::CO2);
-                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                            BoundaryAssembler::Assemble_2D_FullJac(
-                                mgr, *modules.pressure_bc, 0, fm,
-                                PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
-                                bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                        if (use_eos) {
+                            sync_pressure_only_state_to_fields();
+                            std::vector<double> bc_res(totalEq, 0.0);
+                            std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                            const bool bc_use_co2 = true;
+                            if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                                BoundaryAssembler::Assemble_2D_FullJac(
+                                    mgr, *modules.pressure_bc, 0, fm,
+                                    PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
+                                    bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                            }
+                            else {
+                                BoundaryAssembler::Assemble_3D_FullJac(
+                                    mgr, *modules.pressure_bc, 0, fm,
+                                    PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
+                                    bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                            }
+
+                            for (int bi = 0; bi < totalBlocks; ++bi) {
+                                const int eq = mgr.getEquationIndex(bi, 0);
+                                if (eq < 0 || eq >= totalEq) continue;
+                                const double r_bc = bc_res[eq];
+                                const double dRdP = bc_jac3[eq][0];
+                                if (std::abs(r_bc) <= 1.0e-16 && std::abs(dRdP) <= 1.0e-16) continue;
+                                global_mat.AddResidual(bi, 0, r_bc);
+                                global_mat.AddDiagJacobian(bi, 0, 0, dRdP);
+                                eq_contribs[eq].R_bc += r_bc;
+                                eq_contribs[eq].D_bc += dRdP;
+                            }
                         }
                         else {
-                            BoundaryAssembler::Assemble_3D_FullJac(
-                                mgr, *modules.pressure_bc, 0, fm,
-                                PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
-                                bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
-                        }
+                            constexpr double kBcEps = 1.0e-14;
+                            const auto& mesh = mgr.mesh();
+                            const auto& cells = mesh.getCells();
+                            const auto& faces = mesh.getFaces();
+                            for (const auto& face : faces) {
+                                if (!face.isBoundary()) continue;
+                                if (!modules.pressure_bc->HasBC(face.physicalGroupId)) continue;
+                                const int owner = face.ownerCell_index;
+                                if (owner < 0 || owner >= totalBlocks || owner >= static_cast<int>(cells.size())) continue;
 
-                        for (int bi = 0; bi < totalBlocks; ++bi) {
-                            const int eq = mgr.getEquationIndex(bi, 0);
-                            if (eq < 0 || eq >= totalEq) continue;
-                            const double r_bc = bc_res[eq];
-                            const double dRdP = bc_jac3[eq][0];
-                            if (std::abs(r_bc) <= 1.0e-16 && std::abs(dRdP) <= 1.0e-16) continue;
-                            global_mat.AddResidual(bi, 0, r_bc);
-                            global_mat.AddDiagJacobian(bi, 0, 0, dRdP);
-                            eq_contribs[eq].R_bc += r_bc;
-                            eq_contribs[eq].D_bc += dRdP;
+                                const auto bc = modules.pressure_bc->GetBCCoefficients(face.physicalGroupId, face.midpoint);
+                                ADVar<1> P_cell(state.P[owner]);
+                                P_cell.grad(0) = 1.0;
+                                const auto props = eval_pressure_props(P_cell);
+                                const ADVar<1> mob = props.rho / props.mu;
+
+                                double k_n = 1.0e-13;
+                                if (owner < nMat) {
+                                    double kxx = 1.0e-13, kyy = 1.0e-13, kzz = 1.0e-13;
+                                    if (kxx_mat && owner < static_cast<int>(kxx_mat->data.size())) kxx = std::max(kxx_mat->data[owner], 0.0);
+                                    if (kyy_mat && owner < static_cast<int>(kyy_mat->data.size())) kyy = std::max(kyy_mat->data[owner], 0.0);
+                                    if (kzz_mat && owner < static_cast<int>(kzz_mat->data.size())) kzz = std::max(kzz_mat->data[owner], 0.0);
+                                    const double nx = face.normal.m_x;
+                                    const double ny = face.normal.m_y;
+                                    const double nz = face.normal.m_z;
+                                    k_n = nx * nx * kxx + ny * ny * kyy + nz * nz * kzz;
+                                    if (k_n <= 0.0) k_n = std::max({ kxx, kyy, kzz, 1.0e-20 });
+                                }
+                                else {
+                                    const int fi = owner - nMat;
+                                    if (kt_frac && fi >= 0 && fi < static_cast<int>(kt_frac->data.size())) {
+                                        k_n = std::max(kt_frac->data[fi], 1.0e-20);
+                                    }
+                                }
+
+                                const Vector d_owner = face.midpoint - cells[owner].center;
+                                const double dist = std::max(std::abs(d_owner * face.normal), 1.0e-12);
+                                const double area = std::max(face.vectorE.Mag(), 0.0);
+                                const double T_geom = area / dist;
+                                const ADVar<1> phys_coeff = ADVar<1>(std::max(k_n, 1.0e-20)) * mob;
+
+                                ADVar<1> q_bc(0.0);
+                                bool applied = false;
+                                if (bc.type == BoundarySetting::BoundaryType::Dirichlet) {
+                                    if (std::abs(bc.a) > kBcEps) {
+                                        q_bc = FVM_Ops::Op_Boundary_Dirichlet_AD<1, ADVar<1>>(T_geom, P_cell, bc.c / bc.a);
+                                        q_bc = FVM_Ops::Op_Boundary_ScaleFlux_AD<1, ADVar<1>>(q_bc, phys_coeff);
+                                        applied = true;
+                                    }
+                                }
+                                else if (bc.type == BoundarySetting::BoundaryType::Neumann) {
+                                    q_bc = FVM_Ops::Op_Boundary_Neumann_AD<1, ADVar<1>>(area, bc.c);
+                                    applied = true;
+                                }
+                                else if (bc.type == BoundarySetting::BoundaryType::Robin) {
+                                    if (std::abs(bc.a) > kBcEps) {
+                                        const double c_l = -bc.a;
+                                        const double far_field_value = bc.c / bc.a;
+                                        q_bc = ADVar<1>(area) * FVM_Ops::Op_Leakoff_Source_AD<1, ADVar<1>>(true, c_l, P_cell, far_field_value);
+                                        q_bc = FVM_Ops::Op_Boundary_ScaleFlux_AD<1, ADVar<1>>(q_bc, phys_coeff);
+                                        applied = true;
+                                    }
+                                }
+                                if (!applied) continue;
+
+                                global_mat.AddResidual(owner, 0, q_bc.val);
+                                global_mat.AddDiagJacobian(owner, 0, 0, q_bc.grad(0));
+                                const int eq = mgr.getEquationIndex(owner, 0);
+                                if (eq >= 0 && eq < totalEq) {
+                                    eq_contribs[eq].R_bc += q_bc.val;
+                                    eq_contribs[eq].D_bc += q_bc.grad(0);
+                                }
+                            }
                         }
                     }
 
@@ -543,9 +784,12 @@ namespace FIM_Engine {
 
                 EmitStepAccepted<1>(modules, step, t, dt, iter_used, step_final_residual, total_rollbacks, converge_mode, state);
 
-                if (iter_used <= 2) dt = std::min(dt * 1.2, params.dt_max);
-                else if (iter_used <= 4) dt = std::min(dt * 1.05, params.dt_max);
-                else dt = std::max(dt * 0.8, params.dt_min);
+                // N=1 route should recover quickly from dt_min after successful steps.
+                // Previous rule shrank dt for iter_used >= 5, which can lock dt at dt_min.
+                if (iter_used <= 2) dt = std::min(dt * 1.20, params.dt_max);
+                else if (iter_used <= 5) dt = std::min(dt * 1.10, params.dt_max);
+                else if (iter_used <= 8) dt = std::min(dt * 1.02, params.dt_max);
+                else dt = std::max(dt * 0.85, params.dt_min);
 
                 const bool reached_target_end = (target_end_time_s > 0.0) && (t >= target_end_time_s - 1.0e-12);
                 if (!modules.disable_default_vtk_output) {
@@ -623,12 +867,12 @@ namespace FIM_Engine {
         const int totalBlocks = mgr.getTotalDOFCount();
         const int totalEq = mgr.getTotalEquationDOFs();
 
-        // ── Step 3: Well independent DOF setup ──────────────────────────────────
+        // 鈹€鈹€ Step 3: Well independent DOF setup 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
         WellDOFManager<N> well_mgr;
         well_mgr.Setup(wells, totalBlocks);
         const int totalBlocksWithWells = well_mgr.TotalBlocksWithWells();
         const int totalEqWithWells     = totalBlocksWithWells * N;
-        // ───────────────────────────────────────────────────────────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         FIM_StateMap<N> state;
         state.InitSizes(totalBlocksWithWells);
@@ -688,7 +932,7 @@ namespace FIM_Engine {
             std::cout << "[Init] External state initializer injected.\n";
         }
 
-        // ── Step 3: init well BHP state; set well block centers to comp_cell center ──
+        // 鈹€鈹€ Step 3: init well BHP state; set well block centers to comp_cell center 鈹€鈹€
         well_mgr.InitWellState(state, ic.P_init, ic.T_init, ic.Sw_init, wells);
         for (int w = 0; w < well_mgr.NumWells(); ++w) {
             const auto& e = well_mgr.GetEntry(w);
@@ -697,7 +941,7 @@ namespace FIM_Engine {
             }
         }
         well_mgr.PrintSummary();
-        // ──────────────────────────────────────────────────────────────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         const Vector gravityVec = params.gravity_vector;
 
@@ -723,9 +967,9 @@ namespace FIM_Engine {
             global_mat.AddOffDiagBlock(conn.nodeI, conn.nodeJ, Eigen::Matrix<double, N, N>::Zero());
             global_mat.AddOffDiagBlock(conn.nodeJ, conn.nodeI, Eigen::Matrix<double, N, N>::Zero());
         }
-        // ── Step 3: register well ↔ reservoir off-diagonal blocks in pattern ──
+        // 鈹€鈹€ Step 3: register well 鈫?reservoir off-diagonal blocks in pattern 鈹€鈹€
         well_mgr.RegisterPatternConnections(global_mat);
-        // ────────────────────────────────────────────────────────────────────────
+        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
         global_mat.FreezePattern();
 
         const auto str_rock = PhysicalProperties_string_op::Rock();
@@ -1035,7 +1279,7 @@ namespace FIM_Engine {
                         ADVar<N> Sw_old_const = ClampSwForConstitutive<N>(Sw_old, vg_cfg, sw_constitutive_eps);
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
-                        // [DAY6-08] 裂缝 Pc=0，基质保持 vG
+                        // [DAY6-08] 瑁傜紳 Pc=0锛屽熀璐ㄤ繚鎸?vG
                         ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
                         ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;
@@ -1080,7 +1324,7 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
-                            // [DAY6-08] 按域判断：裂缝线性kr+Pc=0，基质vG
+                            // [DAY6-08] 鎸夊煙鍒ゆ柇锛氳缂濈嚎鎬r+Pc=0锛屽熀璐╲G
                             ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
                             if (i >= nMat) {
                                 Sw_i_const = (Sw_i.val < 0.0) ? ADVar<N>(0.0) : (Sw_i.val > 1.0) ? ADVar<N>(1.0) : Sw_i;
@@ -1178,8 +1422,8 @@ namespace FIM_Engine {
                 assembleBoundaryFieldProbe(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field);
 
                 Eigen::VectorXd b_probe = probe_mat.ExportEigenResidual();
-                // ── ConstantWaterNoConvection: freeze T probe rows to match main Newton system ──
-                // Without this, probe_res >> conv_res → LS-BASE-CHECK corrupts use_ref → Armijo fails.
+                // 鈹€鈹€ ConstantWaterNoConvection: freeze T probe rows to match main Newton system 鈹€鈹€
+                // Without this, probe_res >> conv_res 鈫?LS-BASE-CHECK corrupts use_ref 鈫?Armijo fails.
                 if constexpr (N == 2) {
                     if (sp_model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
                         for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -1192,7 +1436,7 @@ namespace FIM_Engine {
                 int max_probe_idx = 0;
                 const double max_probe = b_probe.cwiseAbs().maxCoeff(&max_probe_idx);
                 (void)max_probe_idx;
-                return max_probe; // [��02] ������̽��������ԭʼ�в� (raw_res) �Ա�֤��������
+                return max_probe; // [锟斤拷02] 锟斤拷锟斤拷锟斤拷探锟斤拷锟斤拷锟斤拷锟斤拷原始锟叫诧拷 (raw_res) 锟皆憋拷证锟斤拷锟斤拷锟斤拷锟斤拷
                 };
 
             for (int iter = 0; iter < active_max_newton_iter; ++iter) {
@@ -1261,7 +1505,7 @@ namespace FIM_Engine {
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
 
-                        // [DAY6-08] 裂缝 Pc=0，基质保持 vG
+                        // [DAY6-08] 瑁傜紳 Pc=0锛屽熀璐ㄤ繚鎸?vG
                         ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
                         ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;
@@ -1304,7 +1548,7 @@ namespace FIM_Engine {
                 };
                 std::map<ConnectionType, ConnAuditStat> audit_stats;
 
-                // [DAY6-09] 单迭代物性缓存：预计算各cell标量物性，避免passive侧冗余EOS调用
+                // [DAY6-09] 鍗曡凯浠ｇ墿鎬х紦瀛橈細棰勮绠楀悇cell鏍囬噺鐗╂€э紝閬垮厤passive渚у啑浣橢OS璋冪敤
                 struct CellPropsCache {
                     double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
                     double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
@@ -1347,51 +1591,136 @@ namespace FIM_Engine {
                     }
                 }
 
-                // ── Step 2: Non-orthogonal deferred correction ─────────────────────────
-                // Pre-compute cell-centre gradients for P (and T, Sw) using Green-Gauss
-                // integration.  These are used EXPLICITLY after AssembleFlux for each
-                // Matrix-Matrix connection that has a non-zero vectorT.
-                // For orthogonal grids |vectorT|=0 everywhere → zero overhead / effect.
+                // Pre-compute cell-centre gradients for deferred non-orth correction.
+                // Align N=2/N=3 with the corrected N=1 style:
+                // prefer Green-Gauss + BC handling, fallback to geometric accumulation.
                 std::vector<Vector> nonorth_grad_P(nMat, Vector(0.0, 0.0, 0.0));
                 std::vector<Vector> nonorth_grad_T_cell(nMat, Vector(0.0, 0.0, 0.0));
                 std::vector<Vector> nonorth_grad_Sw(nMat, Vector(0.0, 0.0, 0.0));
-                if (params.enable_non_orthogonal_correction &&
-                    std::is_same_v<MeshMgrType, MeshManager>)
-                {
-                    const auto& mesh_faces = mgr.mesh().getFaces();
-                    for (size_t fi = 0; fi < mesh_faces.size(); ++fi) {
-                        const Face& mf = mesh_faces[fi];
-                        if (mf.isBoundary()) continue;
-                        const int nI = mf.ownerCell_index;
-                        const int nJ = mf.neighborCell_index;
-                        if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
-                        // Face-arithmetic-mean values
-                        const double Pf  = 0.5 * (state.P[nI] + state.P[nJ]);
-                        const double Tf  = 0.5 * (state.T[nI] + state.T[nJ]);
-                        // Area vector Aj = normal * length (owner→neighbor direction)
-                        const double Ax = mf.normal.m_x * mf.length;
-                        const double Ay = mf.normal.m_y * mf.length;
-                        const double vol_I = vols[nI], vol_J = vols[nJ];
-                        // Green-Gauss: grad_phi = (1/V) * sum_f(phi_f * Aj)
-                        nonorth_grad_P[nI].m_x += Pf * Ax / vol_I;
-                        nonorth_grad_P[nI].m_y += Pf * Ay / vol_I;
-                        nonorth_grad_P[nJ].m_x -= Pf * Ax / vol_J;
-                        nonorth_grad_P[nJ].m_y -= Pf * Ay / vol_J;
-                        nonorth_grad_T_cell[nI].m_x += Tf * Ax / vol_I;
-                        nonorth_grad_T_cell[nI].m_y += Tf * Ay / vol_I;
-                        nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
-                        nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
+                if (params.enable_non_orthogonal_correction && nMat > 0) {
+                    std::fill(nonorth_grad_P.begin(), nonorth_grad_P.end(), Vector(0.0, 0.0, 0.0));
+                    std::fill(nonorth_grad_T_cell.begin(), nonorth_grad_T_cell.end(), Vector(0.0, 0.0, 0.0));
+                    std::fill(nonorth_grad_Sw.begin(), nonorth_grad_Sw.end(), Vector(0.0, 0.0, 0.0));
+
+                    if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                        auto compute_matrix_gg_grad = [&](const std::vector<double>& values,
+                            const BoundarySetting::BoundaryConditionManager* bc_mgr,
+                            const char* tmp_name,
+                            std::vector<Vector>& grad_out) -> bool {
+                                try {
+                                    volScalarField tmp(tmp_name, static_cast<size_t>(nMat), 0.0);
+                                    for (int ci = 0; ci < nMat; ++ci) tmp[ci] = values[ci];
+                                    FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_mgr);
+                                    auto grad_field = grad_solver.compute(tmp, FVM_Grad::Method::GreenGauss);
+                                    if (!grad_field || grad_field->data.size() < static_cast<size_t>(nMat)) return false;
+                                    for (int ci = 0; ci < nMat; ++ci) grad_out[ci] = (*grad_field)[ci];
+                                    return true;
+                                }
+                                catch (...) {
+                                    return false;
+                                }
+                            };
+
+                        const bool ok_p = compute_matrix_gg_grad(
+                            state.P, modules.pressure_bc, "n23_main_p_tmp", nonorth_grad_P);
+                        const bool ok_t = compute_matrix_gg_grad(
+                            state.T, modules.temperature_bc, "n23_main_t_tmp", nonorth_grad_T_cell);
+                        bool ok_sw = true;
                         if constexpr (N == 3) {
-                            const double Swf = 0.5 * (state.Sw[nI] + state.Sw[nJ]);
-                            nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
-                            nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
-                            nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
-                            nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
+                            ok_sw = compute_matrix_gg_grad(
+                                state.Sw, modules.saturation_bc, "n23_main_sw_tmp", nonorth_grad_Sw);
+                        }
+
+                        if (!(ok_p && ok_t && ok_sw)) {
+                            const auto& mesh_faces = mgr.mesh().getFaces();
+                            for (const auto& mf : mesh_faces) {
+                                if (mf.isBoundary()) continue;
+                                const int nI = mf.ownerCell_index;
+                                const int nJ = mf.neighborCell_index;
+                                if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+
+                                const double vol_I = std::max(vols[nI], 1.0e-30);
+                                const double vol_J = std::max(vols[nJ], 1.0e-30);
+                                const double Pf = 0.5 * (state.P[nI] + state.P[nJ]);
+                                const double Tf = 0.5 * (state.T[nI] + state.T[nJ]);
+                                const double Ax = mf.normal.m_x * mf.length;
+                                const double Ay = mf.normal.m_y * mf.length;
+                                const double Az = mf.normal.m_z * mf.length;
+
+                                nonorth_grad_P[nI].m_x += Pf * Ax / vol_I;
+                                nonorth_grad_P[nI].m_y += Pf * Ay / vol_I;
+                                nonorth_grad_P[nI].m_z += Pf * Az / vol_I;
+                                nonorth_grad_P[nJ].m_x -= Pf * Ax / vol_J;
+                                nonorth_grad_P[nJ].m_y -= Pf * Ay / vol_J;
+                                nonorth_grad_P[nJ].m_z -= Pf * Az / vol_J;
+
+                                nonorth_grad_T_cell[nI].m_x += Tf * Ax / vol_I;
+                                nonorth_grad_T_cell[nI].m_y += Tf * Ay / vol_I;
+                                nonorth_grad_T_cell[nI].m_z += Tf * Az / vol_I;
+                                nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
+                                nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
+                                nonorth_grad_T_cell[nJ].m_z -= Tf * Az / vol_J;
+
+                                if constexpr (N == 3) {
+                                    const double Swf = 0.5 * (state.Sw[nI] + state.Sw[nJ]);
+                                    nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
+                                    nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
+                                    nonorth_grad_Sw[nI].m_z += Swf * Az / vol_I;
+                                    nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
+                                    nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
+                                    nonorth_grad_Sw[nJ].m_z -= Swf * Az / vol_J;
+                                }
+                            }
+                        }
+                    } else {
+                        for (const auto& conn : connMgr.GetConnections()) {
+                            if (conn.type != ConnectionType::Matrix_Matrix) continue;
+                            const int nI = conn.nodeI;
+                            const int nJ = conn.nodeJ;
+                            if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+
+                            const double vol_I = std::max(vols[nI], 1.0e-30);
+                            const double vol_J = std::max(vols[nJ], 1.0e-30);
+                            const double Pf = 0.5 * (state.P[nI] + state.P[nJ]);
+                            const double Tf = 0.5 * (state.T[nI] + state.T[nJ]);
+
+                            const Vector d_ij = blockCenters[nJ] - blockCenters[nI];
+                            double dmag = d_ij.Mag();
+                            if (dmag <= 1.0e-20) dmag = std::max(conn.aux_dist, 1.0e-20);
+                            const double inv_dmag = 1.0 / dmag;
+                            const double nx = d_ij.m_x * inv_dmag;
+                            const double ny = d_ij.m_y * inv_dmag;
+                            const double nz = d_ij.m_z * inv_dmag;
+                            const double Ax = nx * conn.aux_area;
+                            const double Ay = ny * conn.aux_area;
+                            const double Az = nz * conn.aux_area;
+
+                            nonorth_grad_P[nI].m_x += Pf * Ax / vol_I;
+                            nonorth_grad_P[nI].m_y += Pf * Ay / vol_I;
+                            nonorth_grad_P[nI].m_z += Pf * Az / vol_I;
+                            nonorth_grad_P[nJ].m_x -= Pf * Ax / vol_J;
+                            nonorth_grad_P[nJ].m_y -= Pf * Ay / vol_J;
+                            nonorth_grad_P[nJ].m_z -= Pf * Az / vol_J;
+
+                            nonorth_grad_T_cell[nI].m_x += Tf * Ax / vol_I;
+                            nonorth_grad_T_cell[nI].m_y += Tf * Ay / vol_I;
+                            nonorth_grad_T_cell[nI].m_z += Tf * Az / vol_I;
+                            nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
+                            nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
+                            nonorth_grad_T_cell[nJ].m_z -= Tf * Az / vol_J;
+
+                            if constexpr (N == 3) {
+                                const double Swf = 0.5 * (state.Sw[nI] + state.Sw[nJ]);
+                                nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
+                                nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
+                                nonorth_grad_Sw[nI].m_z += Swf * Az / vol_I;
+                                nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
+                                nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
+                                nonorth_grad_Sw[nJ].m_z -= Swf * Az / vol_J;
+                            }
                         }
                     }
                 }
-                // ───────────────────────────────────────────────────────────────────────
-
                 for (const auto& conn : connMgr.GetConnections()) {
                     audit_stats[conn.type].conn_count++;
                     audit_stats[conn.type].sum_abs_tflow += std::abs(conn.T_Flow);
@@ -1406,7 +1735,7 @@ namespace FIM_Engine {
                         if constexpr (N == 2) {
                             if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
                             else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            // [DAY6-09] active侧完整EOS，passive侧从缓存构造常量ADVar（梯度全零）
+                            // [DAY6-09] active渚у畬鏁碋OS锛宲assive渚т粠缂撳瓨鏋勯€犲父閲廇DVar锛堟搴﹀叏闆讹級
                             AD_Fluid::ADFluidProperties<N> pW_i, pW_j;
                             if (wrt_i) {
                                 pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
@@ -1429,11 +1758,11 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
-                            // [DAY6-09] active侧：完整AD计算kr/Pc/EOS；passive侧：从缓存构造常量ADVar
+                            // [DAY6-09] active渚э細瀹屾暣AD璁＄畻kr/Pc/EOS锛沺assive渚э細浠庣紦瀛樻瀯閫犲父閲廇DVar
                             ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
                             ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
                             if (wrt_i) {
-                                // i 是 active：完整 AD 计算
+                                // i 鏄?active锛氬畬鏁?AD 璁＄畻
                                 if (i >= nMat) {
                                     Sw_i_const = (Sw_i.val < 0.0) ? ADVar<N>(0.0) : (Sw_i.val > 1.0) ? ADVar<N>(1.0) : Sw_i;
                                     Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
@@ -1442,16 +1771,16 @@ namespace FIM_Engine {
                                     Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg);
                                     CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
                                 }
-                                // j 是 passive：从缓存读取常量
+                                // j 鏄?passive锛氫粠缂撳瓨璇诲彇甯搁噺
                                 Pc_j  = ADVar<N>(cprop[j].Pc);
                                 krw_j = ADVar<N>(cprop[j].krw);
                                 krg_j = ADVar<N>(cprop[j].krg);
                             } else {
-                                // i 是 passive：从缓存读取常量
+                                // i 鏄?passive锛氫粠缂撳瓨璇诲彇甯搁噺
                                 Pc_i  = ADVar<N>(cprop[i].Pc);
                                 krw_i = ADVar<N>(cprop[i].krw);
                                 krg_i = ADVar<N>(cprop[i].krg);
-                                // j 是 active：完整 AD 计算
+                                // j 鏄?active锛氬畬鏁?AD 璁＄畻
                                 if (j >= nMat) {
                                     Sw_j_const = (Sw_j.val < 0.0) ? ADVar<N>(0.0) : (Sw_j.val > 1.0) ? ADVar<N>(1.0) : Sw_j;
                                     Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
@@ -1463,7 +1792,7 @@ namespace FIM_Engine {
                             }
                             ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
 
-                            // [DAY6-09] active侧完整EOS，passive侧从缓存构造常量ADVar（梯度全零）
+                            // [DAY6-09] active渚у畬鏁碋OS锛宲assive渚т粠缂撳瓨鏋勯€犲父閲廇DVar锛堟搴﹀叏闆讹級
                             AD_Fluid::ADFluidProperties<N> pW_i, pW_j, pG_i, pG_j;
                             if (wrt_i) {
                                 pW_i = AD_Fluid::Evaluator::evaluateWater<N>(P_i, T_i);
@@ -1498,7 +1827,7 @@ namespace FIM_Engine {
                     auto f_wrt_j = evalFlux(false);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, global_mat);
 
-                    // ── Step 2: non-orthogonal deferred correction ────────────────────
+                    // 鈹€鈹€ Step 2: non-orthogonal deferred correction 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                     if (params.enable_non_orthogonal_correction &&
                         conn.type == ConnectionType::Matrix_Matrix &&
                         i < nMat && j < nMat)
@@ -1508,11 +1837,13 @@ namespace FIM_Engine {
                             // Face-interpolated cell-centre gradients (arithmetic mean)
                             const double gP_x = 0.5*(nonorth_grad_P[i].m_x + nonorth_grad_P[j].m_x);
                             const double gP_y = 0.5*(nonorth_grad_P[i].m_y + nonorth_grad_P[j].m_y);
+                            const double gP_z = 0.5*(nonorth_grad_P[i].m_z + nonorth_grad_P[j].m_z);
                             const double gT_x = 0.5*(nonorth_grad_T_cell[i].m_x + nonorth_grad_T_cell[j].m_x);
                             const double gT_y = 0.5*(nonorth_grad_T_cell[i].m_y + nonorth_grad_T_cell[j].m_y);
-                            // Tangential correction scalars: grad · vectorT  [Pa], [K]
-                            const double corr_P = gP_x * conn.vectorT.m_x + gP_y * conn.vectorT.m_y;
-                            const double corr_T = gT_x * conn.vectorT.m_x + gT_y * conn.vectorT.m_y;
+                            const double gT_z = 0.5*(nonorth_grad_T_cell[i].m_z + nonorth_grad_T_cell[j].m_z);
+                            // Tangential correction scalars: grad 路 vectorT  [Pa], [K]
+                            const double corr_P = gP_x * conn.vectorT.m_x + gP_y * conn.vectorT.m_y + gP_z * conn.vectorT.m_z;
+                            const double corr_T = gT_x * conn.vectorT.m_x + gT_y * conn.vectorT.m_y + gT_z * conn.vectorT.m_z;
                             // Effective permeability: K_eff = T_Flow * dist / |vectorE|
                             const double K_eff = (conn.aux_area > 1e-12)
                                 ? conn.T_Flow * conn.aux_dist / conn.aux_area : 0.0;
@@ -1524,7 +1855,7 @@ namespace FIM_Engine {
                             const double mob_w = (dPhi_w_sign < 0.0)
                                 ? cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
                                 : cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
-                            // Correction contributions (explicit → residual only, no Jacobian)
+                            // Correction contributions (explicit 鈫?residual only, no Jacobian)
                             const double mass_w_corr = K_eff * mob_w * corr_P;
                             const double heat_corr   = conn.T_Heat * corr_T;
                             global_mat.AddResidual(i, 0,  -mass_w_corr);
@@ -1545,7 +1876,7 @@ namespace FIM_Engine {
                             }
                         }
                     }
-                    // ─────────────────────────────────────────────────────────────────
+                    // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
                     const double abs_mass_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[0].val);
@@ -1660,14 +1991,14 @@ namespace FIM_Engine {
                     std::cout << "    [WellJac] max|dR/dT|=" << std::scientific << max_abs_well_dt << "\n";
                 }
 
-                // ── Step 3: assemble independent well DOF equations ────────────────
+                // 鈹€鈹€ Step 3: assemble independent well DOF equations 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                 if (!well_mgr.Empty()) {
                     well_mgr.AssembleWellEquations(
                         global_mat, state, active_wells,
                         w_res, w_jac3, mgr,
                         kWellSourceSign);
                 }
-                // ────────────────────────────────────────────────────────────────────
+                // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
                 auto assembleBoundaryField = [&](const BoundarySetting::BoundaryConditionManager* bcMgr,
                     int dofOffset,
@@ -1758,7 +2089,7 @@ namespace FIM_Engine {
                 auto A = global_mat.GetFrozenMatrix(); // Issue#11: O(nnz) CSR value-update, no Triplet sort
                 auto b = global_mat.ExportEigenResidual();
 
-                // ── ConstantWaterNoConvection: freeze T DOF ────────────────────────────────
+                // 鈹€鈹€ ConstantWaterNoConvection: freeze T DOF 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                 // Replace the energy equation row with a Dirichlet constraint T = T_init.
                 // R_T = T - T_init, J_TT = 1, all off-diagonals = 0.
                 // This makes the energy equation trivially satisfied every Newton step
@@ -1774,7 +2105,7 @@ namespace FIM_Engine {
                             A.coeffRef(t_row, t_row) = 1.0;
                             b(t_row) = state.T[bi] - ic.T_init;
                             // Reset D_acc so row scaling uses denominator=1 for T rows
-                            // (original D_acc_energy is large → would scale T row to ~0 → no precision gain)
+                            // (original D_acc_energy is large 鈫?would scale T row to ~0 鈫?no precision gain)
                             if (t_row < static_cast<int>(eq_contribs.size()))
                                 eq_contribs[t_row].D_acc = 1.0;
                         }
@@ -2753,3 +3084,4 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
+

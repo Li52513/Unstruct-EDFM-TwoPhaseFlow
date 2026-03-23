@@ -320,8 +320,47 @@ void ExportSnapshotVTK(const std::string& case_dir,
                        MeshManager& mgr,
                        FieldManager_2D& fm,
                        const std::vector<double>& p,
-                       double t_const) {
+                       double t_const,
+                       double fluid_rho_const = std::numeric_limits<double>::quiet_NaN(),
+                       double fluid_mu_const = std::numeric_limits<double>::quiet_NaN(),
+                       double fluid_lambda_const = std::numeric_limits<double>::quiet_NaN()) {
     SyncPressureToField(fm, p, t_const);
+    if (std::isfinite(fluid_rho_const) && fluid_rho_const > 0.0 &&
+        std::isfinite(fluid_mu_const) && fluid_mu_const > 0.0) {
+        const PhysicalProperties_string_op::Water water_cfg;
+        const double lambda_w_const = 1.0 / std::max(fluid_mu_const, 1.0e-20);
+        const double lambda_cond_const = std::isfinite(fluid_lambda_const) ? fluid_lambda_const : 0.6;
+
+        auto f_rhow = fm.getOrCreateMatrixScalar(water_cfg.rho_tag, fluid_rho_const);
+        auto f_muw = fm.getOrCreateMatrixScalar(water_cfg.mu_tag, fluid_mu_const);
+        auto f_cpw = fm.getOrCreateMatrixScalar(water_cfg.cp_tag, 0.0);
+        auto f_cvw = fm.getOrCreateMatrixScalar(water_cfg.cv_tag, 0.0);
+        auto f_hw = fm.getOrCreateMatrixScalar(water_cfg.h_tag, 0.0);
+        auto f_lamw = fm.getOrCreateMatrixScalar(water_cfg.lambda_w_tag, lambda_w_const);
+        auto f_kw = fm.getOrCreateMatrixScalar(water_cfg.k_tag, lambda_cond_const);
+        if (f_rhow) for (double& v : f_rhow->data) v = fluid_rho_const;
+        if (f_muw) for (double& v : f_muw->data) v = fluid_mu_const;
+        if (f_cpw) for (double& v : f_cpw->data) v = 0.0;
+        if (f_cvw) for (double& v : f_cvw->data) v = 0.0;
+        if (f_hw) for (double& v : f_hw->data) v = 0.0;
+        if (f_lamw) for (double& v : f_lamw->data) v = lambda_w_const;
+        if (f_kw) for (double& v : f_kw->data) v = lambda_cond_const;
+
+        auto frac_rhow = fm.getOrCreateFractureScalar(water_cfg.rho_tag, fluid_rho_const);
+        auto frac_muw = fm.getOrCreateFractureScalar(water_cfg.mu_tag, fluid_mu_const);
+        auto frac_cpw = fm.getOrCreateFractureScalar(water_cfg.cp_tag, 0.0);
+        auto frac_cvw = fm.getOrCreateFractureScalar(water_cfg.cv_tag, 0.0);
+        auto frac_hw = fm.getOrCreateFractureScalar(water_cfg.h_tag, 0.0);
+        auto frac_lamw = fm.getOrCreateFractureScalar(water_cfg.lambda_w_tag, lambda_w_const);
+        auto frac_kw = fm.getOrCreateFractureScalar(water_cfg.k_tag, lambda_cond_const);
+        if (frac_rhow) for (double& v : frac_rhow->data) v = fluid_rho_const;
+        if (frac_muw) for (double& v : frac_muw->data) v = fluid_mu_const;
+        if (frac_cpw) for (double& v : frac_cpw->data) v = 0.0;
+        if (frac_cvw) for (double& v : frac_cvw->data) v = 0.0;
+        if (frac_hw) for (double& v : frac_hw->data) v = 0.0;
+        if (frac_lamw) for (double& v : frac_lamw->data) v = lambda_w_const;
+        if (frac_kw) for (double& v : frac_kw->data) v = lambda_cond_const;
+    }
     const std::string path = case_dir + "/" + filename;
     PostProcess_2D(mgr, fm).ExportVTK(path, time_s);
 }
@@ -637,6 +676,7 @@ CaseSummary RunPressureCaseAD(const PressureCaseConfig& cfg,
     modules.property_initializer = [&cfg, property_mode](MeshManager&, FieldManager_2D& fld) {
         const auto rock = PhysicalProperties_string_op::Rock();
         const auto frac = PhysicalProperties_string_op::Fracture_string();
+        const auto water = PhysicalProperties_string_op::Water();
 
         const double rock_cr = (property_mode == FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline)
             ? cfg.physical.ct
@@ -655,13 +695,28 @@ CaseSummary RunPressureCaseAD(const PressureCaseConfig& cfg,
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.k_n_tag, cfg.physical.perm), cfg.physical.perm);
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.phi_tag, cfg.physical.phi), cfg.physical.phi);
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.c_r_tag, rock_cr), rock_cr);
+
+        // Keep fluid visualization fields deterministic for pressure-only ladder.
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(water.k_tag, 0.6), 0.6);
+        ApplyUniformScalarField(fld.getOrCreateFractureScalar(water.k_tag, 0.6), 0.6);
     };
+
+    const double vtk_baseline_rho = (property_mode == FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline)
+        ? 700.0
+        : std::numeric_limits<double>::quiet_NaN();
+    const double vtk_baseline_mu = (property_mode == FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline)
+        ? cfg.physical.mu
+        : std::numeric_limits<double>::quiet_NaN();
+    const double vtk_baseline_lambda = (property_mode == FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline)
+        ? 0.6
+        : std::numeric_limits<double>::quiet_NaN();
 
     auto export_from_state = [&](const std::string& name, double time_s, const std::vector<double>& p_state) {
         if (p_state.size() != n_cells) {
             throw std::runtime_error("[Day6Ladder-AD] pressure size mismatch during VTK export.");
         }
-        ExportSnapshotVTK(summary.case_dir, name, time_s, mgr, fm, p_state, cfg.t_init);
+        ExportSnapshotVTK(summary.case_dir, name, time_s, mgr, fm, p_state, cfg.t_init,
+                          vtk_baseline_rho, vtk_baseline_mu, vtk_baseline_lambda);
     };
 
     modules.on_step_accepted =

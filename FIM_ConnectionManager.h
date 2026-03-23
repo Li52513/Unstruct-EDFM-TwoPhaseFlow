@@ -1,8 +1,3 @@
-/**
- * @file FIM_ConnectionManager.h
- * @brief ά���޹صĴ��������Ӿۺ����� (֧�� FF ��ͨ������)
- */
-
 #pragma once
 
 #include <vector>
@@ -18,8 +13,8 @@
 enum class ConnectionType {
     Matrix_Matrix = 0,
     Fracture_Internal = 1,
-    Matrix_Fracture = 2, ///< NNC (����-�ѷ�)
-    Fracture_Fracture = 3  ///< FF (�ѷ�-�ѷ�)
+    Matrix_Fracture = 2, 
+    Fracture_Fracture = 3
 };
 
 struct Connection {
@@ -27,8 +22,8 @@ struct Connection {
     int nodeJ;
     double T_Flow;
     double T_Heat;
-    double aux_area;  ///< ��������������� (����Ȩ��)
-    double aux_dist;  ///< ��������������������
+    double aux_area;  
+    double aux_dist;
     ConnectionType type;
     /// Non-orthogonal correction vector T = Aj - vectorE (only non-zero for MM connections).
     /// Always oriented from nodeI to nodeJ (negated if original i>j to maintain consistency).
@@ -68,7 +63,7 @@ public:
     struct AggregationStats {
         size_t raw_count = 0;
         size_t unique_count = 0;
-        size_t merged_count = 0; // ʵ��ִ�С��ۼӾۺϡ����ظ�����
+        size_t merged_count = 0;
         std::array<size_t, 4> merged_by_type{ 0, 0, 0, 0 };
         std::array<size_t, 4> physical_parallel_by_type{ 0, 0, 0, 0 };
         std::array<size_t, 4> geometric_duplicate_by_type{ 0, 0, 0, 0 };
@@ -100,7 +95,7 @@ public:
             if (std::isnan(val) || std::isinf(val))
                 throw std::runtime_error("[FIM Error] " + name + " is NaN/Inf!");
             if (val < 0.0) {
-                if (val > -1e-14) val = 0.0; // ��ֵ������ȫ�ü�
+                if (val > -1e-14) val = 0.0;
                 else throw std::runtime_error("[FIM Error] " + name + " is strictly negative!");
             }
             };
@@ -111,6 +106,12 @@ public:
         validateAndClip(aux_dist, "Aux_Dist");
 
         rawBuffer_.emplace_back(nodeI, nodeJ, t_flow, t_heat, aux_area, aux_dist, type, vectorT);
+
+        if (std::isnan(vectorT.m_x) || std::isnan(vectorT.m_y) || std::isnan(vectorT.m_z)) 
+        {
+            throw std::runtime_error("[FIM Error] vectorT contains NaN!");
+        }
+
     }
 
     void FinalizeAndAggregate() {
@@ -141,7 +142,6 @@ public:
 
             const size_t tid = TypeToIdx(raw.type);
 
-            // �ȷ��ࣺ�����ظ� / ��������������ʽ��
             bool sameGeom = false;
             bool sameGeomAndTrans = false;
             auto& sigs = signatures[key];
@@ -162,13 +162,13 @@ public:
 
             if (sameGeomAndTrans) {
                 stats_.geometric_duplicate_by_type[tid]++;
+                continue;
+
             }
             else {
                 stats_.physical_parallel_by_type[tid]++;
                 sigs.push_back({ raw.aux_area, raw.aux_dist, raw.T_Flow, raw.T_Heat });
             }
-
-            // �� NNC / FF �����ظ����ۺ�
             if (raw.type == ConnectionType::Matrix_Fracture || raw.type == ConnectionType::Fracture_Fracture) {
                 it->second.T_Flow += raw.T_Flow;
                 it->second.T_Heat += raw.T_Heat;

@@ -674,8 +674,10 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
                 continue;
             }
 
-            const double dist = std::max((cell.center - face.midpoint).Mag(), 1.0e-12);
-            const double area = face.length;
+            const Vector d_owner = face.midpoint - cell.center;
+            const double dist = std::max(std::abs(d_owner * face.normal), 1.0e-12);
+            double area = std::max(face.vectorE.Mag(), 0.0);
+            if (area <= 1.0e-20) area = std::max(face.length, 0.0);
             const double T_geom = area / dist;
 
             const ADVar<3> var_cell = is_temp_eq ? state.T : (is_sat_eq ? state.Sw : state.P);
@@ -967,8 +969,10 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
                 continue;
             }
 
-            const double dist = std::max((cell.center - face.midpoint).Mag(), 1.0e-12);
-            const double area = face.length;
+            const Vector d_owner = face.midpoint - cell.center;
+            const double dist = std::max(std::abs(d_owner * face.normal), 1.0e-12);
+            double area = std::max(face.vectorE.Mag(), 0.0);
+            if (area <= 1.0e-20) area = std::max(face.length, 0.0);
             const double T_geom = area / dist;
 
             const ADVar<3> var_cell = is_temp_eq ? state.T : (is_sat_eq ? state.Sw : state.P);

@@ -463,10 +463,14 @@ static void RunT1(const T1Config& cfg) {
 
     auto params = BuildValParams(false, 100.0, 2.0e4, t_final, 50000);
     // ConstantWaterNoConvection: P equation is linear (const rho, const mu).
-    // PTC with row_floor=1.0 adds a fictitious 1 kg/(Pa·s) diagonal (real Jacobian ~4e-7),
-    // making dx[P] = -b/ptc ≈ 1.5 Pa (negligible) instead of the correct ~7.5 MPa update.
-    // Disable PTC so SparseLU solves the unmodified linear system → 1-step convergence.
+    // (a) PTC: row_floor=1.0 >> real Jacobian (~4e-7) → Newton step O(1 Pa) instead of O(1 MPa).
+    // (b) Armijo: probe lacks non-orthogonal correction → probe_res >> conv_res → LS-BASE-CHECK
+    //     sets use_ref=probe_res; at alpha→0 trial_res≈probe_res≥use_ref → Armijo never passes.
+    // (c) dt-aware alpha damping: max_dP_eff = 2e5*(dt/dt_ref); at dt=1s → 2000 Pa cap → alpha=0.001.
+    // Fix: disable PTC+Armijo; raise max_dP so damp_scale never limits below full step.
     params.enable_ptc = false;
+    params.enable_armijo_line_search = false;
+    params.max_dP = 2.0e8;  // 2e8*(dt=1/dt_ref=100)=2e6 Pa ≥ any expected ΔP → alpha=1 always
     params.lin_solver = FIM_Engine::LinearSolverType::SparseLU;
 
     bool run_ok = true;
@@ -958,8 +962,11 @@ static void RunT5(const T5Config& cfg) {
     ic.Sw_init = 1.0;
 
     auto params = BuildValParams(false, 100.0, 3.0e4, t_final, 50000);
-    // Same PTC+AMGCL issues as T1: disable PTC and use SparseLU for exact Newton direction.
+    // Same issues as T1: PTC destroys Newton direction, Armijo probe lacks non-orth correction,
+    // and dt-aware damping caps max_dP_eff at 2 kPa for dt=1s.
     params.enable_ptc = false;
+    params.enable_armijo_line_search = false;
+    params.max_dP = 2.0e8;
     params.lin_solver = FIM_Engine::LinearSolverType::SparseLU;
 
     bool run_ok = true;
