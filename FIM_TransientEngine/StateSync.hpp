@@ -69,13 +69,25 @@ namespace FIM_Engine {
         const ADVar<N>& P,
         const ADVar<N>& T)
     {
+        if (model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
+            AD_Fluid::ADFluidProperties<N> props;
+            props.rho = ADVar<N>(1000.0);
+            props.mu  = ADVar<N>(1.0e-3);
+            props.cp  = ADVar<N>(0.0);   // zero heat capacity → F_conv = ρ·h·u = 0
+            props.cv  = ADVar<N>(0.0);
+            props.h   = ADVar<N>(0.0);   // zero enthalpy → no convective heat transport
+            props.k   = ADVar<N>(0.6);   // keep conductivity (but ΔT_IC=0, so conduction is also zero)
+            props.isFallback = false;
+            props.near_bound = false;
+            return props;
+        }
         if (model == SinglePhaseFluidModel::ConstantWater) {
             AD_Fluid::ADFluidProperties<N> props;
             props.rho = ADVar<N>(1000.0);
             props.mu = ADVar<N>(1.0e-3);
             props.cp = ADVar<N>(4200.0);
             props.cv = ADVar<N>(4182.0);
-            props.h = ADVar<N>(1.0e5);
+            props.h = T * 4200.0;       // h = cp_w * T, ∂h/∂T = 4200 (fixes Newton Jacobian for energy eq)
             props.k = ADVar<N>(0.6);
             props.isFallback = false;
             props.near_bound = false;

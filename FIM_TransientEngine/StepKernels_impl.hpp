@@ -241,7 +241,7 @@ namespace FIM_Engine {
             FIM_StateMap<N>& out_state,
             int& limiter_added_local,
             double& rel_update_inf,
-            int num_well_blocks = 0) {
+            int num_well_blocks) {
 
             out_state = base_state;
             limiter_added_local = 0;
@@ -249,8 +249,7 @@ namespace FIM_Engine {
 
             for (int bi = 0; bi < totalBlocks; ++bi) {
                 const int eqP = mgr.getEquationIndex(bi, 0);
-                const int eqT = mgr.getEquationIndex(bi, (N == 3) ? 2 : 1);
-                if (eqP < 0 || eqP >= dx.size() || eqT < 0 || eqT >= dx.size()) return false;
+                if (eqP < 0 || eqP >= dx.size()) return false;
 
                 const double dP = alpha_try * dx[eqP];
                 const double p_ref = std::max(std::abs(base_state.P[bi]), 1.0e5);
@@ -262,6 +261,13 @@ namespace FIM_Engine {
                     if (out_state.P[bi] > p_ceil) { out_state.P[bi] = p_ceil; limiter_added_local++; }
                 }
 
+                if constexpr (N == 1) {
+                    // Pressure-only route: no T/Sw unknowns are updated.
+                    continue;
+                }
+
+                const int eqT = mgr.getEquationIndex(bi, (N == 3) ? 2 : 1);
+                if (eqT < 0 || eqT >= dx.size()) return false;
                 const double dT = alpha_try * dx[eqT];
                 const double t_ref = std::max(std::abs(base_state.T[bi]), 300.0);
                 rel_update_inf = std::max(rel_update_inf, std::abs(dT) / t_ref);

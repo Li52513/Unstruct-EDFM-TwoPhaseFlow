@@ -31,6 +31,548 @@
 
 namespace FIM_Engine {
 
+    namespace detail {
+
+        template <int N, typename MeshMgrType, typename FieldMgrType>
+        inline void EmitStepAccepted(
+            const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules,
+            int step,
+            double time_s,
+            double dt_used_s,
+            int newton_iters,
+            double residual_inf,
+            int total_rollbacks,
+            const std::string& converge_mode,
+            const FIM_StateMap<N>& state)
+        {
+            if (!modules.on_step_accepted) return;
+            const std::vector<double>* sw_ptr = nullptr;
+            if constexpr (N == 3) sw_ptr = &state.Sw;
+            modules.on_step_accepted(
+                step, time_s, dt_used_s, newton_iters, residual_inf, total_rollbacks, converge_mode, state.P, state.T, sw_ptr);
+        }
+
+        template <typename MeshMgrType, typename FieldMgrType>
+        inline void EmitSnapshot(
+            const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules,
+            const std::string& tag,
+            int step,
+            double time_s,
+            const std::string& vtk_path)
+        {
+            if (!modules.on_snapshot_written) return;
+            modules.on_snapshot_written(tag, step, time_s, vtk_path);
+        }
+
+        template <typename MeshMgrType, typename FieldMgrType>
+        inline void RunGenericFIMTransientPressureOnlyN1(
+            const std::string& caseName,
+            MeshMgrType& mgr,
+            FieldMgrType& fm,
+            const InitialConditions& ic,
+            const std::vector<WellScheduleStep>& wells,
+            const TransientSolverParams& params,
+            const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules)
+        {
+            if (!wells.empty()) {
+                throw std::runtime_error("[N=1] unsupported: wells are not enabled in pressure-only AD route.");
+            }
+
+            std::cout << "\n========== Starting Transient Scenario (N=1 AD): " << caseName << " ==========\n";
+            MakePath(caseName);
+            InjectStaticProperties(fm);
+            if (modules.property_initializer) {
+                modules.property_initializer(mgr, fm);
+                std::cout << "[Init] External property module injected.\n";
+            }
+
+            const int totalBlocks = mgr.getTotalDOFCount();
+            const int totalEq = totalBlocks;
+            if (totalBlocks <= 0 || totalEq <= 0) {
+                throw std::runtime_error("[N=1] invalid system size.");
+            }
+
+            const int nMat = MatrixBlockCount(mgr);
+            FIM_StateMap<1> state;
+            state.InitSizes(totalBlocks);
+            for (int i = 0; i < totalBlocks; ++i) {
+                state.P[i] = ic.P_init;
+                state.T[i] = ic.T_init;
+            }
+
+            std::vector<double> vols(totalBlocks, 1.0);
+            for (size_t i = 0; i < mgr.mesh().getCells().size(); ++i) vols[i] = mgr.mesh().getCells()[i].volume;
+            for (size_t i = 0; i < mgr.fracture_network().getOrderedFractureElements().size(); ++i) {
+                auto* elem = mgr.fracture_network().getOrderedFractureElements()[i];
+                if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                    vols[nMat + static_cast<int>(i)] = elem->length * std::max(elem->aperture, 1e-6);
+                }
+                else {
+                    const auto* frac2d = mgr.findFractureByID(mgr.fracture_network(), elem->parentFractureID);
+                    const double ap = frac2d ? frac2d->aperture : 1e-3;
+                    vols[nMat + static_cast<int>(i)] = std::max(elem->area, 1e-12) * std::max(ap, 1e-8);
+                }
+            }
+
+            std::vector<Vector> blockCenters(totalBlocks, Vector(0.0, 0.0, 0.0));
+            for (size_t i = 0; i < mgr.mesh().getCells().size(); ++i) blockCenters[i] = mgr.mesh().getCells()[i].center;
+            if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                const auto& orderedFrac = mgr.fracture_network().getOrderedFractureElements();
+                const auto& macros = mgr.fracture_network().fractures;
+                for (size_t i = 0; i < orderedFrac.size(); ++i) {
+                    const auto* elem = orderedFrac[i];
+                    Vector c(0.0, 0.0, 0.0);
+                    if (elem && elem->parentFractureID >= 0 && elem->parentFractureID < static_cast<int>(macros.size())) {
+                        const auto& frac = macros[elem->parentFractureID];
+                        const double u = std::max(0.0, std::min(1.0, 0.5 * (elem->param0 + elem->param1)));
+                        c = frac.start + (frac.end - frac.start) * u;
+                    }
+                    blockCenters[nMat + static_cast<int>(i)] = c;
+                }
+            }
+            else {
+                const auto& orderedFrac = mgr.fracture_network().getOrderedFractureElements();
+                for (size_t i = 0; i < orderedFrac.size(); ++i) {
+                    blockCenters[nMat + static_cast<int>(i)] = orderedFrac[i] ? orderedFrac[i]->centroid : Vector(0.0, 0.0, 0.0);
+                }
+            }
+
+            if (modules.state_initializer) {
+                modules.state_initializer(mgr, blockCenters, nMat, state.P, state.T, nullptr);
+                std::cout << "[Init] External state initializer injected.\n";
+            }
+
+            FIM_ConnectionManager connMgr;
+            if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(mgr, fm);
+                TransmissibilitySolver_2D::Calculate_Transmissibility_FractureInternal(mgr, fm);
+                TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(mgr, fm);
+                TransmissibilitySolver_2D::Calculate_Transmissibility_FF(mgr, fm);
+                FIM_TopologyBuilder2D::LoadAllConnections(connMgr, mgr, fm);
+            }
+            else {
+                TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(mgr, fm);
+                TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(mgr, fm);
+                TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(mgr, fm);
+                TransmissibilitySolver_3D::Calculate_Transmissibility_FF(mgr, fm);
+                FIM_TopologyBuilder3D::LoadAllConnections(connMgr, mgr, fm);
+            }
+            connMgr.FinalizeAndAggregate();
+
+            FIM_BlockSparseMatrix<1> global_mat(totalBlocks);
+            for (const auto& conn : connMgr.GetConnections()) {
+                global_mat.AddOffDiagBlock(conn.nodeI, conn.nodeJ, Eigen::Matrix<double, 1, 1>::Zero());
+                global_mat.AddOffDiagBlock(conn.nodeJ, conn.nodeI, Eigen::Matrix<double, 1, 1>::Zero());
+            }
+            global_mat.FreezePattern();
+
+            const auto str_rock = PhysicalProperties_string_op::Rock();
+            const auto str_frac = PhysicalProperties_string_op::Fracture_string();
+            auto phi_mat = fm.getMatrixScalar(str_rock.phi_tag);
+            auto cr_mat = fm.getMatrixScalar(str_rock.c_r_tag);
+            auto phi_frac = fm.getFractureScalar(str_frac.phi_tag);
+            auto cr_frac = fm.getFractureScalar(str_frac.c_r_tag);
+            if (!cr_mat) std::cout << "    [Warning] Matrix c_r field not found, defaulting to 0.0.\n";
+            if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
+
+            const double t_eval = (modules.pressure_only_temperature_k > 0.0)
+                ? modules.pressure_only_temperature_k
+                : ic.T_init;
+            const bool use_eos = (modules.pressure_only_property_mode == PressureOnlyPropertyMode::CO2_EOS);
+            double baseline_rho = modules.pressure_only_baseline_rho;
+            double baseline_mu = modules.pressure_only_baseline_mu;
+            if (!(baseline_rho > 0.0) || !(baseline_mu > 0.0)) {
+                ADVar<1> p0(ic.P_init), t0(t_eval);
+                AD_Fluid::ADFluidProperties<1> base_props;
+                if (modules.single_phase_fluid == SinglePhaseFluidModel::CO2 || use_eos) {
+                    base_props = AD_Fluid::Evaluator::evaluateCO2<1>(p0, t0);
+                }
+                else {
+                    base_props = EvalPrimaryFluid<1>(modules.single_phase_fluid, p0, t0);
+                }
+                if (!(baseline_rho > 0.0)) baseline_rho = std::max(base_props.rho.val, 1.0e-8);
+                if (!(baseline_mu > 0.0)) baseline_mu = std::max(base_props.mu.val, 1.0e-12);
+            }
+
+            auto eval_pressure_props = [&](const ADVar<1>& P) {
+                if (use_eos) {
+                    return AD_Fluid::Evaluator::evaluateCO2<1>(P, ADVar<1>(t_eval));
+                }
+                AD_Fluid::ADFluidProperties<1> props;
+                props.rho = ADVar<1>(baseline_rho);
+                props.mu = ADVar<1>(baseline_mu);
+                props.cp = ADVar<1>(0.0);
+                props.cv = ADVar<1>(0.0);
+                props.h = ADVar<1>(0.0);
+                props.k = ADVar<1>(0.0);
+                props.isFallback = false;
+                props.near_bound = false;
+                return props;
+            };
+
+            std::vector<double> P_ref(totalBlocks, ic.P_init);
+            for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i];
+
+            double p_floor = 1.0e4;
+            double p_ceil = std::numeric_limits<double>::max();
+            double t_floor = 273.15;
+            double t_ceil = std::numeric_limits<double>::max();
+            if (params.clamp_state_to_eos_bounds && use_eos) {
+                const auto& table = CO2PropertyTable::instance();
+                p_floor = std::max(p_floor, table.minPressure() + 1.0);
+                p_ceil = std::min(p_ceil, table.maxPressure() - 1.0);
+                t_floor = std::max(t_floor, table.minTemperature() + 1.0e-6);
+                t_ceil = std::min(t_ceil, table.maxTemperature() - 1.0e-6);
+                if (!(p_floor < p_ceil)) { p_floor = 1.0e4; p_ceil = std::numeric_limits<double>::max(); }
+                if (!(t_floor < t_ceil)) { t_floor = 273.15; t_ceil = std::numeric_limits<double>::max(); }
+            }
+
+            double t = 0.0;
+            double dt = params.dt_init;
+            int completed_steps = 0;
+            int total_rollbacks = 0;
+            int total_limiters = 0;
+            int vtk_export_count = 0;
+            bool final_vtk_exported = false;
+            double final_residual = std::numeric_limits<double>::quiet_NaN();
+            const double target_end_time_s = params.target_end_time_s;
+            const Vector gravityVec = params.gravity_vector;
+
+            EmitStepAccepted<1>(modules, 0, t, 0.0, 0, 0.0, total_rollbacks, "initial", state);
+
+            auto export_vtk_snapshot = [&](const std::string& tag, int step_idx) {
+                if (modules.disable_default_vtk_output) return;
+                SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
+                const std::string fname = "Test/Transient/Day6/" + caseName + "/" + tag + ".vtk";
+                if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                    PostProcess_2D(mgr, fm).ExportVTK(fname, t);
+                }
+                else {
+                    PostProcess_3D(mgr, fm).ExportVTK(fname, t);
+                }
+                VerifyVtkExport(fname, false);
+                if (tag == "final") final_vtk_exported = true;
+                ++vtk_export_count;
+                EmitSnapshot(modules, tag, step_idx, t, fname);
+                std::cout << "    [VTK Export PASS] " << fname << "\n";
+            };
+
+            for (int step = 1; step <= params.max_steps && (target_end_time_s <= 0.0 || t < target_end_time_s - 1.0e-12); ++step) {
+                if (target_end_time_s > 0.0) {
+                    const double t_remaining = target_end_time_s - t;
+                    if (t_remaining <= 1.0e-14) break;
+                    dt = std::min(dt, t_remaining);
+                }
+                dt = std::max(params.dt_min, std::min(dt, params.dt_max));
+
+                FIM_StateMap<1> old_state = state;
+                LinearSolverCache<1> linear_solver_cache;
+                linear_solver_cache.Configure(params);
+
+                bool converged = false;
+                std::string converge_mode = "none";
+                std::string fail_reason;
+                int iter_used = 0;
+                double res_iter1 = -1.0;
+                double last_rel_update = std::numeric_limits<double>::infinity();
+                double step_final_residual = std::numeric_limits<double>::quiet_NaN();
+
+                for (int iter = 1; iter <= std::max(1, params.max_newton_iter); ++iter) {
+                    iter_used = iter;
+                    global_mat.SetZero();
+                    std::vector<EqContrib> eq_contribs(totalEq);
+
+                    struct CellCache { double rho = 0.0; double mu = 0.0; double mob = 0.0; };
+                    std::vector<CellCache> cprop(totalBlocks);
+                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                        const auto props = eval_pressure_props(ADVar<1>(state.P[bi]));
+                        const double rho = std::max(props.rho.val, 1.0e-12);
+                        const double mu = std::max(props.mu.val, 1.0e-20);
+                        cprop[bi].rho = rho;
+                        cprop[bi].mu = mu;
+                        cprop[bi].mob = rho / mu;
+                    }
+
+                    std::vector<Vector> nonorth_grad_P(nMat, Vector(0.0, 0.0, 0.0));
+                    if (params.enable_non_orthogonal_correction && nMat > 0) {
+                        for (const auto& conn : connMgr.GetConnections()) {
+                            if (conn.type != ConnectionType::Matrix_Matrix) continue;
+                            const int nI = conn.nodeI, nJ = conn.nodeJ;
+                            if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+                            const double volI = std::max(vols[nI], 1.0e-30);
+                            const double volJ = std::max(vols[nJ], 1.0e-30);
+                            const double pFace = 0.5 * (state.P[nI] + state.P[nJ]);
+                            // Connection does not store an explicit normal vector.
+                            // Reconstruct a consistent face-area direction from block-centre line.
+                            const Vector d_ij = blockCenters[nJ] - blockCenters[nI];
+                            double dmag = d_ij.Mag();
+                            if (dmag <= 1.0e-20) dmag = std::max(conn.aux_dist, 1.0e-20);
+                            const double inv_dmag = 1.0 / dmag;
+                            const double nx = d_ij.m_x * inv_dmag;
+                            const double ny = d_ij.m_y * inv_dmag;
+                            const double Ax = nx * conn.aux_area;
+                            const double Ay = ny * conn.aux_area;
+                            nonorth_grad_P[nI].m_x += pFace * Ax / volI;
+                            nonorth_grad_P[nI].m_y += pFace * Ay / volI;
+                            nonorth_grad_P[nJ].m_x -= pFace * Ax / volJ;
+                            nonorth_grad_P[nJ].m_y -= pFace * Ay / volJ;
+                        }
+                    }
+
+                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                        double phi_ref = 0.2;
+                        double c_r = 0.0;
+                        if (bi < nMat) {
+                            if (phi_mat) phi_ref = (*phi_mat)[bi];
+                            if (cr_mat) c_r = (*cr_mat)[bi];
+                        }
+                        else {
+                            const int fi = bi - nMat;
+                            if (phi_frac) phi_ref = (*phi_frac)[fi];
+                            if (cr_frac) c_r = (*cr_frac)[fi];
+                        }
+
+                        ADVar<1> P(state.P[bi]); P.grad(0) = 1.0;
+                        ADVar<1> P_old(old_state.P[bi]);
+                        auto props = eval_pressure_props(P);
+                        auto props_old = eval_pressure_props(P_old);
+
+                        ADVar<1> phi = ADVar<1>(phi_ref) * (ADVar<1>(1.0) + ADVar<1>(c_r) * (P - ADVar<1>(P_ref[bi])));
+                        ADVar<1> phi_old = ADVar<1>(phi_ref) * (ADVar<1>(1.0) + ADVar<1>(c_r) * (P_old - ADVar<1>(P_ref[bi])));
+                        ADVar<1> acc = (props.rho * phi - props_old.rho * phi_old) * (vols[bi] / std::max(dt, 1.0e-20));
+
+                        std::vector<ADVar<1>> acc_eqs(1);
+                        acc_eqs[0] = acc;
+                        FIM_GlobalAssembler<1, ADVar<1>>::AssembleAccumulation(bi, acc_eqs, global_mat);
+
+                        const int eq = mgr.getEquationIndex(bi, 0);
+                        if (eq >= 0 && eq < totalEq) {
+                            eq_contribs[eq].R_acc += acc.val;
+                            eq_contribs[eq].D_acc += acc.grad(0);
+                        }
+                    }
+
+                    for (const auto& conn : connMgr.GetConnections()) {
+                        const int i = conn.nodeI;
+                        const int j = conn.nodeJ;
+                        const Vector& x_i = blockCenters[i];
+                        const Vector& x_j = blockCenters[j];
+
+                        auto eval_flux = [&](bool wrt_i) {
+                            std::vector<ADVar<1>> F(1);
+                            ADVar<1> P_i(state.P[i]);
+                            ADVar<1> P_j(state.P[j]);
+                            if (wrt_i) P_i.grad(0) = 1.0;
+                            else P_j.grad(0) = 1.0;
+
+                            const auto p_i = eval_pressure_props(P_i);
+                            const auto p_j = eval_pressure_props(P_j);
+                            ADVar<1> rho_avg = ADVar<1>(0.5) * (p_i.rho + p_j.rho);
+                            ADVar<1> dPhi = FVM_Ops::Compute_Potential_Diff<1, ADVar<1>, Vector>(P_i, P_j, rho_avg, x_i, x_j, gravityVec);
+                            ADVar<1> mob_i = p_i.rho / p_i.mu;
+                            ADVar<1> mob_j = p_j.rho / p_j.mu;
+                            ADVar<1> up_mob = FVM_Ops::Op_Upwind_AD<1, ADVar<1>>(dPhi, mob_i, mob_j);
+                            F[0] = FVM_Ops::Compute_Mass_Flux<1, ADVar<1>>(conn.T_Flow, up_mob, dPhi);
+                            return F;
+                        };
+
+                        auto f_i = eval_flux(true);
+                        auto f_j = eval_flux(false);
+                        FIM_GlobalAssembler<1, ADVar<1>>::AssembleFlux(i, j, f_i, f_j, global_mat);
+
+                        const int eq_i = mgr.getEquationIndex(i, 0);
+                        const int eq_j = mgr.getEquationIndex(j, 0);
+                        if (eq_i >= 0 && eq_i < totalEq) {
+                            eq_contribs[eq_i].R_flux += -f_i[0].val;
+                            eq_contribs[eq_i].D_flux += -f_i[0].grad(0);
+                        }
+                        if (eq_j >= 0 && eq_j < totalEq) {
+                            eq_contribs[eq_j].R_flux += f_i[0].val;
+                            eq_contribs[eq_j].D_flux += f_j[0].grad(0);
+                        }
+
+                        if (params.enable_non_orthogonal_correction &&
+                            conn.type == ConnectionType::Matrix_Matrix &&
+                            i < nMat && j < nMat) {
+                            const double vT_mag = conn.vectorT.Mag();
+                            if (vT_mag > 1.0e-15) {
+                                const double gPx = 0.5 * (nonorth_grad_P[i].m_x + nonorth_grad_P[j].m_x);
+                                const double gPy = 0.5 * (nonorth_grad_P[i].m_y + nonorth_grad_P[j].m_y);
+                                const double corr_P = gPx * conn.vectorT.m_x + gPy * conn.vectorT.m_y;
+                                const double K_eff = (conn.aux_area > 1.0e-12)
+                                    ? conn.T_Flow * conn.aux_dist / conn.aux_area
+                                    : 0.0;
+                                const double gdx = gravityVec * (blockCenters[j] - blockCenters[i]);
+                                const double dPhi_sign = (state.P[j] - state.P[i]) - 0.5 * (cprop[i].rho + cprop[j].rho) * gdx;
+                                const double mob = (dPhi_sign < 0.0) ? cprop[i].mob : cprop[j].mob;
+                                const double mass_corr = K_eff * mob * corr_P;
+                                global_mat.AddResidual(i, 0, -mass_corr);
+                                global_mat.AddResidual(j, 0, mass_corr);
+                                if (eq_i >= 0 && eq_i < totalEq) eq_contribs[eq_i].R_flux += -mass_corr;
+                                if (eq_j >= 0 && eq_j < totalEq) eq_contribs[eq_j].R_flux += mass_corr;
+                            }
+                        }
+                    }
+
+                    if (modules.pressure_bc) {
+                        SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
+                        std::vector<double> bc_res(totalEq, 0.0);
+                        std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                        const bool bc_use_co2 = use_eos || (modules.single_phase_fluid == SinglePhaseFluidModel::CO2);
+                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                            BoundaryAssembler::Assemble_2D_FullJac(
+                                mgr, *modules.pressure_bc, 0, fm,
+                                PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
+                                bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                        }
+                        else {
+                            BoundaryAssembler::Assemble_3D_FullJac(
+                                mgr, *modules.pressure_bc, 0, fm,
+                                PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
+                                bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                        }
+
+                        for (int bi = 0; bi < totalBlocks; ++bi) {
+                            const int eq = mgr.getEquationIndex(bi, 0);
+                            if (eq < 0 || eq >= totalEq) continue;
+                            const double r_bc = bc_res[eq];
+                            const double dRdP = bc_jac3[eq][0];
+                            if (std::abs(r_bc) <= 1.0e-16 && std::abs(dRdP) <= 1.0e-16) continue;
+                            global_mat.AddResidual(bi, 0, r_bc);
+                            global_mat.AddDiagJacobian(bi, 0, 0, dRdP);
+                            eq_contribs[eq].R_bc += r_bc;
+                            eq_contribs[eq].D_bc += dRdP;
+                        }
+                    }
+
+                    auto A = global_mat.GetFrozenMatrix();
+                    auto b = global_mat.ExportEigenResidual();
+                    const double conv_res = b.lpNorm<Eigen::Infinity>();
+                    if (iter == 1) res_iter1 = conv_res;
+                    const double rel_res = conv_res / std::max(res_iter1, 1.0e-30);
+                    step_final_residual = conv_res;
+
+                    if (conv_res <= params.abs_res_tol) {
+                        converged = true;
+                        converge_mode = "abs_res";
+                        break;
+                    }
+                    if (rel_res <= params.rel_res_tol && last_rel_update <= params.rel_update_tol) {
+                        converged = true;
+                        converge_mode = "rel_res_update";
+                        break;
+                    }
+
+                    auto linear_out = SolveLinearSystem<1>(A, b, eq_contribs, totalEq, params, linear_solver_cache);
+                    if (!linear_out.compute_ok || !linear_out.solve_ok || linear_out.dx.size() != totalEq) {
+                        fail_reason = "linear_solve_fail";
+                        break;
+                    }
+                    const Eigen::VectorXd& dx = linear_out.dx;
+                    if (!dx.allFinite()) {
+                        fail_reason = "dx_nan_inf";
+                        break;
+                    }
+
+                    // N=1 pressure-only route:
+                    // do NOT couple max_dP to dt shrinking, otherwise rollback to small dt
+                    // can stall Newton updates and trigger perpetual nonlinear_max_iter.
+                    const double max_dP_eff = std::max(1.0e-3, params.max_dP);
+                    double alpha = 1.0;
+                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                        const int eqP = mgr.getEquationIndex(bi, 0);
+                        if (eqP < 0 || eqP >= dx.size()) { fail_reason = "invalid_eq_index"; alpha = 0.0; break; }
+                        alpha = std::min(alpha, max_dP_eff / (std::abs(dx[eqP]) + 1.0e-14));
+                    }
+                    alpha = std::min(1.0, alpha);
+                    if (!std::isfinite(alpha) || alpha < params.min_alpha) {
+                        fail_reason = "alpha_too_small";
+                        break;
+                    }
+
+                    FIM_StateMap<1> trial_state = state;
+                    int trial_limiter = 0;
+                    double trial_rel_update = std::numeric_limits<double>::infinity();
+                    if (!ApplyTrialUpdate<1>(
+                        state, alpha, dx, mgr, totalBlocks, params,
+                        p_floor, p_ceil, t_floor, t_ceil,
+                        trial_state, trial_limiter, trial_rel_update, 0)) {
+                        fail_reason = "state_nan_inf";
+                        break;
+                    }
+
+                    state = std::move(trial_state);
+                    total_limiters += trial_limiter;
+                    last_rel_update = trial_rel_update;
+                }
+
+                if (!converged) {
+                    if (fail_reason.empty()) fail_reason = "nonlinear_max_iter";
+                    if (fail_reason == "nonlinear_max_iter") {
+                        std::cout << "    [N1-DIAG] step=" << step
+                            << " iter_used=" << iter_used
+                            << " residual_inf=" << step_final_residual
+                            << " last_rel_update=" << last_rel_update
+                            << " max_newton_iter=" << params.max_newton_iter
+                            << "\n";
+                    }
+                    ++total_rollbacks;
+                    const double rollback_fac = std::min(1.0, std::max(0.05, params.rollback_shrink_factor));
+                    dt = std::max(dt * rollback_fac, params.dt_min);
+                    state = old_state;
+                    --step;
+                    std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
+                    if (dt <= params.dt_min && total_rollbacks > 20) {
+                        throw std::runtime_error("[FAIL] dt reached lower bound with repeated rollback.");
+                    }
+                    if (total_rollbacks > 80) {
+                        throw std::runtime_error("[FAIL] Max rollbacks exceeded.");
+                    }
+                    continue;
+                }
+
+                t += dt;
+                completed_steps = step;
+                final_residual = step_final_residual;
+                std::cout << "  [Step Success] step=" << std::setw(3) << step
+                    << " dt=" << std::scientific << std::setprecision(3) << dt
+                    << " iter_used=" << iter_used
+                    << " conv_mode=" << converge_mode
+                    << " rollback_count=" << total_rollbacks
+                    << " limiter_count=" << total_limiters << "\n";
+
+                EmitStepAccepted<1>(modules, step, t, dt, iter_used, step_final_residual, total_rollbacks, converge_mode, state);
+
+                if (iter_used <= 2) dt = std::min(dt * 1.2, params.dt_max);
+                else if (iter_used <= 4) dt = std::min(dt * 1.05, params.dt_max);
+                else dt = std::max(dt * 0.8, params.dt_min);
+
+                const bool reached_target_end = (target_end_time_s > 0.0) && (t >= target_end_time_s - 1.0e-12);
+                if (!modules.disable_default_vtk_output) {
+                    if (vtk_export_count == 0) {
+                        export_vtk_snapshot("step_" + std::to_string(step), step);
+                    }
+                    if (step % 10 == 0 || step == params.max_steps || reached_target_end) {
+                        export_vtk_snapshot(reached_target_end ? "final" : ("step_" + std::to_string(step)), step);
+                    }
+                }
+            }
+
+            if (!final_vtk_exported && !modules.disable_default_vtk_output) {
+                export_vtk_snapshot("final", completed_steps);
+            }
+
+            std::cout << "[PASS] Day6 case completed: " << caseName
+                << " | steps=" << completed_steps
+                << " | rollbacks=" << total_rollbacks
+                << " | limiters=" << total_limiters
+                << " | final_residual=" << std::scientific << final_residual
+                << " | vtk_exports=" << vtk_export_count
+                << " | t_end=" << std::scientific << t << " s\n";
+        }
+
+    } // namespace detail
+
     template <int N, typename MeshMgrType, typename FieldMgrType>
     inline void RunGenericFIMTransient(
         const std::string& caseName,
@@ -45,6 +587,12 @@ namespace FIM_Engine {
 
         if (route == SolverRoute::IMPES) {
             throw std::runtime_error("[TODO] IMPES explicit route is reserved but currently bypassed.");
+        }
+
+        if constexpr (N == 1) {
+            detail::RunGenericFIMTransientPressureOnlyN1(
+                caseName, mgr, fm, ic, wells, params, modules);
+            return;
         }
 
         std::cout << "\n========== Starting Transient Scenario: " << caseName << " ==========\n";
@@ -206,6 +754,10 @@ namespace FIM_Engine {
         int vtk_export_count = 0;
         bool final_vtk_exported = false;
         double final_residual = std::numeric_limits<double>::quiet_NaN();
+
+        detail::EmitStepAccepted<N>(
+            modules, 0, t, 0.0, 0, 0.0, total_rollbacks, "initial", state);
+
         // State guard rails:
         // 1) always keep conservative physical lower bounds;
         // 2) optionally enforce EOS-table hard clipping (off by default).
@@ -625,7 +1177,18 @@ namespace FIM_Engine {
                 }
                 assembleBoundaryFieldProbe(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field);
 
-                const Eigen::VectorXd b_probe = probe_mat.ExportEigenResidual();
+                Eigen::VectorXd b_probe = probe_mat.ExportEigenResidual();
+                // ── ConstantWaterNoConvection: freeze T probe rows to match main Newton system ──
+                // Without this, probe_res >> conv_res → LS-BASE-CHECK corrupts use_ref → Armijo fails.
+                if constexpr (N == 2) {
+                    if (sp_model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
+                        for (int bi = 0; bi < totalBlocks; ++bi) {
+                            const int t_row = mgr.getEquationIndex(bi, 1);
+                            if (t_row >= 0 && t_row < static_cast<int>(b_probe.size()))
+                                b_probe(t_row) = eval_state.T[bi] - ic.T_init;
+                        }
+                    }
+                }
                 int max_probe_idx = 0;
                 const double max_probe = b_probe.cwiseAbs().maxCoeff(&max_probe_idx);
                 (void)max_probe_idx;
@@ -1194,6 +1757,30 @@ namespace FIM_Engine {
                 assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, "T");
                 auto A = global_mat.GetFrozenMatrix(); // Issue#11: O(nnz) CSR value-update, no Triplet sort
                 auto b = global_mat.ExportEigenResidual();
+
+                // ── ConstantWaterNoConvection: freeze T DOF ────────────────────────────────
+                // Replace the energy equation row with a Dirichlet constraint T = T_init.
+                // R_T = T - T_init, J_TT = 1, all off-diagonals = 0.
+                // This makes the energy equation trivially satisfied every Newton step
+                // (T stays at T_init), isolating the pressure equation for clean convergence.
+                if constexpr (N == 2) {
+                    if (sp_model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
+                        using SpMat = Eigen::SparseMatrix<double, Eigen::RowMajor, int>;
+                        for (int bi = 0; bi < totalBlocks; ++bi) {
+                            const int t_row = mgr.getEquationIndex(bi, 1);
+                            if (t_row < 0 || t_row >= static_cast<int>(b.size())) continue;
+                            for (SpMat::InnerIterator it(A, t_row); it; ++it)
+                                it.valueRef() = 0.0;
+                            A.coeffRef(t_row, t_row) = 1.0;
+                            b(t_row) = state.T[bi] - ic.T_init;
+                            // Reset D_acc so row scaling uses denominator=1 for T rows
+                            // (original D_acc_energy is large → would scale T row to ~0 → no precision gain)
+                            if (t_row < static_cast<int>(eq_contribs.size()))
+                                eq_contribs[t_row].D_acc = 1.0;
+                        }
+                    }
+                }
+
                 if (params.enable_matrix_audit && step == params.matrix_audit_step && iter_used == params.matrix_audit_iter) {
                     for (const auto& conn : connMgr.GetConnections()) {
                         int i = conn.nodeI, j = conn.nodeJ;
@@ -2027,6 +2614,9 @@ namespace FIM_Engine {
                     << " rollback_count=" << total_rollbacks << " limiter_count=" << total_limiters << "\n";
 
                 const double dt_used = dt;
+                detail::EmitStepAccepted<N>(
+                    modules, step, t, dt_used, iter_used, step_final_residual, total_rollbacks, converge_mode, state);
+
                 if (converge_mode == "abs_res") {
                     if (iter_used <= 3) dt = std::min(dt * 1.2, active_dt_max);
                     else if (iter_used <= 5) dt = std::min(dt * 1.05, active_dt_max);
@@ -2093,6 +2683,16 @@ namespace FIM_Engine {
                     VerifyVtkExport(fname, N == 3);
                     if (suffix == "/final.vtk") final_vtk_exported = true;
                     vtk_export_count++;
+                    {
+                        const std::string tag = [&]() {
+                            if (suffix == "/final.vtk") return std::string("final");
+                            std::string out = suffix;
+                            if (!out.empty() && out.front() == '/') out.erase(out.begin());
+                            if (out.size() > 4 && out.substr(out.size() - 4) == ".vtk") out.resize(out.size() - 4);
+                            return out;
+                        }();
+                        detail::EmitSnapshot(modules, tag, step, t, fname);
+                    }
                     std::cout << "    [VTK Export PASS] " << fname << "\n";
                     };
 
@@ -2104,29 +2704,31 @@ namespace FIM_Engine {
 
                 // Ensure at least one recoverable snapshot exists even if the run fails
                 // before the first time-based VTK interval is reached.
-                if (vtk_export_count == 0) {
-                    export_vtk_snapshot("/step_" + std::to_string(step) + ".vtk");
-                }
-
-                if (active_vtk_interval_s > 0.0) {
-                    if (!(next_vtk_output_time_s > 0.0)) {
-                        next_vtk_output_time_s = t + active_vtk_interval_s;
-                    }
-                    if (t + 1.0e-12 >= next_vtk_output_time_s || reached_target_end) {
+                if (!modules.disable_default_vtk_output) {
+                    if (vtk_export_count == 0) {
                         export_vtk_snapshot("/step_" + std::to_string(step) + ".vtk");
-                        do {
-                            next_vtk_output_time_s += active_vtk_interval_s;
-                        } while (next_vtk_output_time_s <= t + 1.0e-12);
                     }
-                }
-                else if (step % 10 == 0 || step == params.max_steps || reached_target_end) {
-                    export_vtk_snapshot((step == params.max_steps || reached_target_end)
-                        ? "/final.vtk"
-                        : ("/step_" + std::to_string(step) + ".vtk"));
+
+                    if (active_vtk_interval_s > 0.0) {
+                        if (!(next_vtk_output_time_s > 0.0)) {
+                            next_vtk_output_time_s = t + active_vtk_interval_s;
+                        }
+                        if (t + 1.0e-12 >= next_vtk_output_time_s || reached_target_end) {
+                            export_vtk_snapshot("/step_" + std::to_string(step) + ".vtk");
+                            do {
+                                next_vtk_output_time_s += active_vtk_interval_s;
+                            } while (next_vtk_output_time_s <= t + 1.0e-12);
+                        }
+                    }
+                    else if (step % 10 == 0 || step == params.max_steps || reached_target_end) {
+                        export_vtk_snapshot((step == params.max_steps || reached_target_end)
+                            ? "/final.vtk"
+                            : ("/step_" + std::to_string(step) + ".vtk"));
+                    }
                 }
             }
         }
-        if (!final_vtk_exported) {
+        if (!final_vtk_exported && !modules.disable_default_vtk_output) {
             SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
             const std::string fname = "Test/Transient/Day6/" + caseName + "/final.vtk";
             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
@@ -2137,6 +2739,7 @@ namespace FIM_Engine {
             }
             VerifyVtkExport(fname, N == 3);
             vtk_export_count++;
+            detail::EmitSnapshot(modules, "final", completed_steps, t, fname);
             std::cout << "    [VTK Export PASS] " << fname << "\n";
         }
 

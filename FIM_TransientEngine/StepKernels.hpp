@@ -137,7 +137,8 @@ namespace FIM_Engine {
             double t_ceil,
             FIM_StateMap<N>& out_state,
             int& limiter_added_local,
-            double& rel_update_inf);
+            double& rel_update_inf,
+            int num_well_blocks = 0);
 
     } // namespace detail
 } // namespace FIM_Engine

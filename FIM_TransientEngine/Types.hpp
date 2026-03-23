@@ -8,6 +8,7 @@
 #include "../UserDefineVarType.h"
 
 #include <functional>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -16,7 +17,8 @@ namespace FIM_Engine {
     enum class DiagLevel { Off, Summary, Hotspot, Forensic };
     enum class SolverRoute { FIM, IMPES };
     enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL, AMGCL_CPR };
-    enum class SinglePhaseFluidModel { Water, CO2, ConstantWater };
+    enum class SinglePhaseFluidModel { Water, CO2, ConstantWater, ConstantWaterNoConvection };
+    enum class PressureOnlyPropertyMode { ConstantBaseline, CO2_EOS };
 
     struct InitialConditions {
         double P_init = 2.0e5;
@@ -198,6 +200,37 @@ namespace FIM_Engine {
 
         std::function<void(const MeshMgrType&, const std::vector<Vector>&, int,
             std::vector<double>&, std::vector<double>&, std::vector<double>*)> state_initializer;
+
+        // N=1 pressure-only property controls:
+        // - ConstantBaseline: freeze rho/mu for the full run.
+        // - CO2_EOS: evaluate CO2 EOS each Newton iteration at (P, T_const).
+        PressureOnlyPropertyMode pressure_only_property_mode = PressureOnlyPropertyMode::ConstantBaseline;
+        double pressure_only_temperature_k = -1.0;
+        double pressure_only_baseline_rho = -1.0;
+        double pressure_only_baseline_mu = -1.0;
+
+        // Optional observability hooks (called after accepted steps / successful VTK snapshots).
+        std::function<void(
+            int,                 // step
+            double,              // time_s
+            double,              // dt_used_s
+            int,                 // newton_iters
+            double,              // residual_inf
+            int,                 // total_rollbacks
+            const std::string&,  // converge_mode
+            const std::vector<double>&, // P
+            const std::vector<double>&, // T
+            const std::vector<double>*  // Sw (nullptr for N=1/N=2)
+            )> on_step_accepted;
+        std::function<void(
+            const std::string&,  // tag (e.g. step_10/final)
+            int,                 // step
+            double,              // time_s
+            const std::string&   // vtk_path
+            )> on_snapshot_written;
+
+        // Keep legacy default exports unless explicitly disabled by caller.
+        bool disable_default_vtk_output = false;
     };
 
 } // namespace FIM_Engine

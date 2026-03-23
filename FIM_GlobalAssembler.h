@@ -1,10 +1,3 @@
-/**
- * @file FIM_GlobalAssembler.h
- * @brief ȫ��ʽ�����ȫ����װ�� (Global Assembler for FIM)
- * @details ���� AD �������ӵľֲ������� (Accumulation, Flux, Source)
- * ��Ч����ȫ��װ���� FIM_BlockSparseMatrix���ѿ����ϸ�ĳߴ������ͨ��һ���Լ�顣
- */
-
 #pragma once
 #include "FIM_BlockSparseMatrix.h"
 #include <vector>

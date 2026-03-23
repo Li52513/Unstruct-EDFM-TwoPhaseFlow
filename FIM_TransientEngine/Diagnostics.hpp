@@ -130,7 +130,7 @@ namespace FIM_Engine {
 
         MatrixAuditSummary s;
         const int flow_eq = 0;
-        const int heat_eq = (N == 3) ? 2 : 1;
+        const int heat_eq = (N == 3) ? 2 : ((N == 2) ? 1 : -1);
         int detail_left = std::max(0, max_detail);
 
         auto abs_coeff = [&](int row, int col) -> double {
@@ -165,10 +165,18 @@ namespace FIM_Engine {
                 else ++s.ff_zero_tflow;
             }
 
-            const bool active_heat = std::abs(c.T_Heat) > trans_eps;
-            if (!active_heat) {
+            bool active_heat = false;
+            if (heat_eq < 0) {
+                // N=1 has no heat equation row; mark as inactive to skip strict heat coupling checks.
                 if (is_nnc) ++s.nnc_zero_theat;
                 else ++s.ff_zero_theat;
+            }
+            else {
+                active_heat = std::abs(c.T_Heat) > trans_eps;
+                if (!active_heat) {
+                    if (is_nnc) ++s.nnc_zero_theat;
+                    else ++s.ff_zero_theat;
+                }
             }
 
             if (active_flow) {
@@ -186,7 +194,7 @@ namespace FIM_Engine {
                 }
             }
 
-            if (active_heat) {
+            if (heat_eq >= 0 && active_heat) {
                 const int i_heat = c.nodeI * N + heat_eq;
                 const int j_heat = c.nodeJ * N + heat_eq;
                 const bool has_heat = (abs_coeff(i_heat, j_heat) > eps) || (abs_coeff(j_heat, i_heat) > eps);

@@ -25,6 +25,7 @@
 #include "Test_Day5_GlobalAssembly_Jacobian.h"
 #include "Test_Day6_TransientSolver.h"
 #include "Test_Day6_DebugLadder.h"
+#include "Test_ValidationSuite.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
 #include "ADVar.hpp"
@@ -128,10 +129,16 @@ int main (int argc, char** argv) {
         {"day6_t01_f1", "Day6 T01 immediate split gate: F1 single-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F1(); return 0; }},
         {"day6_t01_f2", "Day6 T01 immediate split gate: F2 crossing-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F2(); return 0; }},
         {"day6_t1_2d_sp_nowell_analytical", "Day6 T1 baseline: 2D no-well single-phase diffusion with Fourier analytical validation", []() { Test_Day6::Run_Day6_T1_2D_SP_NoWell_Analytical(); return 0; }},
-        {"day6l1_2d_sp_co2_const_nowell_analytical", "Day6L1: 2D pressure-only constant-CO2 no-well analytical baseline (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical(); return 0; }},
-        {"day6l2_2d_sp_co2_const_nowell_grid", "Day6L2: 2D pressure-only constant-CO2 no-well grid convergence (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence(); return 0; }},
-        {"day6l3_2d_sp_co2_const_nowell_solver", "Day6L3: 2D pressure-only constant-CO2 no-well solver robustness (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness(); return 0; }},
-        {"day6ladder_2d_sp_co2_const_nowell_all", "Day6 ladder: run L1+L2+L3 pressure-only debug chain (forced non-orth + VTK)", []() { Test_Day6::Run_Day6Ladder_2D_SP_CO2Const_NoWell_All(); return 0; }},
+        {"day6l1_2d_sp_co2_const_nowell_analytical", "Day6L1 (AD N=1): 2D pressure-only constant-baseline no-well analytical baseline (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical(); return 0; }},
+        {"day6l2_2d_sp_co2_const_nowell_grid", "Day6L2 (AD N=1): 2D pressure-only constant-baseline no-well grid convergence (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence(); return 0; }},
+        {"day6l3_2d_sp_co2_const_nowell_solver", "Day6L3 (AD N=1): 2D pressure-only constant-baseline no-well solver robustness (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness(); return 0; }},
+        {"day6l4_2d_sp_co2_varprop_nowell", "Day6L4 (AD N=1): 2D pressure-only CO2-EOS no-well nonlinear stress (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear(); return 0; }},
+        {"day6ladder_2d_sp_co2_const_nowell_all", "Day6 ladder (AD N=1): run L1+L2+L3+L4 pressure-only debug chain (forced non-orth + VTK)", []() { Test_Day6::Run_Day6Ladder_2D_SP_CO2Const_NoWell_All(); return 0; }},
+        {"day6l1_2d_sp_co2_const_nowell_analytical_legacy", "Day6L1 legacy: custom SparseLU pressure-only analytical baseline", []() { Test_Day6::Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical_Legacy(); return 0; }},
+        {"day6l2_2d_sp_co2_const_nowell_grid_legacy", "Day6L2 legacy: custom SparseLU pressure-only grid convergence", []() { Test_Day6::Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence_Legacy(); return 0; }},
+        {"day6l3_2d_sp_co2_const_nowell_solver_legacy", "Day6L3 legacy: custom SparseLU pressure-only solver robustness", []() { Test_Day6::Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness_Legacy(); return 0; }},
+        {"day6l4_2d_sp_co2_varprop_nowell_legacy", "Day6L4 legacy: custom SparseLU pressure-only variable-property stress", []() { Test_Day6::Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear_Legacy(); return 0; }},
+        {"day6ladder_2d_sp_co2_const_nowell_all_legacy", "Day6 ladder legacy: run L1+L2+L3+L4 legacy chain", []() { Test_Day6::Run_Day6Ladder_2D_SP_CO2Const_NoWell_All_Legacy(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
@@ -155,6 +162,22 @@ int main (int argc, char** argv) {
         {"trans_2d", "2D transmissibility benchmark (MM/FI/NNC/FF)", []() { Benchmark2D::run_TransmissibilityBenchmark_2D(); return 0; }},
         {"trans_3d", "3D transmissibility benchmark (MM/FI/NNC/FF)", []() { Benchmark3D::run_TransmissibilityBenchmark_3D(); return 0; }},
         {"trans_all", "2D + 3D transmissibility benchmarks", []() { Benchmark2D::run_TransmissibilityBenchmark_2D(); Benchmark3D::run_TransmissibilityBenchmark_3D(); return 0; }},
+        // ---- ValidationSuite ----
+        {"val_t1_const_nofrac",    "ValidationSuite T1: Const NoFrac (analytical)",      []() { ValidationSuite::Val_T1_Const_NoFrac();    return 0; }},
+        {"val_t1_const_singlefrac","ValidationSuite T1: Const SingleFrac (stability)",   []() { ValidationSuite::Val_T1_Const_SingleFrac(); return 0; }},
+        {"val_t1_const_crossfrac", "ValidationSuite T1: Const CrossFrac (stability)",    []() { ValidationSuite::Val_T1_Const_CrossFrac();  return 0; }},
+        {"val_t1_var_nofrac",      "ValidationSuite T1: Var NoFrac (EOS cross-check)",   []() { ValidationSuite::Val_T1_Var_NoFrac();      return 0; }},
+        {"val_t1_var_singlefrac",  "ValidationSuite T1: Var SingleFrac (EOS stability)", []() { ValidationSuite::Val_T1_Var_SingleFrac();  return 0; }},
+        {"val_t1_var_crossfrac",   "ValidationSuite T1: Var CrossFrac (EOS stability)",  []() { ValidationSuite::Val_T1_Var_CrossFrac();   return 0; }},
+        {"val_t1", "ValidationSuite T1: no-well single-phase pressure diffusion (6 variants)", []() { ValidationSuite::Run_All_T1(); return 0; }},
+        {"val_t2", "ValidationSuite T2: no-well single-phase thermal diffusion (6 variants)", []() { ValidationSuite::Run_All_T2(); return 0; }},
+        {"val_t3", "ValidationSuite T3: no-well two-phase Buckley-Leverett (6 variants)", []() { ValidationSuite::Run_All_T3(); return 0; }},
+        {"val_t4", "ValidationSuite T4: no-well two-phase + heat (6 variants)", []() { ValidationSuite::Run_All_T4(); return 0; }},
+        {"val_t5", "ValidationSuite T5: with-well single-phase Theis (6 variants)", []() { ValidationSuite::Run_All_T5(); return 0; }},
+        {"val_t6", "ValidationSuite T6: with-well single-phase thermal front (6 variants)", []() { ValidationSuite::Run_All_T6(); return 0; }},
+        {"val_t7", "ValidationSuite T7: with-well two-phase radial BL (6 variants)", []() { ValidationSuite::Run_All_T7(); return 0; }},
+        {"val_t8", "ValidationSuite T8: with-well two-phase radial BL + heat (6 variants)", []() { ValidationSuite::Run_All_T8(); return 0; }},
+        {"val_suite_all", "ValidationSuite: run all 48 validation scenarios T1..T8", []() { ValidationSuite::Run_ValidationSuite_All(); return 0; }},
     };
 
     bool showHelp = false;

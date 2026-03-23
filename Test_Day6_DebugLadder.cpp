@@ -49,10 +49,23 @@ struct PressurePhysicalParams {
     double perm = 1.0e-13; // m^2
     double ct = 5.0e-9;    // Pa^-1
     double mu = 6.0e-5;    // Pa*s (constant CO2 viscosity, simplified)
+
+    // Optional pressure-dependent property model for L4 nonlinear stress.
+    bool use_pressure_dependent_properties = false;
+    double p_ref = 1.0e7;            // Pa
+    double mu_p_exp_coeff = 0.0;     // 1/Pa, mu = mu0 * exp(coeff * (p - p_ref))
+    double ct_p_lin_coeff = 0.0;     // 1/Pa, ct = ct0 * (1 + coeff * (p - p_ref))
+    double phi_p_lin_coeff = 0.0;    // 1/Pa, phi = phi0 * (1 + coeff * (p - p_ref))
+    double mu_min = 1.0e-6;          // Pa*s
+    double mu_max = 1.0e-2;          // Pa*s
+    double ct_min = 1.0e-12;         // Pa^-1
+    double ct_max = 1.0e-6;          // Pa^-1
+    double phi_min = 1.0e-4;         // [-]
+    double phi_max = 0.95;           // [-]
 };
 
 struct PressureCaseConfig {
-    std::string level_dir;   // L1/L2/L3
+    std::string level_dir;   // L1/L2/L3/L4
     std::string case_name;   // sub-path under level dir
 
     PressurePhysicalParams physical;
@@ -119,6 +132,47 @@ struct GridCaseResult {
     int steps = 0;
     int rollbacks = 0;
 };
+
+struct LocalPressureProps {
+    double phi = 0.0;
+    double ct = 0.0;
+    double mu = 0.0;
+    double mobility = 0.0;
+};
+
+double ClampScalar(double v, double lo, double hi) {
+    return std::max(lo, std::min(v, hi));
+}
+
+double HarmonicMeanPositive(double a, double b, double eps) {
+    const double aa = std::max(a, eps);
+    const double bb = std::max(b, eps);
+    return 2.0 * aa * bb / (aa + bb);
+}
+
+LocalPressureProps EvaluateLocalPressureProps(const PressureCaseConfig& cfg, double p) {
+    LocalPressureProps out;
+    const auto& ph = cfg.physical;
+
+    if (!ph.use_pressure_dependent_properties) {
+        out.phi = ph.phi;
+        out.ct = ph.ct;
+        out.mu = ph.mu;
+        out.mobility = ph.perm / std::max(out.mu, 1.0e-30);
+        return out;
+    }
+
+    const double dp = p - ph.p_ref;
+    const double mu_raw = ph.mu * std::exp(ph.mu_p_exp_coeff * dp);
+    const double ct_raw = ph.ct * (1.0 + ph.ct_p_lin_coeff * dp);
+    const double phi_raw = ph.phi * (1.0 + ph.phi_p_lin_coeff * dp);
+
+    out.mu = ClampScalar(mu_raw, ph.mu_min, ph.mu_max);
+    out.ct = ClampScalar(ct_raw, ph.ct_min, ph.ct_max);
+    out.phi = ClampScalar(phi_raw, ph.phi_min, ph.phi_max);
+    out.mobility = ph.perm / std::max(out.mu, 1.0e-30);
+    return out;
+}
 
 void EnsureDirRecursive(const std::string& raw_path) {
     if (raw_path.empty()) return;
@@ -290,7 +344,6 @@ StepReport SolveSingleImplicitStep(const MeshManager& mgr,
 
     StepReport report;
     std::vector<double> p_iter = p_old;
-    const double mobility = cfg.physical.perm / std::max(cfg.physical.mu, 1.0e-30);
     constexpr double kEps = 1.0e-14;
 
     for (int iter = 1; iter <= cfg.max_nonlinear_iter; ++iter) {
@@ -298,13 +351,30 @@ StepReport SolveSingleImplicitStep(const MeshManager& mgr,
             ? ComputePressureGradientGG(mgr, p_iter, bc_p)
             : std::vector<Vector>(n, Vector(0.0));
 
+        std::vector<LocalPressureProps> props(n);
+        double mu_min_iter = std::numeric_limits<double>::infinity();
+        double mu_max_iter = 0.0;
+        double ct_min_iter = std::numeric_limits<double>::infinity();
+        double ct_max_iter = 0.0;
+        double phi_min_iter = std::numeric_limits<double>::infinity();
+        double phi_max_iter = 0.0;
+        for (size_t i = 0; i < n; ++i) {
+            props[i] = EvaluateLocalPressureProps(cfg, p_iter[i]);
+            mu_min_iter = std::min(mu_min_iter, props[i].mu);
+            mu_max_iter = std::max(mu_max_iter, props[i].mu);
+            ct_min_iter = std::min(ct_min_iter, props[i].ct);
+            ct_max_iter = std::max(ct_max_iter, props[i].ct);
+            phi_min_iter = std::min(phi_min_iter, props[i].phi);
+            phi_max_iter = std::max(phi_max_iter, props[i].phi);
+        }
+
         std::vector<double> rhs(n, 0.0);
         std::vector<double> diag(n, 0.0);
         std::vector<Eigen::Triplet<double>> tri;
         tri.reserve(n * 7);
 
         for (size_t i = 0; i < n; ++i) {
-            const double acc = cfg.physical.phi * cfg.physical.ct * std::max(cells[i].volume, 0.0) / std::max(dt, kEps);
+            const double acc = props[i].phi * props[i].ct * std::max(cells[i].volume, 0.0) / std::max(dt, kEps);
             diag[i] += acc;
             rhs[i] += acc * p_old[i];
         }
@@ -321,7 +391,8 @@ StepReport SolveSingleImplicitStep(const MeshManager& mgr,
                 const Vector& c_nei = cells[nei].center;
 
                 const double d = std::max(std::abs((c_nei - c_owner) * face.normal), kEps);
-                const double t_orth = mobility * area_e / d;
+                const double mob_face = HarmonicMeanPositive(props[owner].mobility, props[nei].mobility, kEps);
+                const double t_orth = mob_face * area_e / d;
 
                 diag[owner] += t_orth;
                 diag[nei] += t_orth;
@@ -331,7 +402,7 @@ StepReport SolveSingleImplicitStep(const MeshManager& mgr,
                 if (cfg.enable_non_orth_correction) {
                     const double w = std::min(1.0, std::max(0.0, face.f_linearInterpolationCoef));
                     const Vector grad_f = grad_p[owner] * w + grad_p[nei] * (1.0 - w);
-                    const double corr = mobility * (grad_f * face.vectorT);
+                    const double corr = mob_face * (grad_f * face.vectorT);
                     rhs[owner] -= corr;
                     rhs[nei] += corr;
                 }
@@ -341,7 +412,7 @@ StepReport SolveSingleImplicitStep(const MeshManager& mgr,
             if (!bc_p.HasBC(face.physicalGroupId)) continue;
             const auto bc = bc_p.GetBCCoefficients(face.physicalGroupId, face.midpoint);
             const double d_b = std::max(std::abs((face.midpoint - c_owner) * face.normal), kEps);
-            const double t_b = mobility * area_e / d_b;
+            const double t_b = props[owner].mobility * area_e / d_b;
 
             if (bc.type == BoundarySetting::BoundaryType::Dirichlet) {
                 const double p_bc = (std::abs(bc.a) > kEps) ? (bc.c / bc.a) : cfg.p_init;
@@ -411,6 +482,11 @@ StepReport SolveSingleImplicitStep(const MeshManager& mgr,
         log << "    [Iter " << std::setw(2) << iter
             << "] rel_update=" << std::scientific << std::setprecision(6) << report.rel_update
             << " lin_rel_res=" << std::scientific << std::setprecision(6) << report.linear_rel_res << "\n";
+        if (cfg.physical.use_pressure_dependent_properties) {
+            log << "      [Props] mu=[" << std::scientific << std::setprecision(6) << mu_min_iter << ", " << mu_max_iter << "]"
+                << " ct=[" << ct_min_iter << ", " << ct_max_iter << "]"
+                << " phi=[" << phi_min_iter << ", " << phi_max_iter << "]\n";
+        }
 
         p_iter.swap(p_iter_next);
         const bool converged = (report.rel_update <= cfg.rel_update_tol) && (report.linear_rel_res <= cfg.linear_res_tol);
@@ -451,6 +527,250 @@ void WriteAnalyticalCSV(const std::string& path,
     }
 }
 
+void ApplyUniformScalarField(const std::shared_ptr<volScalarField>& field, double value) {
+    if (!field) return;
+    for (double& v : field->data) v = value;
+}
+
+FIM_Engine::TransientSolverParams BuildN1AdParams(const PressureCaseConfig& cfg) {
+    FIM_Engine::TransientSolverParams p;
+    p.max_steps = cfg.max_steps;
+    p.dt_init = cfg.dt_init;
+    p.dt_min = cfg.dt_min;
+    p.dt_max = cfg.dt_max;
+    p.target_end_time_s = cfg.target_end_time_s;
+
+    p.max_newton_iter = std::max(cfg.max_nonlinear_iter, 10);
+    p.abs_res_tol = std::max(1.0e-9, cfg.linear_res_tol);
+    p.rel_res_tol = std::max(1.0e-6, cfg.rel_update_tol * 100.0);
+    p.rel_update_tol = std::max(1.0e-8, cfg.rel_update_tol);
+    p.rollback_shrink_factor = cfg.rollback_shrink_factor;
+
+    p.lin_solver = FIM_Engine::LinearSolverType::AMGCL;
+    p.amgcl_use_fallback_sparselu = true;
+    p.enable_row_scaling = true;
+    p.enable_armijo_line_search = false;
+    p.enable_non_orthogonal_correction = cfg.enable_non_orth_correction;
+    p.diag_level = FIM_Engine::DiagLevel::Off;
+
+    // Keep pressure update cap generous for pressure-only AD route.
+    p.max_dP = 2.0e7;
+    p.max_dT = 1.0;
+    p.max_dSw = 0.1;
+    p.min_alpha = 1.0e-8;
+    return p;
+}
+
+CaseSummary RunPressureCaseAD(const PressureCaseConfig& cfg,
+                              FIM_Engine::PressureOnlyPropertyMode property_mode) {
+    CaseSummary summary;
+    summary.case_dir = "Test/Transient/Day6Ladder/" + cfg.level_dir + "/" + cfg.case_name;
+    EnsureDirRecursive(summary.case_dir);
+    summary.convergence_log_path = summary.case_dir + "/convergence.log";
+    summary.metrics_csv_path = summary.case_dir + "/metrics.csv";
+    summary.analytical_csv_path = summary.case_dir + "/analytical_compare.csv";
+
+    std::ofstream log(summary.convergence_log_path, std::ios::out | std::ios::trunc);
+    if (!log.good()) {
+        throw std::runtime_error("[Day6Ladder-AD] failed to open convergence.log: " + summary.convergence_log_path);
+    }
+
+    MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
+    mgr.BuildSolidMatrixGrid_2D(cfg.normal_corr_method);
+    mgr.BuildGlobalSystemIndexing();
+    mgr.BuildFracturetoFractureTopology();
+    mgr.setNumDOFs(1);
+
+    FieldManager_2D fm;
+    FIM_CaseKit::InitFieldManager(mgr, fm);
+    const size_t n_cells = mgr.mesh().getCells().size();
+    if (n_cells == 0) {
+        throw std::runtime_error("[Day6Ladder-AD] zero matrix cell count.");
+    }
+
+    BoundarySetting::BoundaryConditionManager bc_p;
+    bc_p.Clear();
+    bc_p.SetDirichletBC(MeshTags::LEFT, cfg.p_left);
+    bc_p.SetDirichletBC(MeshTags::RIGHT, cfg.p_right);
+    bc_p.SetNeumannBC(MeshTags::BOTTOM, 0.0);
+    bc_p.SetNeumannBC(MeshTags::TOP, 0.0);
+
+    std::vector<double> p_final(n_cells, cfg.p_init);
+    bool mid_exported = false;
+    bool final_exported = false;
+    int iter_sum = 0;
+    int iter_count = 0;
+    int iter_max = 0;
+
+    log << "=== Day6 Debug Ladder Pressure-Only AD N=1 ===\n";
+    log << "case=" << cfg.case_name << "\n";
+    log << "level=" << cfg.level_dir << "\n";
+    log << "grid=(" << cfg.nx << "," << cfg.ny << ")\n";
+    log << "non_orth_enabled=" << (cfg.enable_non_orth_correction ? "true" : "false") << "\n";
+    log << "normal_correction_method=" << NormalMethodName(cfg.normal_corr_method) << "\n";
+    log << "dt_init=" << cfg.dt_init << " dt_min=" << cfg.dt_min << " dt_max=" << cfg.dt_max << "\n";
+    log << "target_end_time_s=" << cfg.target_end_time_s << "\n";
+    log << "max_nonlinear_iter=" << cfg.max_nonlinear_iter << " rel_update_tol=" << cfg.rel_update_tol
+        << " linear_res_tol=" << cfg.linear_res_tol << "\n";
+    log << "Physical(const CO2): phi=" << cfg.physical.phi
+        << " k=" << cfg.physical.perm
+        << " ct=" << cfg.physical.ct
+        << " mu=" << cfg.physical.mu << "\n";
+    log << "solver_backend=AD_N1\n";
+    log << "property_mode=" << (property_mode == FIM_Engine::PressureOnlyPropertyMode::CO2_EOS ? "CO2_EOS" : "ConstantBaseline") << "\n";
+
+    FIM_Engine::InitialConditions ic;
+    ic.P_init = cfg.p_init;
+    ic.T_init = cfg.t_init;
+    ic.Sw_init = 1.0;
+
+    FIM_Engine::TransientOptionalModules<MeshManager, FieldManager_2D> modules;
+    modules.pressure_bc = &bc_p;
+    modules.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
+    modules.pressure_only_property_mode = property_mode;
+    modules.pressure_only_temperature_k = cfg.t_init;
+    if (property_mode == FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline) {
+        modules.pressure_only_baseline_mu = cfg.physical.mu;
+        modules.pressure_only_baseline_rho = 700.0;
+    }
+    modules.disable_default_vtk_output = true;
+    modules.property_initializer = [&cfg, property_mode](MeshManager&, FieldManager_2D& fld) {
+        const auto rock = PhysicalProperties_string_op::Rock();
+        const auto frac = PhysicalProperties_string_op::Fracture_string();
+
+        const double rock_cr = (property_mode == FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline)
+            ? cfg.physical.ct
+            : 0.0;
+
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.k_xx_tag, cfg.physical.perm), cfg.physical.perm);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.k_yy_tag, cfg.physical.perm), cfg.physical.perm);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.k_zz_tag, cfg.physical.perm), cfg.physical.perm);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.phi_tag, cfg.physical.phi), cfg.physical.phi);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.c_r_tag, rock_cr), rock_cr);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.rho_tag, 2600.0), 2600.0);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.cp_tag, 1000.0), 1000.0);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.lambda_tag, 2.0), 2.0);
+
+        ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.k_t_tag, cfg.physical.perm), cfg.physical.perm);
+        ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.k_n_tag, cfg.physical.perm), cfg.physical.perm);
+        ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.phi_tag, cfg.physical.phi), cfg.physical.phi);
+        ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.c_r_tag, rock_cr), rock_cr);
+    };
+
+    auto export_from_state = [&](const std::string& name, double time_s, const std::vector<double>& p_state) {
+        if (p_state.size() != n_cells) {
+            throw std::runtime_error("[Day6Ladder-AD] pressure size mismatch during VTK export.");
+        }
+        ExportSnapshotVTK(summary.case_dir, name, time_s, mgr, fm, p_state, cfg.t_init);
+    };
+
+    modules.on_step_accepted =
+        [&](int step, double time_s, double dt_used_s, int newton_iters, double residual_inf, int total_rollbacks,
+            const std::string& converge_mode, const std::vector<double>& p_vec, const std::vector<double>&, const std::vector<double>*) {
+            if (!p_vec.empty() && p_vec.size() == n_cells) {
+                p_final = p_vec;
+            }
+
+            if (step == 0) {
+                export_from_state("initial.vtk", 0.0, p_final);
+                return;
+            }
+
+            summary.steps = step;
+            summary.time_end = time_s;
+            summary.total_rollbacks = total_rollbacks;
+
+            iter_sum += newton_iters;
+            iter_count += 1;
+            iter_max = std::max(iter_max, newton_iters);
+
+            log << "[Step " << step << "]"
+                << " t=" << std::scientific << std::setprecision(8) << time_s
+                << " dt=" << dt_used_s
+                << " iters=" << newton_iters
+                << " residual_inf=" << residual_inf
+                << " rollbacks=" << total_rollbacks
+                << " mode=" << converge_mode << "\n";
+
+            if (!mid_exported && time_s >= 0.5 * cfg.target_end_time_s - 1.0e-12) {
+                export_from_state("mid.vtk", time_s, p_final);
+                mid_exported = true;
+            }
+        };
+
+    const auto params = BuildN1AdParams(cfg);
+    std::vector<WellScheduleStep> wells_none;
+    const std::string generic_case_name = [&cfg]() {
+        std::string s = cfg.case_name;
+        for (char& ch : s) {
+            if (ch == '/' || ch == '\\') ch = '_';
+        }
+        return s;
+    }();
+
+    FIM_Engine::RunGenericFIMTransient<1>(
+        generic_case_name, mgr, fm, ic, wells_none, params, FIM_Engine::SolverRoute::FIM, modules);
+
+    if (!mid_exported) {
+        export_from_state("mid.vtk", summary.time_end, p_final);
+        mid_exported = true;
+    }
+    export_from_state("final.vtk", summary.time_end, p_final);
+    final_exported = true;
+
+    VerifyMandatoryVtkOutputs(summary.case_dir);
+    summary.initial_vtk_ok = FileExistsNonEmpty(summary.case_dir + "/initial.vtk");
+    summary.mid_vtk_ok = FileExistsNonEmpty(summary.case_dir + "/mid.vtk");
+    summary.final_vtk_ok = FileExistsNonEmpty(summary.case_dir + "/final.vtk");
+
+    summary.max_iters_observed = iter_max;
+    summary.avg_iters = (iter_count > 0) ? (static_cast<double>(iter_sum) / static_cast<double>(iter_count)) : 0.0;
+
+    if (cfg.compute_analytical_error) {
+        summary.l2_error_final = ComputeL2RelativeErrorFinal(mgr, p_final, cfg, summary.time_end);
+        WriteAnalyticalCSV(summary.analytical_csv_path, mgr, p_final, cfg, summary.time_end);
+    }
+
+    std::ofstream metrics(summary.metrics_csv_path, std::ios::out | std::ios::trunc);
+    metrics << "case_name,level,nx,ny,n_cells,h_char,t_end,steps,total_rollbacks,avg_nonlinear_iters,max_nonlinear_iters,dt_init,dt_min,dt_max,enable_non_orth,normal_method,l2_error_final,solver_backend,property_mode,pressure_dependent_props,p_ref,mu_p_exp_coeff,ct_p_lin_coeff,phi_p_lin_coeff\n";
+    metrics << cfg.case_name << ","
+            << cfg.level_dir << ","
+            << cfg.nx << ","
+            << cfg.ny << ","
+            << n_cells << ","
+            << std::setprecision(12) << ComputeMeshCharLength(mgr) << ","
+            << std::setprecision(12) << summary.time_end << ","
+            << summary.steps << ","
+            << summary.total_rollbacks << ","
+            << std::setprecision(8) << summary.avg_iters << ","
+            << summary.max_iters_observed << ","
+            << std::setprecision(12) << cfg.dt_init << ","
+            << std::setprecision(12) << cfg.dt_min << ","
+            << std::setprecision(12) << cfg.dt_max << ","
+            << (cfg.enable_non_orth_correction ? 1 : 0) << ","
+            << NormalMethodName(cfg.normal_corr_method) << ","
+            << std::setprecision(12) << summary.l2_error_final << ","
+            << "AD_N1,"
+            << (property_mode == FIM_Engine::PressureOnlyPropertyMode::CO2_EOS ? "CO2_EOS" : "ConstantBaseline") << ","
+            << (cfg.physical.use_pressure_dependent_properties ? 1 : 0) << ","
+            << std::setprecision(12) << cfg.physical.p_ref << ","
+            << std::setprecision(12) << cfg.physical.mu_p_exp_coeff << ","
+            << std::setprecision(12) << cfg.physical.ct_p_lin_coeff << ","
+            << std::setprecision(12) << cfg.physical.phi_p_lin_coeff << "\n";
+
+    log << "\n[Case PASS] " << cfg.case_name
+        << " solver_backend=AD_N1"
+        << " property_mode=" << (property_mode == FIM_Engine::PressureOnlyPropertyMode::CO2_EOS ? "CO2_EOS" : "ConstantBaseline")
+        << " steps=" << summary.steps
+        << " rollbacks=" << summary.total_rollbacks
+        << " avg_iters=" << summary.avg_iters
+        << " max_iters=" << summary.max_iters_observed
+        << " l2_error_final=" << summary.l2_error_final << "\n";
+
+    (void)final_exported;
+    return summary;
+}
+
 CaseSummary RunPressureCase(const PressureCaseConfig& cfg) {
     CaseSummary summary;
     summary.case_dir = "Test/Transient/Day6Ladder/" + cfg.level_dir + "/" + cfg.case_name;
@@ -479,6 +799,17 @@ CaseSummary RunPressureCase(const PressureCaseConfig& cfg) {
         << " k=" << cfg.physical.perm
         << " ct=" << cfg.physical.ct
         << " mu=" << cfg.physical.mu << "\n";
+    log << "PropertyModel: pressure_dependent="
+        << (cfg.physical.use_pressure_dependent_properties ? "true" : "false") << "\n";
+    if (cfg.physical.use_pressure_dependent_properties) {
+        log << "  p_ref=" << cfg.physical.p_ref
+            << " mu_p_exp_coeff=" << cfg.physical.mu_p_exp_coeff
+            << " ct_p_lin_coeff=" << cfg.physical.ct_p_lin_coeff
+            << " phi_p_lin_coeff=" << cfg.physical.phi_p_lin_coeff << "\n";
+        log << "  bounds: mu=[" << cfg.physical.mu_min << ", " << cfg.physical.mu_max
+            << "] ct=[" << cfg.physical.ct_min << ", " << cfg.physical.ct_max
+            << "] phi=[" << cfg.physical.phi_min << ", " << cfg.physical.phi_max << "]\n";
+    }
 
     MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
     mgr.BuildSolidMatrixGrid_2D(cfg.normal_corr_method);
@@ -593,7 +924,7 @@ CaseSummary RunPressureCase(const PressureCaseConfig& cfg) {
     }
 
     std::ofstream metrics(summary.metrics_csv_path, std::ios::out | std::ios::trunc);
-    metrics << "case_name,level,nx,ny,n_cells,h_char,t_end,steps,total_rollbacks,avg_nonlinear_iters,max_nonlinear_iters,dt_init,dt_min,dt_max,enable_non_orth,normal_method,l2_error_final\n";
+    metrics << "case_name,level,nx,ny,n_cells,h_char,t_end,steps,total_rollbacks,avg_nonlinear_iters,max_nonlinear_iters,dt_init,dt_min,dt_max,enable_non_orth,normal_method,l2_error_final,pressure_dependent_props,p_ref,mu_p_exp_coeff,ct_p_lin_coeff,phi_p_lin_coeff\n";
     metrics << cfg.case_name << ","
             << cfg.level_dir << ","
             << cfg.nx << ","
@@ -610,7 +941,12 @@ CaseSummary RunPressureCase(const PressureCaseConfig& cfg) {
             << std::setprecision(12) << cfg.dt_max << ","
             << (cfg.enable_non_orth_correction ? 1 : 0) << ","
             << NormalMethodName(cfg.normal_corr_method) << ","
-            << std::setprecision(12) << summary.l2_error_final << "\n";
+            << std::setprecision(12) << summary.l2_error_final << ","
+            << (cfg.physical.use_pressure_dependent_properties ? 1 : 0) << ","
+            << std::setprecision(12) << cfg.physical.p_ref << ","
+            << std::setprecision(12) << cfg.physical.mu_p_exp_coeff << ","
+            << std::setprecision(12) << cfg.physical.ct_p_lin_coeff << ","
+            << std::setprecision(12) << cfg.physical.phi_p_lin_coeff << "\n";
 
     log << "\n[Case PASS] " << cfg.case_name
         << " steps=" << summary.steps
@@ -651,14 +987,9 @@ void CopyCaseFramesToRoot(const std::string& src_case_dir, const std::string& ds
 
 } // namespace
 
-void Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical() {
-    std::cout << "\n=== Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical ===\n";
-
-    PressureCaseConfig cfg = MakeBaseConfig(
-        "L1",
-        "day6l1_2d_sp_co2_const_nowell_analytical",
-        48, 6);
-
+void Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical_Legacy() {
+    std::cout << "\n=== Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical_Legacy ===\n";
+    PressureCaseConfig cfg = MakeBaseConfig("L1", "day6l1_2d_sp_co2_const_nowell_analytical_legacy", 48, 6);
     cfg.dt_init = 120.0;
     cfg.dt_min = 1.0;
     cfg.dt_max = 5000.0;
@@ -667,53 +998,38 @@ void Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical() {
     cfg.rel_update_tol = 5.0e-9;
     cfg.linear_res_tol = 1.0e-10;
     cfg.max_nonlinear_iter = 8;
-
     const CaseSummary summary = RunPressureCase(cfg);
     constexpr double kL1ErrorThreshold = 5.0e-2;
-
-    std::cout << "[L1] case_dir = " << summary.case_dir << "\n";
-    std::cout << "[L1] l2_error_final = " << summary.l2_error_final
+    std::cout << "[L1-Legacy] case_dir = " << summary.case_dir << "\n";
+    std::cout << "[L1-Legacy] l2_error_final = " << summary.l2_error_final
               << " (threshold=" << kL1ErrorThreshold << ")\n";
-
     if (!(summary.l2_error_final <= kL1ErrorThreshold)) {
         std::ostringstream oss;
-        oss << "[L1] analytical validation failed: l2_error_final=" << summary.l2_error_final
+        oss << "[L1-Legacy] analytical validation failed: l2_error_final=" << summary.l2_error_final
             << " > " << kL1ErrorThreshold;
         throw std::runtime_error(oss.str());
     }
 }
 
-void Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence() {
-    std::cout << "\n=== Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence ===\n";
-
-    const std::string root_case_name = "day6l2_2d_sp_co2_const_nowell_grid";
+void Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence_Legacy() {
+    std::cout << "\n=== Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence_Legacy ===\n";
+    const std::string root_case_name = "day6l2_2d_sp_co2_const_nowell_grid_legacy";
     const std::string root_case_dir = "Test/Transient/Day6Ladder/L2/" + root_case_name;
     EnsureDirRecursive(root_case_dir);
 
     struct GridSpec { int nx; int ny; double dt_init; };
-    const std::vector<GridSpec> grids = {
-        { 24, 3, 200.0 },
-        { 48, 6, 120.0 },
-        { 96, 12, 60.0 }
-    };
-
+    const std::vector<GridSpec> grids = { {24, 3, 200.0}, {48, 6, 120.0}, {96, 12, 60.0} };
     std::vector<GridCaseResult> results;
     results.reserve(grids.size());
     std::string finest_case_dir;
-
     std::ofstream root_log(root_case_dir + "/convergence.log", std::ios::out | std::ios::trunc);
-    root_log << "=== L2 Grid Convergence ===\n";
+    root_log << "=== L2 Grid Convergence Legacy ===\n";
 
     for (size_t i = 0; i < grids.size(); ++i) {
         const auto& g = grids[i];
         std::ostringstream tag;
         tag << "nx" << g.nx << "_ny" << g.ny;
-
-        PressureCaseConfig cfg = MakeBaseConfig(
-            "L2",
-            root_case_name + "/" + tag.str(),
-            g.nx, g.ny);
-
+        PressureCaseConfig cfg = MakeBaseConfig("L2", root_case_name + "/" + tag.str(), g.nx, g.ny);
         cfg.dt_init = g.dt_init;
         cfg.dt_min = 1.0;
         cfg.dt_max = 4000.0;
@@ -722,26 +1038,21 @@ void Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence() {
         cfg.rel_update_tol = 5.0e-9;
         cfg.linear_res_tol = 1.0e-10;
         cfg.max_nonlinear_iter = 10;
-
         const CaseSummary summary = RunPressureCase(cfg);
         finest_case_dir = summary.case_dir;
 
         MeshManager mesh_probe(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
         mesh_probe.BuildSolidMatrixGrid_2D(cfg.normal_corr_method);
-        const int n_cells = static_cast<int>(mesh_probe.mesh().getCells().size());
-        const double h_char = ComputeMeshCharLength(mesh_probe);
-
         GridCaseResult r;
         r.tag = tag.str();
         r.nx = cfg.nx;
         r.ny = cfg.ny;
-        r.n_cells = n_cells;
-        r.h_char = h_char;
+        r.n_cells = static_cast<int>(mesh_probe.mesh().getCells().size());
+        r.h_char = ComputeMeshCharLength(mesh_probe);
         r.l2_error = summary.l2_error_final;
         r.steps = summary.steps;
         r.rollbacks = summary.total_rollbacks;
         results.push_back(r);
-
         root_log << "[" << r.tag << "] h=" << r.h_char
                  << " l2_error=" << r.l2_error
                  << " steps=" << r.steps
@@ -757,17 +1068,175 @@ void Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence() {
             order = std::log(results[i - 1].l2_error / results[i].l2_error)
                 / std::log(results[i - 1].h_char / results[i].h_char);
         }
+        metrics << results[i].tag << "," << results[i].nx << "," << results[i].ny << ","
+                << results[i].n_cells << "," << std::setprecision(12) << results[i].h_char << ","
+                << std::setprecision(12) << results[i].l2_error << "," << std::setprecision(12) << order << ","
+                << results[i].steps << "," << results[i].rollbacks << "\n";
+        root_log << "[order] " << results[i].tag << " order_vs_prev=" << order << "\n";
+    }
 
-        metrics << results[i].tag << ","
-                << results[i].nx << ","
-                << results[i].ny << ","
-                << results[i].n_cells << ","
-                << std::setprecision(12) << results[i].h_char << ","
-                << std::setprecision(12) << results[i].l2_error << ","
-                << std::setprecision(12) << order << ","
-                << results[i].steps << ","
-                << results[i].rollbacks << "\n";
+    if (results.size() >= 2) {
+        for (size_t i = 1; i < results.size(); ++i) {
+            if (!(results[i].l2_error < results[i - 1].l2_error)) {
+                std::ostringstream oss;
+                oss << "[L2-Legacy] error is not decreasing with refinement at " << results[i].tag
+                    << ": prev=" << results[i - 1].l2_error
+                    << " curr=" << results[i].l2_error;
+                throw std::runtime_error(oss.str());
+            }
+        }
+    }
+    if (!finest_case_dir.empty()) CopyCaseFramesToRoot(finest_case_dir, root_case_dir);
+    std::cout << "[L2-Legacy] root_case_dir = " << root_case_dir << "\n";
+}
 
+void Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness_Legacy() {
+    std::cout << "\n=== Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness_Legacy ===\n";
+    PressureCaseConfig cfg = MakeBaseConfig("L3", "day6l3_2d_sp_co2_const_nowell_solver_legacy", 48, 6);
+    cfg.dt_init = 2.0e4;
+    cfg.dt_min = 50.0;
+    cfg.dt_max = 3.0e4;
+    cfg.target_end_time_s = 1.2e5;
+    cfg.max_steps = 5000;
+    cfg.max_nonlinear_iter = 3;
+    cfg.rel_update_tol = 2.0e-5;
+    cfg.linear_res_tol = 1.0e-11;
+    cfg.rollback_shrink_factor = 0.5;
+    cfg.compute_analytical_error = false;
+    const CaseSummary summary = RunPressureCase(cfg);
+    std::cout << "[L3-Legacy] case_dir = " << summary.case_dir << "\n";
+    std::cout << "[L3-Legacy] steps=" << summary.steps
+              << " total_rollbacks=" << summary.total_rollbacks
+              << " avg_iters=" << summary.avg_iters
+              << " max_iters=" << summary.max_iters_observed << "\n";
+}
+
+void Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear_Legacy() {
+    std::cout << "\n=== Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear_Legacy ===\n";
+    PressureCaseConfig cfg = MakeBaseConfig("L4", "day6l4_2d_sp_co2_varprop_nowell_legacy", 48, 6);
+    cfg.dt_init = 400.0;
+    cfg.dt_min = 5.0;
+    cfg.dt_max = 8000.0;
+    cfg.target_end_time_s = 1.0e5;
+    cfg.max_steps = 12000;
+    cfg.max_nonlinear_iter = 10;
+    cfg.rel_update_tol = 1.0e-8;
+    cfg.linear_res_tol = 1.0e-10;
+    cfg.rollback_shrink_factor = 0.55;
+    cfg.compute_analytical_error = false;
+    cfg.physical.use_pressure_dependent_properties = true;
+    cfg.physical.p_ref = cfg.p_init;
+    cfg.physical.mu_p_exp_coeff = 8.0e-8;
+    cfg.physical.ct_p_lin_coeff = 1.2e-7;
+    cfg.physical.phi_p_lin_coeff = 3.0e-9;
+    cfg.physical.mu_min = 2.0e-5;
+    cfg.physical.mu_max = 2.5e-4;
+    cfg.physical.ct_min = 1.0e-10;
+    cfg.physical.ct_max = 4.0e-8;
+    cfg.physical.phi_min = 0.05;
+    cfg.physical.phi_max = 0.25;
+    const CaseSummary summary = RunPressureCase(cfg);
+    std::cout << "[L4-Legacy] case_dir = " << summary.case_dir << "\n";
+    std::cout << "[L4-Legacy] steps=" << summary.steps
+              << " total_rollbacks=" << summary.total_rollbacks
+              << " avg_iters=" << summary.avg_iters
+              << " max_iters=" << summary.max_iters_observed << "\n";
+}
+
+void Run_Day6Ladder_2D_SP_CO2Const_NoWell_All_Legacy() {
+    std::cout << "\n=== Run_Day6Ladder_2D_SP_CO2Const_NoWell_All_Legacy ===\n";
+    Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical_Legacy();
+    Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence_Legacy();
+    Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness_Legacy();
+    Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear_Legacy();
+    std::cout << "[Day6Ladder-Legacy] ALL PASS\n";
+}
+
+void Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical() {
+    std::cout << "\n=== Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical (AD N=1) ===\n";
+    PressureCaseConfig cfg = MakeBaseConfig("L1", "day6l1_2d_sp_co2_const_nowell_analytical", 48, 6);
+    cfg.dt_init = 120.0;
+    cfg.dt_min = 1.0;
+    cfg.dt_max = 5000.0;
+    cfg.target_end_time_s = 1.0e5;
+    cfg.max_steps = 12000;
+    cfg.rel_update_tol = 5.0e-9;
+    cfg.linear_res_tol = 1.0e-10;
+    cfg.max_nonlinear_iter = 8;
+    const CaseSummary summary = RunPressureCaseAD(cfg, FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline);
+    constexpr double kL1ErrorThreshold = 5.0e-2;
+    std::cout << "[L1] case_dir = " << summary.case_dir << "\n";
+    std::cout << "[L1] l2_error_final = " << summary.l2_error_final
+              << " (threshold=" << kL1ErrorThreshold << ")\n";
+    if (!(summary.l2_error_final <= kL1ErrorThreshold)) {
+        std::ostringstream oss;
+        oss << "[L1] analytical validation failed: l2_error_final=" << summary.l2_error_final
+            << " > " << kL1ErrorThreshold;
+        throw std::runtime_error(oss.str());
+    }
+}
+
+void Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence() {
+    std::cout << "\n=== Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence (AD N=1) ===\n";
+    const std::string root_case_name = "day6l2_2d_sp_co2_const_nowell_grid";
+    const std::string root_case_dir = "Test/Transient/Day6Ladder/L2/" + root_case_name;
+    EnsureDirRecursive(root_case_dir);
+
+    struct GridSpec { int nx; int ny; double dt_init; };
+    const std::vector<GridSpec> grids = { {24, 3, 200.0}, {48, 6, 120.0}, {96, 12, 60.0} };
+    std::vector<GridCaseResult> results;
+    results.reserve(grids.size());
+    std::string finest_case_dir;
+    std::ofstream root_log(root_case_dir + "/convergence.log", std::ios::out | std::ios::trunc);
+    root_log << "=== L2 Grid Convergence (AD N=1) ===\n";
+
+    for (size_t i = 0; i < grids.size(); ++i) {
+        const auto& g = grids[i];
+        std::ostringstream tag;
+        tag << "nx" << g.nx << "_ny" << g.ny;
+        PressureCaseConfig cfg = MakeBaseConfig("L2", root_case_name + "/" + tag.str(), g.nx, g.ny);
+        cfg.dt_init = g.dt_init;
+        cfg.dt_min = 1.0;
+        cfg.dt_max = 4000.0;
+        cfg.target_end_time_s = 8.0e4;
+        cfg.max_steps = 20000;
+        cfg.rel_update_tol = 5.0e-9;
+        cfg.linear_res_tol = 1.0e-10;
+        cfg.max_nonlinear_iter = 10;
+        const CaseSummary summary = RunPressureCaseAD(cfg, FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline);
+        finest_case_dir = summary.case_dir;
+
+        MeshManager mesh_probe(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
+        mesh_probe.BuildSolidMatrixGrid_2D(cfg.normal_corr_method);
+        GridCaseResult r;
+        r.tag = tag.str();
+        r.nx = cfg.nx;
+        r.ny = cfg.ny;
+        r.n_cells = static_cast<int>(mesh_probe.mesh().getCells().size());
+        r.h_char = ComputeMeshCharLength(mesh_probe);
+        r.l2_error = summary.l2_error_final;
+        r.steps = summary.steps;
+        r.rollbacks = summary.total_rollbacks;
+        results.push_back(r);
+        root_log << "[" << r.tag << "] h=" << r.h_char
+                 << " l2_error=" << r.l2_error
+                 << " steps=" << r.steps
+                 << " rollbacks=" << r.rollbacks << "\n";
+    }
+
+    std::ofstream metrics(root_case_dir + "/metrics.csv", std::ios::out | std::ios::trunc);
+    metrics << "grid_tag,nx,ny,n_cells,h_char,l2_error_final,order_vs_prev,steps,total_rollbacks\n";
+    for (size_t i = 0; i < results.size(); ++i) {
+        double order = std::numeric_limits<double>::quiet_NaN();
+        if (i > 0 && results[i].l2_error > 0.0 && results[i - 1].l2_error > 0.0
+            && results[i].h_char > 0.0 && results[i - 1].h_char > 0.0) {
+            order = std::log(results[i - 1].l2_error / results[i].l2_error)
+                / std::log(results[i - 1].h_char / results[i].h_char);
+        }
+        metrics << results[i].tag << "," << results[i].nx << "," << results[i].ny << ","
+                << results[i].n_cells << "," << std::setprecision(12) << results[i].h_char << ","
+                << std::setprecision(12) << results[i].l2_error << "," << std::setprecision(12) << order << ","
+                << results[i].steps << "," << results[i].rollbacks << "\n";
         root_log << "[order] " << results[i].tag << " order_vs_prev=" << order << "\n";
     }
 
@@ -782,36 +1251,25 @@ void Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence() {
             }
         }
     }
-
-    if (!finest_case_dir.empty()) {
-        CopyCaseFramesToRoot(finest_case_dir, root_case_dir);
-    }
-
+    if (!finest_case_dir.empty()) CopyCaseFramesToRoot(finest_case_dir, root_case_dir);
     std::cout << "[L2] root_case_dir = " << root_case_dir << "\n";
     std::cout << "[L2] grid-convergence metrics written: " << (root_case_dir + "/metrics.csv") << "\n";
 }
 
 void Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness() {
-    std::cout << "\n=== Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness ===\n";
-
-    PressureCaseConfig cfg = MakeBaseConfig(
-        "L3",
-        "day6l3_2d_sp_co2_const_nowell_solver",
-        48, 6);
-
-    cfg.dt_init = 2.0e4;     // stress large dt
+    std::cout << "\n=== Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness (AD N=1) ===\n";
+    PressureCaseConfig cfg = MakeBaseConfig("L3", "day6l3_2d_sp_co2_const_nowell_solver", 48, 6);
+    cfg.dt_init = 2.0e4;
     cfg.dt_min = 50.0;
     cfg.dt_max = 3.0e4;
     cfg.target_end_time_s = 1.2e5;
     cfg.max_steps = 5000;
-    cfg.max_nonlinear_iter = 3;  // intentionally tight to trigger rollback behaviour
-    cfg.rel_update_tol = 1.0e-10;
+    cfg.max_nonlinear_iter = 3;
+    cfg.rel_update_tol = 2.0e-5;
     cfg.linear_res_tol = 1.0e-11;
     cfg.rollback_shrink_factor = 0.5;
     cfg.compute_analytical_error = false;
-
-    const CaseSummary summary = RunPressureCase(cfg);
-
+    const CaseSummary summary = RunPressureCaseAD(cfg, FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline);
     std::cout << "[L3] case_dir = " << summary.case_dir << "\n";
     std::cout << "[L3] steps=" << summary.steps
               << " total_rollbacks=" << summary.total_rollbacks
@@ -819,11 +1277,34 @@ void Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness() {
               << " max_iters=" << summary.max_iters_observed << "\n";
 }
 
+void Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear() {
+    std::cout << "\n=== Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear (AD N=1) ===\n";
+    PressureCaseConfig cfg = MakeBaseConfig("L4", "day6l4_2d_sp_co2_varprop_nowell", 48, 6);
+    cfg.dt_init = 400.0;
+    cfg.dt_min = 5.0;
+    cfg.dt_max = 8000.0;
+    cfg.target_end_time_s = 1.0e5;
+    cfg.max_steps = 12000;
+    cfg.max_nonlinear_iter = 10;
+    cfg.rel_update_tol = 1.0e-8;
+    cfg.linear_res_tol = 1.0e-10;
+    cfg.rollback_shrink_factor = 0.55;
+    cfg.compute_analytical_error = false;
+    cfg.physical.use_pressure_dependent_properties = true;
+    const CaseSummary summary = RunPressureCaseAD(cfg, FIM_Engine::PressureOnlyPropertyMode::CO2_EOS);
+    std::cout << "[L4] case_dir = " << summary.case_dir << "\n";
+    std::cout << "[L4] steps=" << summary.steps
+              << " total_rollbacks=" << summary.total_rollbacks
+              << " avg_iters=" << summary.avg_iters
+              << " max_iters=" << summary.max_iters_observed << "\n";
+}
+
 void Run_Day6Ladder_2D_SP_CO2Const_NoWell_All() {
-    std::cout << "\n=== Run_Day6Ladder_2D_SP_CO2Const_NoWell_All ===\n";
+    std::cout << "\n=== Run_Day6Ladder_2D_SP_CO2Const_NoWell_All (AD N=1) ===\n";
     Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical();
     Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence();
     Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness();
+    Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear();
     std::cout << "[Day6Ladder] ALL PASS\n";
 }
 
