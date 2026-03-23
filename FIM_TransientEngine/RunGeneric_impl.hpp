@@ -1317,7 +1317,7 @@ namespace FIM_Engine {
                         }
                     }
                 }
-                const double conv_res = max_res; // [��02] ţ�������оݽ����� raw_res�������������Ź����µġ���������
+                const double conv_res = max_res;
 
                 if (iter == 0) res_iter1 = conv_res;
                 step_final_residual = conv_res;

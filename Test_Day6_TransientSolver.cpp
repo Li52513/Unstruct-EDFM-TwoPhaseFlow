@@ -168,7 +168,7 @@ namespace Test_Day6 {
         params.startup_profile.dt_relres_hard_shrink_factor = 0.92;
         // 100步完成斜坡（~4天 @ dt_max=3600s），远早于30天startup结束，消除切换时硬跳变
         params.startup_profile.control_ramp_steps = 10;
-		params.startup_profile.rel_res_tol = 1e-3; // Startup阶段使用较严格的相对残差容忍度，以确保初始非线性收敛质量，促进时间步长增长
+		params.startup_profile.rel_res_tol = 1e-2; // [Fix-A] 放宽至1e-2：dt_init=1e-3时growth~3.77e-3>1e-3导致NL-DIVERGED；1e-2允许rel_res_update触发，不影响dt=3600路径
 
 
         params.long_profile.max_newton_iter = 36; // Allow deeper nonlinear progress in late stiff periods.

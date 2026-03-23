@@ -74,10 +74,6 @@ public:
         }
     }
 
-    /**
-     * @brief ��װԴ���� (Source: Well / Boundary / Leakoff)
-     * @details Լ����Դ���Ϊע��Ϊ����R_i -= Source_i
-     */
     static void AssembleSource(int block_idx,
         const std::vector<ADVarType>& source_wrt_i,
         FIM_BlockSparseMatrix<N>& global_mat)

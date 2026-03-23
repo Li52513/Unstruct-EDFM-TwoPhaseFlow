@@ -169,7 +169,7 @@
   - `--case=day5_block_matrix_robust`：块稀疏矩阵基础设施鲁棒性门禁
   - `--case=day5_global_jac_2d`：2D 全局组装 + FD vs AD Jacobian 门禁
   - `--case=day5_global_jac_3d`：3D 全局组装 + FD vs AD Jacobian 门禁
-- Day6 验收入口（已实现，待执行动态验收）：
+- Day6 验收入口（已实现，待执行动态验收，当前不收敛）：
   - `--case=day6_transient_2d_sp_injprod`
   - `--case=day6_transient_2d_tp_injprod`
   - `--case=day6_transient_2d_tp_multiwell`
