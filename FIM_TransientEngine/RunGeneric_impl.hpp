@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "StepKernels.hpp"
 #include "../FIM_BlockSparseMatrix.h"
@@ -193,7 +193,7 @@ namespace FIM_Engine {
                     base_props = AD_Fluid::Evaluator::evaluateCO2<1>(p0, t0);
                 }
                 else {
-                    base_props = EvalPrimaryFluid<1>(modules.single_phase_fluid, p0, t0);
+                    base_props = EvalPrimaryFluid<1>(modules.single_phase_fluid, modules.fluid_property_eval, p0, t0);
                 }
                 if (!(baseline_rho > 0.0)) baseline_rho = std::max(base_props.rho.val, 1.0e-8);
                 if (!(baseline_mu > 0.0)) baseline_mu = std::max(base_props.mu.val, 1.0e-12);
@@ -231,7 +231,7 @@ namespace FIM_Engine {
                 vtk_bc_ctx.bindings.empty() ? nullptr : &vtk_bc_ctx;
             auto sync_pressure_only_state_to_fields = [&]() {
                 if (use_eos) {
-                    SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
+                    SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.fluid_property_eval, modules.vg_params, modules.rp_params);
                     return;
                 }
 
@@ -574,18 +574,21 @@ namespace FIM_Engine {
                             sync_pressure_only_state_to_fields();
                             std::vector<double> bc_res(totalEq, 0.0);
                             std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
-                            const bool bc_use_co2 = true;
+                            FluidPropertyEvalConfig bc_fluid_cfg = modules.fluid_property_eval;
+                            bc_fluid_cfg.enable_single_phase_constant = false;
+                            bc_fluid_cfg.enable_two_phase_constant = false;
+                            bc_fluid_cfg.single_phase_is_co2 = true;
                             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                                 BoundaryAssembler::Assemble_2D_FullJac(
                                     mgr, *modules.pressure_bc, 0, fm,
                                     PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
-                                    bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_use_co2, modules.vg_params, modules.rp_params);
+                                    bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_fluid_cfg, modules.vg_params, modules.rp_params);
                             }
                             else {
                                 BoundaryAssembler::Assemble_3D_FullJac(
                                     mgr, *modules.pressure_bc, 0, fm,
                                     PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
-                                    bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_use_co2, modules.vg_params, modules.rp_params);
+                                    bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_fluid_cfg, modules.vg_params, modules.rp_params);
                             }
 
                             for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -839,7 +842,21 @@ namespace FIM_Engine {
         }
 
         const SinglePhaseFluidModel sp_model = modules.single_phase_fluid;
-        const bool sp_use_co2 = (N == 2) && (sp_model == SinglePhaseFluidModel::CO2);
+        const FluidPropertyEvalContext fluid_ctx =
+            BuildFluidPropertyEvalContext(sp_model, modules.fluid_property_eval);
+        const FluidPropertyEvalConfig& fluid_cfg = fluid_ctx.config;
+        const bool sp_use_co2 = (N == 2) && fluid_cfg.single_phase_is_co2;
+        auto eval_w_phase = [&](const ADVar<N>& P, const ADVar<N>& T) {
+            if constexpr (N == 3) {
+                return EvalTwoPhaseWaterFluid<N>(fluid_ctx, P, T);
+            }
+            else {
+                return EvalSinglePhaseFluid<N>(fluid_ctx, P, T);
+            }
+        };
+        auto eval_g_phase = [&](const ADVar<N>& P, const ADVar<N>& T) {
+            return EvalTwoPhaseGasFluid<N>(fluid_ctx, P, T);
+        };
         if constexpr (N == 2) {
             for (const auto& w : wells) {
                 if (sp_use_co2 && w.component_mode == WellComponentMode::Water) {
@@ -938,7 +955,7 @@ namespace FIM_Engine {
             std::cout << "[Init] External state initializer injected.\n";
         }
 
-        // 鈹€鈹€ Step 3: init well BHP state; set well block centers to comp_cell center 鈹€鈹€
+        // 閳光偓閳光偓 Step 3: init well BHP state; set well block centers to comp_cell center 閳光偓閳光偓
         well_mgr.InitWellState(state, ic.P_init, ic.T_init, ic.Sw_init, wells);
         for (int w = 0; w < well_mgr.NumWells(); ++w) {
             const auto& e = well_mgr.GetEntry(w);
@@ -947,7 +964,7 @@ namespace FIM_Engine {
             }
         }
         well_mgr.PrintSummary();
-        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+        // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 
         const Vector gravityVec = params.gravity_vector;
 
@@ -973,9 +990,9 @@ namespace FIM_Engine {
             global_mat.AddOffDiagBlock(conn.nodeI, conn.nodeJ, Eigen::Matrix<double, N, N>::Zero());
             global_mat.AddOffDiagBlock(conn.nodeJ, conn.nodeI, Eigen::Matrix<double, N, N>::Zero());
         }
-        // 鈹€鈹€ Step 3: register well �?reservoir off-diagonal blocks in pattern 鈹€鈹€
+        // 閳光偓閳光偓 Step 3: register well 閳?reservoir off-diagonal blocks in pattern 閳光偓閳光偓
         well_mgr.RegisterPatternConnections(global_mat);
-        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+        // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
         global_mat.FreezePattern();
 
         const auto str_rock = PhysicalProperties_string_op::Rock();
@@ -1263,9 +1280,9 @@ namespace FIM_Engine {
                     }
                     ADVar<N> P(eval_state.P[bi]); P.grad(0) = 1.0;
                     ADVar<N> T(eval_state.T[bi]); T.grad((N == 2) ? 1 : 2) = 1.0;
-                    auto pW = EvalPrimaryFluid<N>(sp_model, P, T);
+                    auto pW = eval_w_phase(P, T);
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
-                    auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
+                    auto pW_old = eval_w_phase(P_old, T_old);
 
                     ADVar<N> phi = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P - ADVar<N>(P_ref[bi])));
                     ADVar<N> phi_old = ADVar<N>(phi_ref) * (ADVar<N>(1.0) + ADVar<N>(c_r) * (P_old - ADVar<N>(P_ref[bi])));
@@ -1285,13 +1302,13 @@ namespace FIM_Engine {
                         ADVar<N> Sw_old_const = ClampSwForConstitutive<N>(Sw_old, vg_cfg, sw_constitutive_eps);
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
-                        // [DAY6-08] 瑁傜�?Pc=0锛屽熀璐ㄤ繚鎸?vG
+                        // [DAY6-08] 鐟佸倻绱?Pc=0閿涘苯鐔€鐠愩劋绻氶幐?vG
                         ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
                         ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;
                         ADVar<N> Pg_old = P_old + Pc_old;
-                        auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(Pg, T);
-                        auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_old, T_old);
+                        auto pG = eval_g_phase(Pg, T);
+                        auto pG_old = eval_g_phase(Pg_old, T_old);
                         acc_eqs[0] = (pW.rho * phi * Sw - pW_old.rho * phi_old * Sw_old) * (vols[bi] / dt);
                         acc_eqs[1] = (pG.rho * phi * Sg - pG_old.rho * phi_old * Sg_old) * (vols[bi] / dt);
                         ADVar<N> e_fluid = pW.rho * Sw * (pW.h - P / pW.rho) + pG.rho * Sg * (pG.h - Pg / pG.rho);
@@ -1313,7 +1330,7 @@ namespace FIM_Engine {
                     const double p_ci = eval_state.P[ci], t_ci = eval_state.T[ci];
                     {
                         ADVar<N> P0(p_ci), T0(t_ci);
-                        auto pw = EvalPrimaryFluid<N>(sp_model, P0, T0);
+                        auto pw = eval_w_phase(P0, T0);
                         cprop[ci].rho_w = pw.rho.val;
                         cprop[ci].mu_w  = pw.mu.val;
                         cprop[ci].h_w   = pw.h.val;
@@ -1341,7 +1358,7 @@ namespace FIM_Engine {
                         cprop[ci].krw = krw_s;
                         cprop[ci].krg = krg_s;
                         ADVar<N> Pg0(p_ci + pc_s), T0(t_ci);
-                        auto pg = AD_Fluid::Evaluator::evaluateCO2<N>(Pg0, T0);
+                        auto pg = eval_g_phase(Pg0, T0);
                         cprop[ci].rho_g = pg.rho.val;
                         cprop[ci].mu_g = pg.mu.val;
                         cprop[ci].h_g = pg.h.val;
@@ -1438,8 +1455,8 @@ namespace FIM_Engine {
                         if constexpr (N == 2) {
                             if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
                             else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            auto pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
-                            auto pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
+                            auto pW_i = eval_w_phase(P_i, T_i);
+                            auto pW_j = eval_w_phase(P_j, T_j);
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
                             ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> mob_i = pW_i.rho / pW_i.mu, mob_j = pW_j.rho / pW_j.mu;
@@ -1454,7 +1471,7 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
-                            // [DAY6-08] 鎸夊煙鍒ゆ柇锛氳缂濈嚎鎬r+Pc=0锛屽熀璐╲G
+                            // [DAY6-08] 閹稿鐓欓崚銈嗘焽閿涙俺顥囩紓婵堝殠閹湵r+Pc=0閿涘苯鐔€鐠愨暡G
                             ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
                             if (i >= nMat) {
                                 Sw_i_const = Sw_i;
@@ -1474,8 +1491,8 @@ namespace FIM_Engine {
                                 CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
                             }
                             ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
-                            auto pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i), pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
-                            auto pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i), pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
+                            auto pW_i = eval_w_phase(P_i, T_i), pW_j = eval_w_phase(P_j, T_j);
+                            auto pG_i = eval_g_phase(Pg_i, T_i), pG_j = eval_g_phase(Pg_j, T_j);
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
                             ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
                             ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
@@ -1550,17 +1567,17 @@ namespace FIM_Engine {
                 }
 
                 // 3) well source
-                SyncStateToFieldManager(eval_state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                SyncStateToFieldManager(eval_state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
                 const int well_dof_w = (N == 3) ? 0 : (sp_use_co2 ? -1 : 0);
                 const int well_dof_g = (N == 3) ? 1 : (sp_use_co2 ? 0 : -1);
                 const int well_dof_e = (N == 3) ? 2 : 1;
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
                 }
                 else {
-                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
                 }
                 const double kWellSourceSignProbe = params.well_source_sign;
                 for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -1588,13 +1605,13 @@ namespace FIM_Engine {
                         bc_stats = BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
                             mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
                             pressureDof, pressureDof, saturationDof, temperatureDof,
-                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                            bc_res, bc_jac3, fluid_cfg, vg_cfg, rp_cfg);
                     }
                     else {
                         bc_stats = BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
                             mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
                             pressureDof, pressureDof, saturationDof, temperatureDof,
-                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                            bc_res, bc_jac3, fluid_cfg, vg_cfg, rp_cfg);
                     }
                     (void)bc_stats;
                     for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -1616,12 +1633,12 @@ namespace FIM_Engine {
                         if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                             bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
                                 mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                                modules.pressure_bc, modules.saturation_bc, fluid_cfg, vg_cfg, rp_cfg);
                         }
                         else {
                             bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
                                 mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                                modules.pressure_bc, modules.saturation_bc, fluid_cfg, vg_cfg, rp_cfg);
                         }
                         (void)bc_stats;
                         for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -1637,10 +1654,10 @@ namespace FIM_Engine {
                 }
 
                 Eigen::VectorXd b_probe = probe_mat.ExportEigenResidual();
-                // 鈹€鈹€ ConstantWaterNoConvection: freeze T probe rows to match main Newton system 鈹€鈹€
-                // Without this, probe_res >> conv_res �?LS-BASE-CHECK corrupts use_ref �?Armijo fails.
+                // 閳光偓閳光偓 ConstantWaterNoConvection: freeze T probe rows to match main Newton system 閳光偓閳光偓
+                // Without this, probe_res >> conv_res 閳?LS-BASE-CHECK corrupts use_ref 閳?Armijo fails.
                 if constexpr (N == 2) {
-                    if (sp_model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
+                    if (IsSinglePhaseNoConvectionActive(fluid_ctx)) {
                         for (int bi = 0; bi < totalBlocks; ++bi) {
                             const int t_row = mgr.getEquationIndex(bi, 1);
                             if (t_row >= 0 && t_row < static_cast<int>(b_probe.size()))
@@ -1651,7 +1668,7 @@ namespace FIM_Engine {
                 int max_probe_idx = 0;
                 const double max_probe = b_probe.cwiseAbs().maxCoeff(&max_probe_idx);
                 (void)max_probe_idx;
-                return max_probe; // [锟斤�?2] 锟斤拷锟斤拷锟斤拷探锟斤拷锟斤拷锟斤拷锟斤拷原始锟叫诧拷 (raw_res) 锟皆憋拷证锟斤拷锟斤拷锟斤拷锟斤�?
+                return max_probe; // [閿熸枻鎷?2] 閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷锋帰閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹鍘熷閿熷彨璇ф嫹 (raw_res) 閿熺殕鎲嬫嫹璇侀敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷?
                 };
 
             for (int iter = 0; iter < active_max_newton_iter; ++iter) {
@@ -1692,9 +1709,9 @@ namespace FIM_Engine {
                     }
                     ADVar<N> P(state.P[bi]); P.grad(0) = 1.0;
                     ADVar<N> T(state.T[bi]); T.grad((N == 2) ? 1 : 2) = 1.0;
-                    auto pW = EvalPrimaryFluid<N>(sp_model, P, T);
+                    auto pW = eval_w_phase(P, T);
                     ADVar<N> P_old(old_state.P[bi]), T_old(old_state.T[bi]);
-                    auto pW_old = EvalPrimaryFluid<N>(sp_model, P_old, T_old);
+                    auto pW_old = eval_w_phase(P_old, T_old);
                     if (track_eos_domain) {
                         ++eos_total_samples;
                         if (pW.isFallback) ++eos_fallback_water;
@@ -1720,14 +1737,14 @@ namespace FIM_Engine {
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
 
-                        // [DAY6-08] 瑁傜�?Pc=0锛屽熀璐ㄤ繚鎸?vG
+                        // [DAY6-08] 鐟佸倻绱?Pc=0閿涘苯鐔€鐠愩劋绻氶幐?vG
                         ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
                         ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;
                         ADVar<N> Pg_old = P_old + Pc_old;
 
-                        auto pG = AD_Fluid::Evaluator::evaluateCO2<N>(Pg, T);
-                        auto pG_old = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_old, T_old);
+                        auto pG = eval_g_phase(Pg, T);
+                        auto pG_old = eval_g_phase(Pg_old, T_old);
                         if (track_eos_domain) {
                             ++eos_total_samples;
                             if (pG.isFallback) ++eos_fallback_co2;
@@ -1763,7 +1780,7 @@ namespace FIM_Engine {
                 };
                 std::map<ConnectionType, ConnAuditStat> audit_stats;
 
-                // [DAY6-09] 鍗曡凯浠ｇ墿鎬х紦瀛橈細棰勮绠楀悇cell鏍囬噺鐗╂€э紝閬垮厤passive渚у啑浣橢OS璋冪�?
+                // [DAY6-09] 閸楁洝鍑禒锝囧⒖閹呯处鐎涙﹫绱版０鍕吀缁犳鎮嘽ell閺嶅洭鍣洪悧鈺傗偓褝绱濋柆鍨帳passive娓氀冨晳娴ｆOS鐠嬪啰鏁?
                 struct CellPropsCache {
                     double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
                     double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
@@ -1774,7 +1791,7 @@ namespace FIM_Engine {
                     const double p_ci = state.P[ci], t_ci = state.T[ci];
                     {
                         ADVar<N> P0(p_ci), T0(t_ci);
-                        auto pw = EvalPrimaryFluid<N>(sp_model, P0, T0);
+                        auto pw = eval_w_phase(P0, T0);
                         cprop[ci].rho_w = pw.rho.val;
                         cprop[ci].mu_w  = pw.mu.val;
                         cprop[ci].h_w   = pw.h.val;
@@ -1802,7 +1819,7 @@ namespace FIM_Engine {
                         cprop[ci].krg = krg_s;
                         {
                             ADVar<N> Pg0(p_ci + pc_s), T0(t_ci);
-                            auto pg = AD_Fluid::Evaluator::evaluateCO2<N>(Pg0, T0);
+                            auto pg = eval_g_phase(Pg0, T0);
                             cprop[ci].rho_g = pg.rho.val;
                             cprop[ci].mu_g  = pg.mu.val;
                             cprop[ci].h_g   = pg.h.val;
@@ -1905,14 +1922,14 @@ namespace FIM_Engine {
                         if constexpr (N == 2) {
                             if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
                             else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            // [DAY6-09] active渚у畬鏁碋OS锛宲assive渚т粠缂撳瓨鏋勯€犲父閲廇DVar锛堟搴﹀叏闆讹級
+                            // [DAY6-09] active娓氀冪暚閺佺OS閿涘assive娓氀傜矤缂傛挸鐡ㄩ弸鍕偓鐘茬埗闁插粐DVar閿涘牊顫惔锕€鍙忛梿璁圭礆
                             AD_Fluid::ADFluidProperties<N> pW_i, pW_j;
                             if (wrt_i) {
-                                pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
+                                pW_i = eval_w_phase(P_i, T_i);
                                 pW_j.rho = ADVar<N>(cprop[j].rho_w); pW_j.mu = ADVar<N>(cprop[j].mu_w); pW_j.h = ADVar<N>(cprop[j].h_w);
                             } else {
                                 pW_i.rho = ADVar<N>(cprop[i].rho_w); pW_i.mu = ADVar<N>(cprop[i].mu_w); pW_i.h = ADVar<N>(cprop[i].h_w);
-                                pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
+                                pW_j = eval_w_phase(P_j, T_j);
                             }
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
                             ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
@@ -1928,11 +1945,11 @@ namespace FIM_Engine {
                             else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
                             const auto& vg = vg_cfg;
                             const auto& rp = rp_cfg;
-                            // [DAY6-09] active渚э細瀹屾暣AD璁＄畻kr/Pc/EOS锛沺assive渚э細浠庣紦瀛樻瀯閫犲父閲廇DVar
+                            // [DAY6-09] active娓氀嶇窗鐎瑰本鏆D鐠侊紕鐣籯r/Pc/EOS閿涙埠assive娓氀嶇窗娴犲海绱︾€涙ɑ鐎柅鐘茬埗闁插粐DVar
                             ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
                             ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
                             if (wrt_i) {
-                                // i �?active锛氬畬鏁?AD 璁＄�?
+                                // i 閺?active閿涙艾鐣弫?AD 鐠侊紕鐣?
                                 if (i >= nMat) {
                                     Sw_i_const = Sw_i;
                                     Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
@@ -1941,16 +1958,16 @@ namespace FIM_Engine {
                                     Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg);
                                     CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
                                 }
-                                // j �?passive锛氫粠缂撳瓨璇诲彇甯搁噺
+                                // j 閺?passive閿涙矮绮犵紓鎾崇摠鐠囪褰囩敮鎼佸櫤
                                 Pc_j  = ADVar<N>(cprop[j].Pc);
                                 krw_j = ADVar<N>(cprop[j].krw);
                                 krg_j = ADVar<N>(cprop[j].krg);
                             } else {
-                                // i �?passive锛氫粠缂撳瓨璇诲彇甯搁噺
+                                // i 閺?passive閿涙矮绮犵紓鎾崇摠鐠囪褰囩敮鎼佸櫤
                                 Pc_i  = ADVar<N>(cprop[i].Pc);
                                 krw_i = ADVar<N>(cprop[i].krw);
                                 krg_i = ADVar<N>(cprop[i].krg);
-                                // j �?active锛氬畬鏁?AD 璁＄�?
+                                // j 閺?active閿涙艾鐣弫?AD 鐠侊紕鐣?
                                 if (j >= nMat) {
                                     Sw_j_const = Sw_j;
                                     Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
@@ -1962,18 +1979,18 @@ namespace FIM_Engine {
                             }
                             ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
 
-                            // [DAY6-09] active渚у畬鏁碋OS锛宲assive渚т粠缂撳瓨鏋勯€犲父閲廇DVar锛堟搴﹀叏闆讹級
+                            // [DAY6-09] active娓氀冪暚閺佺OS閿涘assive娓氀傜矤缂傛挸鐡ㄩ弸鍕偓鐘茬埗闁插粐DVar閿涘牊顫惔锕€鍙忛梿璁圭礆
                             AD_Fluid::ADFluidProperties<N> pW_i, pW_j, pG_i, pG_j;
                             if (wrt_i) {
-                                pW_i = EvalPrimaryFluid<N>(sp_model, P_i, T_i);
-                                pG_i = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_i, T_i);
+                                pW_i = eval_w_phase(P_i, T_i);
+                                pG_i = eval_g_phase(Pg_i, T_i);
                                 pW_j.rho = ADVar<N>(cprop[j].rho_w); pW_j.mu = ADVar<N>(cprop[j].mu_w); pW_j.h = ADVar<N>(cprop[j].h_w);
                                 pG_j.rho = ADVar<N>(cprop[j].rho_g); pG_j.mu = ADVar<N>(cprop[j].mu_g); pG_j.h = ADVar<N>(cprop[j].h_g);
                             } else {
                                 pW_i.rho = ADVar<N>(cprop[i].rho_w); pW_i.mu = ADVar<N>(cprop[i].mu_w); pW_i.h = ADVar<N>(cprop[i].h_w);
                                 pG_i.rho = ADVar<N>(cprop[i].rho_g); pG_i.mu = ADVar<N>(cprop[i].mu_g); pG_i.h = ADVar<N>(cprop[i].h_g);
-                                pW_j = EvalPrimaryFluid<N>(sp_model, P_j, T_j);
-                                pG_j = AD_Fluid::Evaluator::evaluateCO2<N>(Pg_j, T_j);
+                                pW_j = eval_w_phase(P_j, T_j);
+                                pG_j = eval_g_phase(Pg_j, T_j);
                             }
 
                             ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
@@ -1997,7 +2014,7 @@ namespace FIM_Engine {
                     auto f_wrt_j = evalFlux(false);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, global_mat);
 
-                    // 鈹€鈹€ Step 2: non-orthogonal deferred correction 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                    // 閳光偓閳光偓 Step 2: non-orthogonal deferred correction 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
                     if (params.enable_non_orthogonal_correction &&
                         conn.type == ConnectionType::Matrix_Matrix &&
                         i < nMat && j < nMat)
@@ -2011,7 +2028,7 @@ namespace FIM_Engine {
                             const double gT_x = 0.5*(nonorth_grad_T_cell[i].m_x + nonorth_grad_T_cell[j].m_x);
                             const double gT_y = 0.5*(nonorth_grad_T_cell[i].m_y + nonorth_grad_T_cell[j].m_y);
                             const double gT_z = 0.5*(nonorth_grad_T_cell[i].m_z + nonorth_grad_T_cell[j].m_z);
-                            // Tangential correction scalars: grad �?vectorT  [Pa], [K]
+                            // Tangential correction scalars: grad 璺?vectorT  [Pa], [K]
                             const double corr_P = gP_x * conn.vectorT.m_x + gP_y * conn.vectorT.m_y + gP_z * conn.vectorT.m_z;
                             const double corr_T = gT_x * conn.vectorT.m_x + gT_y * conn.vectorT.m_y + gT_z * conn.vectorT.m_z;
                             // Effective permeability: K_eff = T_Flow * dist / |vectorE|
@@ -2025,7 +2042,7 @@ namespace FIM_Engine {
                             const double mob_w = (dPhi_w_sign < 0.0)
                                 ? cprop[i].krw * cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
                                 : cprop[j].krw * cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
-                            // Correction contributions (explicit �?residual only, no Jacobian)
+                            // Correction contributions (explicit 閳?residual only, no Jacobian)
                             const double mass_w_corr = K_eff * mob_w * corr_P;
                             const double heat_corr   = conn.T_Heat * corr_T;
                             const double h_w_upwind = (dPhi_w_sign < 0.0) ? cprop[i].h_w : cprop[j].h_w;
@@ -2057,7 +2074,7 @@ namespace FIM_Engine {
                             global_mat.AddResidual(j, N - 1,  total_heat_corr);
                         }
                     }
-                    // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                    // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 
                     const double abs_mass_flux = [&]() {
                         if constexpr (N == 2) return std::abs(f_wrt_i[0].val);
@@ -2098,7 +2115,7 @@ namespace FIM_Engine {
                 }
 
 
-                SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
                 const int well_dof_w = (N == 3) ? 0 : (sp_use_co2 ? -1 : 0);
@@ -2106,10 +2123,10 @@ namespace FIM_Engine {
                 const int well_dof_e = (N == 3) ? 2 : 1;
 
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
                 }
                 else {
-                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
                 }
 
                 double max_abs_well_dsw = 0.0;
@@ -2172,14 +2189,14 @@ namespace FIM_Engine {
                     std::cout << "    [WellJac] max|dR/dT|=" << std::scientific << max_abs_well_dt << "\n";
                 }
 
-                // 鈹€鈹€ Step 3: assemble independent well DOF equations 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                // 閳光偓閳光偓 Step 3: assemble independent well DOF equations 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
                 if (!well_mgr.Empty()) {
                     well_mgr.AssembleWellEquations(
                         global_mat, state, active_wells,
                         w_res, w_jac3, mgr,
                         kWellSourceSign);
                 }
-                // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 
                 if constexpr (N == 3) {
                     std::vector<double> bc_res(totalEq, 0.0);
@@ -2189,13 +2206,13 @@ namespace FIM_Engine {
                         bc_stats = BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
                             mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
                             pressureDof, pressureDof, saturationDof, temperatureDof,
-                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                            bc_res, bc_jac3, fluid_cfg, vg_cfg, rp_cfg);
                     }
                     else {
                         bc_stats = BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
                             mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
                             pressureDof, pressureDof, saturationDof, temperatureDof,
-                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                            bc_res, bc_jac3, fluid_cfg, vg_cfg, rp_cfg);
                     }
 
                     int appliedEq = 0;
@@ -2260,12 +2277,12 @@ namespace FIM_Engine {
                             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                                 bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
                                     mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                    modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                                    modules.pressure_bc, modules.saturation_bc, fluid_cfg, vg_cfg, rp_cfg);
                             }
                             else {
                                 bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
                                     mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                    modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                                    modules.pressure_bc, modules.saturation_bc, fluid_cfg, vg_cfg, rp_cfg);
                             }
 
                             int appliedEq = 0;
@@ -2310,13 +2327,13 @@ namespace FIM_Engine {
                 auto A = global_mat.GetFrozenMatrix(); // Issue#11: O(nnz) CSR value-update, no Triplet sort
                 auto b = global_mat.ExportEigenResidual();
 
-                // 鈹€鈹€ ConstantWaterNoConvection: freeze T DOF 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+                // 閳光偓閳光偓 ConstantWaterNoConvection: freeze T DOF 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
                 // Replace the energy equation row with a Dirichlet constraint T = T_init.
                 // R_T = T - T_init, J_TT = 1, all off-diagonals = 0.
                 // This makes the energy equation trivially satisfied every Newton step
                 // (T stays at T_init), isolating the pressure equation for clean convergence.
                 if constexpr (N == 2) {
-                    if (sp_model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
+                    if (IsSinglePhaseNoConvectionActive(fluid_ctx)) {
                         using SpMat = Eigen::SparseMatrix<double, Eigen::RowMajor, int>;
                         for (int bi = 0; bi < totalBlocks; ++bi) {
                             const int t_row = mgr.getEquationIndex(bi, 1);
@@ -2326,7 +2343,7 @@ namespace FIM_Engine {
                             A.coeffRef(t_row, t_row) = 1.0;
                             b(t_row) = state.T[bi] - ic.T_init;
                             // Reset D_acc so row scaling uses denominator=1 for T rows
-                            // (original D_acc_energy is large �?would scale T row to ~0 �?no precision gain)
+                            // (original D_acc_energy is large 閳?would scale T row to ~0 閳?no precision gain)
                             if (t_row < static_cast<int>(eq_contribs.size()))
                                 eq_contribs[t_row].D_acc = 1.0;
                         }
@@ -3126,7 +3143,7 @@ namespace FIM_Engine {
                     std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
                     auto export_crash_vtk = [&]() {
                         try {
-                            SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                            SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
                             const std::string cfname = "Test/Transient/Day6/" + caseName + "/crash.vtk";
                             if constexpr (std::is_same_v<MeshMgrType, MeshManager>)
                                 PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(cfname, t);
@@ -3224,7 +3241,7 @@ namespace FIM_Engine {
                 }
 
                 auto export_vtk_snapshot = [&](const std::string& suffix) {
-                    SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+                    SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
                     const std::string fname = "Test/Transient/Day6/" + caseName + suffix;
                     if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                         PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
@@ -3281,7 +3298,7 @@ namespace FIM_Engine {
             }
         }
         if (!final_vtk_exported && !modules.disable_default_vtk_output) {
-            SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
+            SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
             const std::string fname = "Test/Transient/Day6/" + caseName + "/final.vtk";
             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                 PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
@@ -3305,5 +3322,7 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
+
+
 
 

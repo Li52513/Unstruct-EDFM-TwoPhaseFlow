@@ -9,6 +9,7 @@
 #include "ADVar.hpp"
 #include "AD_FluidEvaluator.h"
 #include "CapRelPerm_HD_AD.h"
+#include "FIM_TransientEngine/StateSync.hpp"
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -106,6 +107,12 @@ namespace {
         x.val = v;
         for (int k = 0; k < N; ++k) x.grad(k) = 0.0;
         return x;
+    }
+
+    inline FIM_Engine::FluidPropertyEvalContext BuildFluidEvalContext(
+        const FluidPropertyEvalConfig& fluid_cfg)
+    {
+        return FIM_Engine::BuildFluidPropertyEvalContext(fluid_cfg);
     }
 
     struct PhaseSplit {
@@ -226,9 +233,36 @@ namespace {
      * @throws std::invalid_argument Invalid standard-state pressure/temperature.
      * @throws std::runtime_error Failed or nonphysical density evaluation.
      */
-    inline StandardConditionDensities EvaluateStandardConditionDensities(const WellScheduleStep& step) {
+    inline StandardConditionDensities EvaluateStandardConditionDensities(
+        const WellScheduleStep& step,
+        const FIM_Engine::FluidPropertyEvalContext& fluid_ctx)
+    {
         StandardConditionDensities out;
         if (step.rate_target_type != WellRateTargetType::StdVolumeRate) {
+            return out;
+        }
+
+        if (fluid_ctx.config.enable_two_phase_constant) {
+            out.rho_w = fluid_ctx.config.water.rho;
+            out.rho_g = fluid_ctx.config.gas.rho;
+            if (!std::isfinite(out.rho_w) || !std::isfinite(out.rho_g) ||
+                out.rho_w <= 0.0 || out.rho_g <= 0.0) {
+                throw std::runtime_error("Invalid two-phase constant standard-condition densities.");
+            }
+            out.enabled = true;
+            return out;
+        }
+
+        if (fluid_ctx.config.enable_single_phase_constant) {
+            out.rho_w = fluid_ctx.config.single_phase_is_co2
+                ? fluid_ctx.config.gas.rho
+                : fluid_ctx.config.water.rho;
+            out.rho_g = fluid_ctx.config.gas.rho;
+            if (!std::isfinite(out.rho_w) || !std::isfinite(out.rho_g) ||
+                out.rho_w <= 0.0 || out.rho_g <= 0.0) {
+                throw std::runtime_error("Invalid single-phase constant standard-condition densities.");
+            }
+            out.enabled = true;
             return out;
         }
 
@@ -238,8 +272,8 @@ namespace {
 
         ADVar<1> P_std(step.std_pressure);
         ADVar<1> T_std(step.std_temperature);
-        const auto props_w_std = AD_Fluid::Evaluator::evaluateWater<1>(P_std, T_std);
-        const auto props_g_std = AD_Fluid::Evaluator::evaluateCO2<1>(P_std, T_std);
+        const auto props_w_std = FIM_Engine::EvalTwoPhaseWaterFluid<1>(fluid_ctx, P_std, T_std);
+        const auto props_g_std = FIM_Engine::EvalTwoPhaseGasFluid<1>(fluid_ctx, P_std, T_std);
 
         if (!std::isfinite(props_w_std.rho.val) || !std::isfinite(props_g_std.rho.val) ||
             props_w_std.rho.val <= 0.0 || props_g_std.rho.val <= 0.0) {
@@ -474,7 +508,7 @@ namespace {
         bool fracture_domain,
         int localIdx,
         const Vector& faceNormal,
-        bool single_phase_use_co2,
+        const FIM_Engine::FluidPropertyEvalContext& fluid_ctx,
         const CapRelPerm::VGParams& vg,
         const CapRelPerm::RelPermParams& rp,
         const BoundaryFieldTags& tags)
@@ -528,16 +562,12 @@ namespace {
                 Pc = CapRelPerm::pc_vG<3>(Sw_const, vg);
             }
         }
-        else if (single_phase_use_co2) {
-            krw = MakeConstAD<3>(1.0);
-            krg = MakeConstAD<3>(0.0);
-        }
-
-        const auto propsW = single_phase_use_co2
-            ? AD_Fluid::Evaluator::evaluateCO2<3>(s.P, s.T)
-            : AD_Fluid::Evaluator::evaluateWater<3>(s.P, s.T);
-
-        const auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(s.P + Pc, s.T);
+        const AD_Fluid::ADFluidProperties<3> propsW = s.has_sw
+            ? FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, s.P, s.T)
+            : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, s.P, s.T);
+        const AD_Fluid::ADFluidProperties<3> propsG = s.has_sw
+            ? FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, s.P + Pc, s.T)
+            : FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, s.P, s.T);
 
         s.mob_w = (propsW.rho * krw) / propsW.mu;
         s.mob_g = s.has_sw ? ((propsG.rho * krg) / propsG.mu) : MakeConstAD<3>(0.0);
@@ -830,7 +860,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D(
     std::vector<std::array<double, 3>> jacobianFull(residual.size(), std::array<double, 3>{ 0.0, 0.0, 0.0 });
     stats = Assemble_2D_FullJac(
         mgr, bcMgr, dofOffset, fm, fieldName, residual, jacobianFull,
-        nullptr, nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
+        nullptr, nullptr, FluidPropertyEvalConfig(), CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
 
     const BoundaryFieldTags tags = BuildBoundaryFieldTags();
     const int jacSlot = ResolvePrimaryJacobianSlot(tags, fieldName, dofOffset);
@@ -850,11 +880,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
     std::vector<std::array<double, 3>>& jacobianFull,
     const BoundarySetting::BoundaryConditionManager* coupledPressureBC,
     const BoundarySetting::BoundaryConditionManager* coupledSaturationBC,
-    bool single_phase_use_co2,
+    const FluidPropertyEvalConfig& fluid_cfg,
     const CapRelPerm::VGParams& vg,
     const CapRelPerm::RelPermParams& rp)
 {
     BoundaryAssemblyStats stats;
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
     if (dofOffset < 0 || dofOffset >= 3) {
         std::cerr << "[BoundaryAssembler::Assemble_2D_FullJac] Invalid dofOffset = " << dofOffset << " (expected 0..2)." << std::endl;
         return stats;
@@ -891,7 +922,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
             ++stats.visitedEqRows;
 
             const BoundaryLocalState state = BuildBoundaryLocalState(
-                fm, false, static_cast<int>(i), face.normal, single_phase_use_co2, vg, rp, tags);
+                fm, false, static_cast<int>(i), face.normal, fluid_ctx, vg, rp, tags);
             if (!state.valid) {
                 ++tagStats.skipped;
                 ++stats.invalidEqRows;
@@ -1038,7 +1069,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
             ++stats.visitedEqRows;
 
             const BoundaryLocalState state = BuildBoundaryLocalState(
-                fm, true, localIdx, boundaryNormal, single_phase_use_co2, vg, rp, tags);
+                fm, true, localIdx, boundaryNormal, fluid_ctx, vg, rp, tags);
             if (!state.valid) {
                 ++tagStats.skipped;
                 ++stats.invalidEqRows;
@@ -1139,7 +1170,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D(
     std::vector<std::array<double, 3>> jacobianFull(residual.size(), std::array<double, 3>{ 0.0, 0.0, 0.0 });
     stats = Assemble_3D_FullJac(
         mgr, bcMgr, dofOffset, fm, fieldName, residual, jacobianFull,
-        nullptr, nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
+        nullptr, nullptr, FluidPropertyEvalConfig(), CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
 
     const BoundaryFieldTags tags = BuildBoundaryFieldTags();
     const int jacSlot = ResolvePrimaryJacobianSlot(tags, fieldName, dofOffset);
@@ -1159,11 +1190,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
     std::vector<std::array<double, 3>>& jacobianFull,
     const BoundarySetting::BoundaryConditionManager* coupledPressureBC,
     const BoundarySetting::BoundaryConditionManager* coupledSaturationBC,
-    bool single_phase_use_co2,
+    const FluidPropertyEvalConfig& fluid_cfg,
     const CapRelPerm::VGParams& vg,
     const CapRelPerm::RelPermParams& rp)
 {
     BoundaryAssemblyStats stats;
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
     if (dofOffset < 0 || dofOffset >= 3) {
         std::cerr << "[BoundaryAssembler::Assemble_3D_FullJac] Invalid dofOffset = " << dofOffset << " (expected 0..2)." << std::endl;
         return stats;
@@ -1200,7 +1232,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
             ++stats.visitedEqRows;
 
             const BoundaryLocalState state = BuildBoundaryLocalState(
-                fm, false, static_cast<int>(i), face.normal, single_phase_use_co2, vg, rp, tags);
+                fm, false, static_cast<int>(i), face.normal, fluid_ctx, vg, rp, tags);
             if (!state.valid) {
                 ++tagStats.skipped;
                 ++stats.invalidEqRows;
@@ -1307,7 +1339,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
         ++stats.visitedEqRows;
 
         const BoundaryLocalState state = BuildBoundaryLocalState(
-            fm, true, localIdx, edge.normal, single_phase_use_co2, vg, rp, tags);
+            fm, true, localIdx, edge.normal, fluid_ctx, vg, rp, tags);
         if (!state.valid) {
             ++tagStats.skipped;
             ++stats.invalidEqRows;
@@ -1403,11 +1435,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
     int dofOffset_E,
     std::vector<double>& residual,
     std::vector<std::array<double, 3>>& jacobianFull,
-    bool single_phase_use_co2,
+    const FluidPropertyEvalConfig& fluid_cfg,
     const CapRelPerm::VGParams& vg,
     const CapRelPerm::RelPermParams& rp)
 {
     BoundaryAssemblyStats stats;
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
     if (residual.size() != jacobianFull.size()) {
         std::cerr << "[BoundaryAssembler::Assemble_2D_CoupledN3_FullJac] residual/jacobianFull size mismatch: "
             << residual.size() << " vs " << jacobianFull.size() << std::endl;
@@ -1439,7 +1472,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
             if (!hasPressure && !hasTemp) continue;
 
             const BoundaryLocalState state = BuildBoundaryLocalState(
-                fm, false, static_cast<int>(i), face.normal, single_phase_use_co2, vg, rp, tags);
+                fm, false, static_cast<int>(i), face.normal, fluid_ctx, vg, rp, tags);
             if (!state.valid) {
                 ++stats.invalidEqRows;
                 continue;
@@ -1530,7 +1563,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
             if (!hasPressure && !hasTemp) continue;
 
             const BoundaryLocalState state = BuildBoundaryLocalState(
-                fm, true, localIdx, outwardNormal, single_phase_use_co2, vg, rp, tags);
+                fm, true, localIdx, outwardNormal, fluid_ctx, vg, rp, tags);
             if (!state.valid) {
                 ++stats.invalidEqRows;
                 continue;
@@ -1577,11 +1610,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
     int dofOffset_E,
     std::vector<double>& residual,
     std::vector<std::array<double, 3>>& jacobianFull,
-    bool single_phase_use_co2,
+    const FluidPropertyEvalConfig& fluid_cfg,
     const CapRelPerm::VGParams& vg,
     const CapRelPerm::RelPermParams& rp)
 {
     BoundaryAssemblyStats stats;
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
     if (residual.size() != jacobianFull.size()) {
         std::cerr << "[BoundaryAssembler::Assemble_3D_CoupledN3_FullJac] residual/jacobianFull size mismatch: "
             << residual.size() << " vs " << jacobianFull.size() << std::endl;
@@ -1612,7 +1646,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
             if (!hasPressure && !hasTemp) continue;
 
             const BoundaryLocalState state = BuildBoundaryLocalState(
-                fm, false, static_cast<int>(i), face.normal, single_phase_use_co2, vg, rp, tags);
+                fm, false, static_cast<int>(i), face.normal, fluid_ctx, vg, rp, tags);
             if (!state.valid) {
                 ++stats.invalidEqRows;
                 continue;
@@ -1674,7 +1708,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
         }
 
         const BoundaryLocalState state = BuildBoundaryLocalState(
-            fm, true, localIdx, edge.normal, single_phase_use_co2, vg, rp, tags);
+            fm, true, localIdx, edge.normal, fluid_ctx, vg, rp, tags);
         if (!state.valid) {
             ++stats.invalidEqRows;
             continue;
@@ -1732,6 +1766,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
     const auto& mesh = mgr.mesh();
     int nMat = mgr.getMatrixDOFCount();
     const WellFieldTags tags = BuildWellFieldTags();
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(FluidPropertyEvalConfig());
 
     for (const auto& step : active_steps) {
         int solverIdx = -1, localIdx = -1;
@@ -1853,7 +1888,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step, fluid_ctx);
             if (total_mode) {
                 PhaseSplit user_split;
                 const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
@@ -1908,12 +1943,11 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
                 const double p_eval = (step.control_mode == WellControlMode::BHP) ? step.target_value : pField_P->data[localIdx];
                 if (q_mass_w.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
-                    // injection_is_co2 governs gas phase only; water slot always uses water EOS
-                    hw = AD_Fluid::Evaluator::evaluateWater<1>(P_inj, T_inj).h.val;
+                    hw = FIM_Engine::EvalSinglePhaseFluid<1>(fluid_ctx, P_inj, T_inj).h.val;
                 }
                 if (q_mass_g.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
-                    hg = AD_Fluid::Evaluator::evaluateCO2<1>(P_inj, T_inj).h.val;
+                    hg = FIM_Engine::EvalTwoPhaseGasFluid<1>(fluid_ctx, P_inj, T_inj).h.val;
                 }
             }
             ADVar<3> q_energy = FVM_Ops::Op_Well_Energy_Source_AD<3, ADVar<3>>(q_mass_w, hw, q_mass_g, hg);
@@ -1949,6 +1983,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
     const auto& mesh = mgr.mesh();
     int nMat = get3DMatrixOffset(mgr);
     const WellFieldTags tags = BuildWellFieldTags();
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(FluidPropertyEvalConfig());
 
     for (const auto& step : active_steps) {
         int solverIdx = -1, localIdx = -1;
@@ -2100,7 +2135,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step, fluid_ctx);
             if (total_mode) {
                 PhaseSplit user_split;
                 const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
@@ -2155,12 +2190,11 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
                 const double p_eval = (step.control_mode == WellControlMode::BHP) ? step.target_value : pField_P->data[localIdx];
                 if (q_mass_w.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
-                    // injection_is_co2 governs gas phase only; water slot always uses water EOS
-                    hw = AD_Fluid::Evaluator::evaluateWater<1>(P_inj, T_inj).h.val;
+                    hw = FIM_Engine::EvalSinglePhaseFluid<1>(fluid_ctx, P_inj, T_inj).h.val;
                 }
                 if (q_mass_g.val < 0.0) {
                     ADVar<1> P_inj(p_eval), T_inj(step.injection_temperature);
-                    hg = AD_Fluid::Evaluator::evaluateCO2<1>(P_inj, T_inj).h.val;
+                    hg = FIM_Engine::EvalTwoPhaseGasFluid<1>(fluid_ctx, P_inj, T_inj).h.val;
                 }
             }
             ADVar<3> q_energy = FVM_Ops::Op_Well_Energy_Source_AD<3, ADVar<3>>(q_mass_w, hw, q_mass_g, hg);
@@ -2206,7 +2240,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
     MeshManager& mgr, FieldManager_2D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
     std::vector<double>& residual, std::vector<std::array<double, 3>>& jacobianFull,
-    bool single_phase_use_co2, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp)
+    const FluidPropertyEvalConfig& fluid_cfg, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp)
 {
     BoundaryAssemblyStats stats;
     if (residual.size() != jacobianFull.size() || dofOffset_P < 0 || dofOffset_P >= 3) {
@@ -2221,6 +2255,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
     const auto& mesh = mgr.mesh();
     const int nMat = mgr.getMatrixDOFCount();
     const WellFieldTags tags = BuildWellFieldTags();
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
 
     for (const auto& step : active_steps) {
         int solverIdx = -1, localIdx = -1;
@@ -2291,15 +2326,22 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
                 CapRelPerm::kr_Mualem_vG<3>(Sw_const, vg, rp, krw, krg);
             }
         }
-        else if (single_phase_use_co2) {
+        else if (fluid_ctx.config.single_phase_is_co2) {
             krw = MakeConstAD3(0.0);
             krg = MakeConstAD3(1.0);
         }
 
-        auto propsW = AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_cell);
-        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell + Pc_cell, T_cell);
-        if (!has_sw && single_phase_use_co2) {
-            propsW = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
+        AD_Fluid::ADFluidProperties<3> propsW{};
+        AD_Fluid::ADFluidProperties<3> propsG{};
+        if (has_sw) {
+            propsW = FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, P_cell, T_cell);
+            propsG = FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, P_cell + Pc_cell, T_cell);
+        }
+        else {
+            propsW = FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_cell, T_cell);
+            propsG = fluid_ctx.config.single_phase_is_co2
+                ? propsW
+                : FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, P_cell, T_cell);
         }
 
         ADVar<3> mob_w = (propsW.rho * krw) / propsW.mu;
@@ -2337,7 +2379,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step, fluid_ctx);
             if (total_mode) {
                 PhaseSplit user_split;
                 const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
@@ -2377,16 +2419,15 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
             const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
             ADVar<3> P_inj_const = MakeConstAD3(p_inj);
-            // injection_is_co2 governs gas phase only; water slot EOS is determined solely by
-            // whether the w-slot is physically CO2 (single-phase CO2 mode with no Sw equation).
-            const bool water_slot_is_co2 = (!has_sw && single_phase_use_co2);
             if (q_mass_w.val < 0.0) {
-                h_w_well = (water_slot_is_co2
-                    ? AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj)
-                    : AD_Fluid::Evaluator::evaluateWater<3>(P_inj_const, T_inj)).h;
+                h_w_well = has_sw
+                    ? FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, P_inj_const, T_inj).h
+                    : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_inj_const, T_inj).h;
             }
             if (q_mass_g.val < 0.0) {
-                h_g_well = AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj).h;
+                h_g_well = (has_sw || !fluid_ctx.config.single_phase_is_co2)
+                    ? FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, P_inj_const, T_inj).h
+                    : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_inj_const, T_inj).h;
             }
         }
         ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
@@ -2411,7 +2452,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
     MeshManager_3D& mgr, FieldManager_3D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
     std::vector<double>& residual, std::vector<std::array<double, 3>>& jacobianFull,
-    bool single_phase_use_co2, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp)
+    const FluidPropertyEvalConfig& fluid_cfg, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp)
 {
     BoundaryAssemblyStats stats;
     if (residual.size() != jacobianFull.size() || dofOffset_P < 0 || dofOffset_P >= 3) {
@@ -2426,6 +2467,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
     const auto& mesh = mgr.mesh();
     const int nMat = get3DMatrixOffset(mgr);
     const WellFieldTags tags = BuildWellFieldTags();
+    const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
 
     for (const auto& step : active_steps) {
         int solverIdx = -1, localIdx = -1;
@@ -2522,15 +2564,22 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
                 CapRelPerm::kr_Mualem_vG<3>(Sw_const, vg, rp, krw, krg);
             }
         }
-        else if (single_phase_use_co2) {
+        else if (fluid_ctx.config.single_phase_is_co2) {
             krw = MakeConstAD3(0.0);
             krg = MakeConstAD3(1.0);
         }
 
-        auto propsW = AD_Fluid::Evaluator::evaluateWater<3>(P_cell, T_cell);
-        auto propsG = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell + Pc_cell, T_cell);
-        if (!has_sw && single_phase_use_co2) {
-            propsW = AD_Fluid::Evaluator::evaluateCO2<3>(P_cell, T_cell);
+        AD_Fluid::ADFluidProperties<3> propsW{};
+        AD_Fluid::ADFluidProperties<3> propsG{};
+        if (has_sw) {
+            propsW = FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, P_cell, T_cell);
+            propsG = FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, P_cell + Pc_cell, T_cell);
+        }
+        else {
+            propsW = FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_cell, T_cell);
+            propsG = fluid_ctx.config.single_phase_is_co2
+                ? propsW
+                : FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, P_cell, T_cell);
         }
 
         ADVar<3> mob_w = (propsW.rho * krw) / propsW.mu;
@@ -2568,7 +2617,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
             }
         }
         else if (step.control_mode == WellControlMode::Rate) {
-            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step);
+            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step, fluid_ctx);
             if (total_mode) {
                 PhaseSplit user_split;
                 const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
@@ -2608,16 +2657,15 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
             const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
             ADVar<3> P_inj_const = MakeConstAD3(p_inj);
-            // injection_is_co2 governs gas phase only; water slot EOS is determined solely by
-            // whether the w-slot is physically CO2 (single-phase CO2 mode with no Sw equation).
-            const bool water_slot_is_co2 = (!has_sw && single_phase_use_co2);
             if (q_mass_w.val < 0.0) {
-                h_w_well = (water_slot_is_co2
-                    ? AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj)
-                    : AD_Fluid::Evaluator::evaluateWater<3>(P_inj_const, T_inj)).h;
+                h_w_well = has_sw
+                    ? FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, P_inj_const, T_inj).h
+                    : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_inj_const, T_inj).h;
             }
             if (q_mass_g.val < 0.0) {
-                h_g_well = AD_Fluid::Evaluator::evaluateCO2<3>(P_inj_const, T_inj).h;
+                h_g_well = (has_sw || !fluid_ctx.config.single_phase_is_co2)
+                    ? FIM_Engine::EvalTwoPhaseGasFluid<3>(fluid_ctx, P_inj_const, T_inj).h
+                    : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_inj_const, T_inj).h;
             }
         }
         ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
@@ -2638,4 +2686,3 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
 
     return stats;
 }
-

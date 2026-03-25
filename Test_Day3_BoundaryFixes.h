@@ -114,7 +114,7 @@ inline void Test_EnergyNeumannPhaseSplit_2D() {
 
     const auto stats = BoundaryAssembler::Assemble_2D_FullJac(
         mgr, bcMgrT, 2, fm, tCfg.temperatue_field, res, jac,
-        &bcMgrP, &bcMgrS, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
+        &bcMgrP, &bcMgrS, FluidPropertyEvalConfig(), CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
     assert(stats.matrixBCCount > 0 && "Energy boundary assembly should visit matrix boundary faces");
 
     ADVar<1> p_ad(p_val);
@@ -181,7 +181,7 @@ inline void Test_FractureSwClampGradient_2D() {
 
     const auto stats = BoundaryAssembler::Assemble_2D_FullJac(
         mgr, bcMgrSw, 1, fm, sCfg.saturation, res, jac,
-        nullptr, nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
+        nullptr, nullptr, FluidPropertyEvalConfig(), CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
     assert(stats.fractureBCCount > 0 && "Fracture boundary saturation test must touch fracture BC rows");
 
     bool found_nonzero_drdsw = false;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Types.hpp"
 #include "../FIM_StateMap.h"
@@ -23,10 +23,6 @@ namespace FIM_Engine {
 
     /**
      * @brief Clamp scalar water saturation into constitutive-safe interval.
-     * @param sw Raw water saturation.
-     * @param vg_params van Genuchten parameter set used by kr/Pc models.
-     * @param safety_eps Safety margin away from constitutive singular points.
-     * @return Clamped saturation value for constitutive evaluation.
      */
     inline double ClampSwForConstitutive(
         double sw,
@@ -44,11 +40,6 @@ namespace FIM_Engine {
 
     /**
      * @brief Clamp AD water saturation into constitutive-safe interval.
-     * @tparam N AD variable dimension.
-     * @param sw Raw AD water saturation.
-     * @param vg_params van Genuchten parameter set used by kr/Pc models.
-     * @param safety_eps Safety margin away from constitutive singular points.
-     * @return AD saturation for constitutive evaluation (boundary-clipped with zero slope outside interval).
      */
     template<int N>
     inline ADVar<N> ClampSwForConstitutive(
@@ -64,39 +55,138 @@ namespace FIM_Engine {
     }
 
     template<int N>
+    inline AD_Fluid::ADFluidProperties<N> BuildConstantFluidProps(
+        const FluidConstantProperties& cfg,
+        const ADVar<N>& T,
+        bool no_convection)
+    {
+        AD_Fluid::ADFluidProperties<N> props;
+        props.rho = ADVar<N>(cfg.rho);
+        props.mu = ADVar<N>(cfg.mu);
+        if (no_convection) {
+            props.cp = ADVar<N>(0.0);
+            props.cv = ADVar<N>(0.0);
+            props.h = ADVar<N>(0.0);
+        }
+        else {
+            props.cp = ADVar<N>(cfg.cp);
+            props.cv = ADVar<N>(cfg.cv);
+            props.h = ADVar<N>(cfg.cp) * T;
+        }
+        props.k = ADVar<N>(cfg.k);
+        props.isFallback = false;
+        props.near_bound = false;
+        return props;
+    }
+
+    struct FluidPropertyEvalContext {
+        SinglePhaseFluidModel single_phase_model = SinglePhaseFluidModel::Water;
+        FluidPropertyEvalConfig config = FluidPropertyEvalConfig();
+    };
+
+    inline FluidPropertyEvalConfig BuildEffectiveFluidPropertyEvalConfig(
+        SinglePhaseFluidModel model,
+        const FluidPropertyEvalConfig& requested)
+    {
+        FluidPropertyEvalConfig cfg = requested;
+        if (model == SinglePhaseFluidModel::ConstantWater ||
+            model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
+            cfg.enable_single_phase_constant = true;
+            cfg.single_phase_is_co2 = false;
+            cfg.single_phase_no_convection = (model == SinglePhaseFluidModel::ConstantWaterNoConvection);
+        }
+        else if (!cfg.enable_single_phase_constant &&
+                 !cfg.enable_two_phase_constant &&
+                 model == SinglePhaseFluidModel::CO2) {
+            // Backward-compatible: N=2 single-phase CO2 should remain CO2 EOS by default.
+            cfg.single_phase_is_co2 = true;
+        }
+        return cfg;
+    }
+
+    inline FluidPropertyEvalContext BuildFluidPropertyEvalContext(
+        SinglePhaseFluidModel model,
+        const FluidPropertyEvalConfig& requested = FluidPropertyEvalConfig())
+    {
+        FluidPropertyEvalContext ctx;
+        ctx.single_phase_model = model;
+        ctx.config = BuildEffectiveFluidPropertyEvalConfig(model, requested);
+        return ctx;
+    }
+
+    inline FluidPropertyEvalContext BuildFluidPropertyEvalContext(
+        const FluidPropertyEvalConfig& requested)
+    {
+        FluidPropertyEvalContext ctx;
+        ctx.single_phase_model = requested.single_phase_is_co2
+            ? SinglePhaseFluidModel::CO2
+            : SinglePhaseFluidModel::Water;
+        ctx.config = requested;
+        return ctx;
+    }
+
+    inline bool IsSinglePhaseNoConvectionActive(const FluidPropertyEvalContext& ctx) {
+        return ctx.config.enable_single_phase_constant && ctx.config.single_phase_no_convection;
+    }
+
+    template<int N>
+    inline AD_Fluid::ADFluidProperties<N> EvalSinglePhaseFluid(
+        const FluidPropertyEvalContext& ctx,
+        const ADVar<N>& P,
+        const ADVar<N>& T)
+    {
+        if (ctx.config.enable_single_phase_constant) {
+            const auto& c = ctx.config.single_phase_is_co2 ? ctx.config.gas : ctx.config.water;
+            return BuildConstantFluidProps<N>(c, T, ctx.config.single_phase_no_convection);
+        }
+        if (ctx.config.single_phase_is_co2 || ctx.single_phase_model == SinglePhaseFluidModel::CO2) {
+            return AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
+        }
+        return AD_Fluid::Evaluator::evaluateWater<N>(P, T);
+    }
+
+    template<int N>
+    inline AD_Fluid::ADFluidProperties<N> EvalTwoPhaseWaterFluid(
+        const FluidPropertyEvalContext& ctx,
+        const ADVar<N>& P,
+        const ADVar<N>& T)
+    {
+        if (ctx.config.enable_two_phase_constant) {
+            return BuildConstantFluidProps<N>(ctx.config.water, T, false);
+        }
+        return AD_Fluid::Evaluator::evaluateWater<N>(P, T);
+    }
+
+    template<int N>
+    inline AD_Fluid::ADFluidProperties<N> EvalTwoPhaseGasFluid(
+        const FluidPropertyEvalContext& ctx,
+        const ADVar<N>& P,
+        const ADVar<N>& T)
+    {
+        if (ctx.config.enable_two_phase_constant) {
+            return BuildConstantFluidProps<N>(ctx.config.gas, T, false);
+        }
+        return AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
+    }
+
+    // Legacy helper retained for compatibility with old call sites.
+    template<int N>
     inline AD_Fluid::ADFluidProperties<N> EvalPrimaryFluid(
         SinglePhaseFluidModel model,
         const ADVar<N>& P,
         const ADVar<N>& T)
     {
-        if (model == SinglePhaseFluidModel::ConstantWaterNoConvection) {
-            AD_Fluid::ADFluidProperties<N> props;
-            props.rho = ADVar<N>(1000.0);
-            props.mu  = ADVar<N>(1.0e-3);
-            props.cp  = ADVar<N>(0.0);   // zero heat capacity �?F_conv = ρ·h·u = 0
-            props.cv  = ADVar<N>(0.0);
-            props.h   = ADVar<N>(0.0);   // zero enthalpy �?no convective heat transport
-            props.k   = ADVar<N>(0.6);   // keep conductivity (but ΔT_IC=0, so conduction is also zero)
-            props.isFallback = false;
-            props.near_bound = false;
-            return props;
-        }
-        if (model == SinglePhaseFluidModel::ConstantWater) {
-            AD_Fluid::ADFluidProperties<N> props;
-            props.rho = ADVar<N>(1000.0);
-            props.mu = ADVar<N>(1.0e-3);
-            props.cp = ADVar<N>(4200.0);
-            props.cv = ADVar<N>(4182.0);
-            props.h = T * 4200.0;       // h = cp_w * T, ∂h/∂T = 4200 (fixes Newton Jacobian for energy eq)
-            props.k = ADVar<N>(0.6);
-            props.isFallback = false;
-            props.near_bound = false;
-            return props;
-        }
-        if (model == SinglePhaseFluidModel::CO2) {
-            return AD_Fluid::Evaluator::evaluateCO2<N>(P, T);
-        }
-        return AD_Fluid::Evaluator::evaluateWater<N>(P, T);
+        return EvalSinglePhaseFluid<N>(BuildFluidPropertyEvalContext(model), P, T);
+    }
+
+    template<int N>
+    inline AD_Fluid::ADFluidProperties<N> EvalPrimaryFluid(
+        SinglePhaseFluidModel model,
+        const FluidPropertyEvalConfig& fluid_cfg,
+        const ADVar<N>& P,
+        const ADVar<N>& T)
+    {
+        return EvalSinglePhaseFluid<N>(BuildFluidPropertyEvalContext(model, fluid_cfg), P, T);
     }
 
     inline void MakePath(const std::string& caseName) {
@@ -109,10 +199,12 @@ namespace FIM_Engine {
         FieldMgrType& fm,
         const MeshMgrType& mgr,
         SinglePhaseFluidModel sp_model = SinglePhaseFluidModel::Water,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg_params = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp_params = CapRelPerm::RelPermParams()) {
         int nMat = MatrixBlockCount(mgr);
         int nTotal = mgr.getTotalDOFCount();
+        const FluidPropertyEvalContext fluid_ctx = BuildFluidPropertyEvalContext(sp_model, fluid_cfg);
 
         const auto pCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
         const auto tCfg = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
@@ -156,7 +248,13 @@ namespace FIM_Engine {
             double p = state.P[i];
             double t = state.T[i];
             ADVar<N> P_ad(p), T_ad(t);
-            auto propsW = EvalPrimaryFluid<N>(sp_model, P_ad, T_ad);
+            AD_Fluid::ADFluidProperties<N> propsW{};
+            if constexpr (N == 3) {
+                propsW = EvalTwoPhaseWaterFluid<N>(fluid_ctx, P_ad, T_ad);
+            }
+            else {
+                propsW = EvalSinglePhaseFluid<N>(fluid_ctx, P_ad, T_ad);
+            }
 
             double sw = (N == 3) ? state.Sw[i] : 1.0;
             double sw_constitutive = sw;
@@ -171,11 +269,12 @@ namespace FIM_Engine {
                 if (i >= nMat) {
                     krw = sw_constitutive;
                     krg = 1.0 - sw_constitutive;
-                    propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);  // Pc=0
-                } else {
+                    propsG = EvalTwoPhaseGasFluid<N>(fluid_ctx, P_ad, T_ad);  // Pc=0
+                }
+                else {
                     const ADVar<N> Pc_const_ad = CapRelPerm::pc_vG<N>(Sw_const_ad, vg_params);
                     const ADVar<N> P_gas_ad = P_ad + Pc_const_ad;
-                    propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_gas_ad, T_ad);
+                    propsG = EvalTwoPhaseGasFluid<N>(fluid_ctx, P_gas_ad, T_ad);
                     ADVar<N> krw_ad, krg_ad;
                     CapRelPerm::kr_Mualem_vG<N>(Sw_const_ad, vg_params, rp_params, krw_ad, krg_ad);
                     krw = krw_ad.val;
@@ -230,4 +329,3 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
-

@@ -194,6 +194,10 @@ namespace FIM_Engine {
         const BoundarySetting::BoundaryConditionManager* saturation_bc = nullptr;
         const BoundarySetting::BoundaryConditionManager* temperature_bc = nullptr;
 
+        // Unified fluid-property controls for N=2/N=3.
+        // Default keeps EOS behavior unless explicitly enabled.
+        FluidPropertyEvalConfig fluid_property_eval = FluidPropertyEvalConfig();
+
         SinglePhaseFluidModel single_phase_fluid = SinglePhaseFluidModel::Water;
         CapRelPerm::VGParams vg_params = CapRelPerm::VGParams();
         CapRelPerm::RelPermParams rp_params = CapRelPerm::RelPermParams();

@@ -42,6 +42,25 @@ struct BoundaryAssemblyStats {
     std::map<std::string, BoundaryTagStats> perTagType;
 };
 
+struct FluidConstantProperties {
+    double rho = 1000.0;
+    double mu = 1.0e-3;
+    double cp = 4200.0;
+    double cv = 4182.0;
+    double k = 0.6;
+};
+
+struct FluidPropertyEvalConfig {
+    bool enable_single_phase_constant = false;
+    bool single_phase_is_co2 = false;
+    bool single_phase_no_convection = false;
+
+    bool enable_two_phase_constant = false;
+
+    FluidConstantProperties water = FluidConstantProperties{};
+    FluidConstantProperties gas = FluidConstantProperties{ 700.0, 5.0e-5, 1200.0, 900.0, 0.08 };
+};
+
 class BoundaryAssembler {
 public:
     static BoundaryAssemblyStats Assemble_2D(
@@ -64,7 +83,7 @@ public:
         std::vector<std::array<double, 3>>& jacobianFull,
         const BoundarySetting::BoundaryConditionManager* coupledPressureBC = nullptr,
         const BoundarySetting::BoundaryConditionManager* coupledSaturationBC = nullptr,
-        bool single_phase_use_co2 = false,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
@@ -89,7 +108,7 @@ public:
         std::vector<std::array<double, 3>>& jacobianFull,
         const BoundarySetting::BoundaryConditionManager* coupledPressureBC = nullptr,
         const BoundarySetting::BoundaryConditionManager* coupledSaturationBC = nullptr,
-        bool single_phase_use_co2 = false,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
@@ -106,7 +125,7 @@ public:
         int dofOffset_E,
         std::vector<double>& residual,
         std::vector<std::array<double, 3>>& jacobianFull,
-        bool single_phase_use_co2 = false,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
@@ -123,7 +142,7 @@ public:
         int dofOffset_E,
         std::vector<double>& residual,
         std::vector<std::array<double, 3>>& jacobianFull,
-        bool single_phase_use_co2 = false,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
@@ -150,7 +169,7 @@ public:
         int dofOffset_E,
         std::vector<double>& residual,
         std::vector<std::array<double, 3>>& jacobianFull,
-        bool single_phase_use_co2 = false,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
@@ -177,7 +196,7 @@ public:
         int dofOffset_E,
         std::vector<double>& residual,
         std::vector<std::array<double, 3>>& jacobianFull,
-        bool single_phase_use_co2 = false,
+        const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
     );
