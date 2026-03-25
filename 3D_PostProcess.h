@@ -9,6 +9,7 @@
 // 引入核心依赖
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
+#include "VTK_BoundaryVisualization.h"
 
 /**
  * @class PostProcess_3D
@@ -28,7 +29,9 @@ public:
      * @param meshMgr 网格管理器 (提供几何拓扑)
      * @param fieldMgr 场管理器 (提供物理量数据)
      */
-    PostProcess_3D(const MeshManager_3D& meshMgr, const FieldManager_3D& fieldMgr);
+    PostProcess_3D(const MeshManager_3D& meshMgr,
+                   const FieldManager_3D& fieldMgr,
+                   const VTKBoundaryVisualizationContext* bcVizCtx = nullptr);
 
     /**
      * @brief 导出全场数据到 Tecplot
@@ -78,6 +81,7 @@ public:
 private:
     const MeshManager_3D& meshMgr_;
     const FieldManager_3D& fieldMgr_;
+    const VTKBoundaryVisualizationContext* bcVizCtx_ = nullptr;
 
     // =========================================================
     // 内部辅助函数

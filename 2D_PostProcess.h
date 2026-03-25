@@ -9,6 +9,7 @@
 // ����������� (���� 2D ����)
 #include "MeshManager.h" 
 #include "2D_FieldManager.h"
+#include "VTK_BoundaryVisualization.h"
 
 /**
  * @class PostProcess_2D
@@ -23,7 +24,9 @@ public:
      * @param meshMgr 2D���������
      * @param fieldMgr 2D��������
      */
-    PostProcess_2D(const MeshManager& meshMgr, const FieldManager_2D& fieldMgr);
+    PostProcess_2D(const MeshManager& meshMgr,
+                   const FieldManager_2D& fieldMgr,
+                   const VTKBoundaryVisualizationContext* bcVizCtx = nullptr);
 
     /**
      * @brief ����ȫ�����ݵ� Tecplot
@@ -100,6 +103,7 @@ public:
 private:
     const MeshManager& meshMgr_;
     const FieldManager_2D& fieldMgr_;
+    const VTKBoundaryVisualizationContext* bcVizCtx_ = nullptr;
 
     // =========================================================
     // �ڲ���������

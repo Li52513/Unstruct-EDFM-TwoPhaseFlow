@@ -218,6 +218,17 @@ namespace FIM_Engine {
             const auto p_cfg_n1 = PhysicalProperties_string_op::PressureEquation_String::FIM();
             const auto t_cfg_n1 = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
             const PhysicalProperties_string_op::Water w_cfg_n1;
+            VTKBoundaryVisualizationContext vtk_bc_ctx;
+            if (modules.pressure_bc) {
+                vtk_bc_ctx.bindings.push_back(
+                    VTKBCVariableBinding{ p_cfg_n1.pressure_field, modules.pressure_bc, VTKBCTransportKind::Pressure });
+            }
+            if (modules.temperature_bc) {
+                vtk_bc_ctx.bindings.push_back(
+                    VTKBCVariableBinding{ t_cfg_n1.temperatue_field, modules.temperature_bc, VTKBCTransportKind::Temperature });
+            }
+            const VTKBoundaryVisualizationContext* vtk_bc_ctx_ptr =
+                vtk_bc_ctx.bindings.empty() ? nullptr : &vtk_bc_ctx;
             auto sync_pressure_only_state_to_fields = [&]() {
                 if (use_eos) {
                     SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.vg_params, modules.rp_params);
@@ -304,10 +315,10 @@ namespace FIM_Engine {
                 sync_pressure_only_state_to_fields();
                 const std::string fname = "Test/Transient/Day6/" + caseName + "/" + tag + ".vtk";
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    PostProcess_2D(mgr, fm).ExportVTK(fname, t);
+                    PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
                 }
                 else {
-                    PostProcess_3D(mgr, fm).ExportVTK(fname, t);
+                    PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
                 }
                 VerifyVtkExport(fname, false);
                 if (tag == "final") final_vtk_exported = true;
@@ -867,12 +878,10 @@ namespace FIM_Engine {
         const int totalBlocks = mgr.getTotalDOFCount();
         const int totalEq = mgr.getTotalEquationDOFs();
 
-        // 鈹€鈹€ Step 3: Well independent DOF setup 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
         WellDOFManager<N> well_mgr;
         well_mgr.Setup(wells, totalBlocks);
         const int totalBlocksWithWells = well_mgr.TotalBlocksWithWells();
         const int totalEqWithWells     = totalBlocksWithWells * N;
-        // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
         FIM_StateMap<N> state;
         state.InitSizes(totalBlocksWithWells);
@@ -883,6 +892,23 @@ namespace FIM_Engine {
         const int pressureDof = 0;
         const int saturationDof = (N == 3) ? 1 : -1;
         const int temperatureDof = (N == 3) ? 2 : 1;
+        VTKBoundaryVisualizationContext vtk_bc_ctx;
+        if (modules.pressure_bc) {
+            vtk_bc_ctx.bindings.push_back(
+                VTKBCVariableBinding{ pEqCfg.pressure_field, modules.pressure_bc, VTKBCTransportKind::Pressure });
+        }
+        if constexpr (N == 3) {
+            if (modules.saturation_bc) {
+                vtk_bc_ctx.bindings.push_back(
+                    VTKBCVariableBinding{ sEqCfg.saturation, modules.saturation_bc, VTKBCTransportKind::Saturation });
+            }
+        }
+        if (modules.temperature_bc) {
+            vtk_bc_ctx.bindings.push_back(
+                VTKBCVariableBinding{ tEqCfg.temperatue_field, modules.temperature_bc, VTKBCTransportKind::Temperature });
+        }
+        const VTKBoundaryVisualizationContext* vtk_bc_ctx_ptr =
+            vtk_bc_ctx.bindings.empty() ? nullptr : &vtk_bc_ctx;
 
         for (int i = 0; i < totalBlocksWithWells; ++i) {
             state.P[i] = ic.P_init;
@@ -2908,9 +2934,9 @@ namespace FIM_Engine {
                             SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
                             const std::string cfname = "Test/Transient/Day6/" + caseName + "/crash.vtk";
                             if constexpr (std::is_same_v<MeshMgrType, MeshManager>)
-                                PostProcess_2D(mgr, fm).ExportVTK(cfname, t);
+                                PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(cfname, t);
                             else
-                                PostProcess_3D(mgr, fm).ExportVTK(cfname, t);
+                                PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(cfname, t);
                             VerifyVtkExport(cfname, N == 3);
                             std::cout << "    [VTK Export PASS] " << cfname << " (crash snapshot t=" << std::scientific << t << "s)\n";
                         }
@@ -3006,10 +3032,10 @@ namespace FIM_Engine {
                     SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
                     const std::string fname = "Test/Transient/Day6/" + caseName + suffix;
                     if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                        PostProcess_2D(mgr, fm).ExportVTK(fname, t);
+                        PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
                     }
                     else {
-                        PostProcess_3D(mgr, fm).ExportVTK(fname, t);
+                        PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
                     }
                     VerifyVtkExport(fname, N == 3);
                     if (suffix == "/final.vtk") final_vtk_exported = true;
@@ -3063,10 +3089,10 @@ namespace FIM_Engine {
             SyncStateToFieldManager(state, fm, mgr, sp_model, vg_cfg, rp_cfg);
             const std::string fname = "Test/Transient/Day6/" + caseName + "/final.vtk";
             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                PostProcess_2D(mgr, fm).ExportVTK(fname, t);
+                PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
             }
             else {
-                PostProcess_3D(mgr, fm).ExportVTK(fname, t);
+                PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
             }
             VerifyVtkExport(fname, N == 3);
             vtk_export_count++;
