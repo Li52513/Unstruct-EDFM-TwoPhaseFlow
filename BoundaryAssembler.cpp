@@ -18,7 +18,7 @@
 
 namespace {
     constexpr double kBoundaryCoeffEps = 1.0e-14;
-    constexpr double kEps = 1.0e-12; // [Patch 2] ��ĸ������Сֵ
+    constexpr double kEps = 1.0e-12; // denominator floor
 
     struct WellFieldTags {
         std::string pressure;
@@ -58,7 +58,7 @@ namespace {
         return tags;
     }
 
-    // [Patch 1] ���� Helper ��
+    // Helper utilities
     inline bool isValidEqIdx(int eqIdx, const std::vector<double>& residual, const std::vector<double>& jacobianDiag) {
         return eqIdx >= 0 && eqIdx < static_cast<int>(residual.size()) && eqIdx < static_cast<int>(jacobianDiag.size());
     }
@@ -130,10 +130,10 @@ namespace {
         return true;
     }
 
-    // Total���Ƚ�������ԣ�
-    // 1) ���û�������Ч frac_w/frac_g�����һ����ʹ�ã�
-    // 2) ���򰴾ֲ� mobility �����Զ����䣻
-    // 3) �� mobility Ҳ�����ã����˻�Ϊˮ��(1,0)��
+    // Total-mode split priority:
+    // 1) explicit user fractions,
+    // 2) local mobility-proportional split,
+    // 3) fallback to water-only (1,0) when mobility is unavailable.
     inline PhaseSplit ResolveTotalPhaseSplit(const WellScheduleStep& step, double mob_w, double mob_g) {
         PhaseSplit split;
         if (TryResolveUserSpecifiedPhaseSplit(step, split)) {
@@ -409,12 +409,33 @@ namespace {
         return dofOffset == 1 && fieldName != tags.temperature;
     }
 
+    inline int ResolvePrimaryJacobianSlot(const BoundaryFieldTags& tags, const std::string& fieldName, int dofOffset) {
+        if (IsTemperatureFieldName(tags, fieldName, dofOffset)) return 2;
+        if (IsSaturationFieldName(tags, fieldName, dofOffset)) return 1;
+        return 0;
+    }
+
     inline ADVar<3> MakeStateAD(double val, int gradIdx) {
         ADVar<3> x = MakeConstAD<3>(val);
         if (gradIdx >= 0 && gradIdx < 3) {
             x.grad(gradIdx) = 1.0;
         }
         return x;
+    }
+
+    inline ADVar<3> ClampSwFractureForConstitutive(const ADVar<3>& sw) {
+        constexpr double kOuterSlope = 1.0e-6;
+        if (sw.val < 0.0) {
+            ADVar<3> out = MakeConstAD<3>(0.0);
+            for (int k = 0; k < 3; ++k) out.grad(k) = kOuterSlope * sw.grad(k);
+            return out;
+        }
+        if (sw.val > 1.0) {
+            ADVar<3> out = MakeConstAD<3>(1.0);
+            for (int k = 0; k < 3; ++k) out.grad(k) = kOuterSlope * sw.grad(k);
+            return out;
+        }
+        return sw;
     }
 
     inline void AddBoundaryEqContribution(
@@ -482,8 +503,7 @@ namespace {
 
         if (s.has_sw) {
             if (fracture_domain) {
-                if (Sw_const.val < 0.0) Sw_const = MakeConstAD<3>(0.0);
-                if (Sw_const.val > 1.0) Sw_const = MakeConstAD<3>(1.0);
+                Sw_const = ClampSwFractureForConstitutive(Sw_const);
                 krw = Sw_const;
                 krg = MakeConstAD<3>(1.0) - Sw_const;
                 Pc = MakeConstAD<3>(0.0);
@@ -549,40 +569,43 @@ namespace {
         return s;
     }
 
-    inline ADVar<3> ComputePressureDrivenBoundaryMassFlux(
-        const BoundarySetting::BoundaryConditionManager* pressureBC,
+    inline ADVar<3> ComputePhaseBoundaryMassFlux(
+        const BoundarySetting::BoundaryConditionManager* phaseBC,
         int physicalTag,
         const Vector& faceMidpoint,
         double area,
         double T_geom,
-        const ADVar<3>& P_cell,
-        const ADVar<3>& k_n)
+        const ADVar<3>& primaryVar,
+        const ADVar<3>& k_n,
+        const ADVar<3>& mobility)
     {
         ADVar<3> q = MakeConstAD<3>(0.0);
-        if (!pressureBC || !pressureBC->HasBC(physicalTag)) {
+        if (!phaseBC || !phaseBC->HasBC(physicalTag)) {
             return q;
         }
 
-        const auto bcP = pressureBC->GetBCCoefficients(physicalTag, faceMidpoint);
-        if (bcP.type == BoundarySetting::BoundaryType::Dirichlet) {
-            if (std::abs(bcP.a) <= kBoundaryCoeffEps) {
+        const auto bc = phaseBC->GetBCCoefficients(physicalTag, faceMidpoint);
+        if (bc.type == BoundarySetting::BoundaryType::Dirichlet) {
+            if (std::abs(bc.a) <= kBoundaryCoeffEps) {
                 return q;
             }
-            const ADVar<3> raw = FVM_Ops::Op_Boundary_Dirichlet_AD<3, ADVar<3>>(T_geom, P_cell, bcP.c / bcP.a);
-            return FVM_Ops::Op_Boundary_ScaleFlux_AD<3, ADVar<3>>(raw, k_n);
+            const ADVar<3> raw = FVM_Ops::Op_Boundary_Dirichlet_AD<3, ADVar<3>>(T_geom, primaryVar, bc.c / bc.a);
+            const ADVar<3> q_darcy = FVM_Ops::Op_Boundary_ScaleFlux_AD<3, ADVar<3>>(raw, k_n);
+            return q_darcy * mobility;
         }
 
-        if (bcP.type == BoundarySetting::BoundaryType::Robin) {
-            if (std::abs(bcP.a) <= kBoundaryCoeffEps) {
+        if (bc.type == BoundarySetting::BoundaryType::Robin) {
+            if (std::abs(bc.a) <= kBoundaryCoeffEps) {
                 return q;
             }
-            const double C_L = -bcP.a;
-            const double far_val = bcP.c / bcP.a;
-            const ADVar<3> raw = MakeConstAD<3>(area) * FVM_Ops::Op_Leakoff_Source_AD<3, ADVar<3>>(true, C_L, P_cell, far_val);
-            return FVM_Ops::Op_Boundary_ScaleFlux_AD<3, ADVar<3>>(raw, k_n);
+            const double C_L = -bc.a;
+            const double far_val = bc.c / bc.a;
+            const ADVar<3> raw = MakeConstAD<3>(area) * FVM_Ops::Op_Leakoff_Source_AD<3, ADVar<3>>(true, C_L, primaryVar, far_val);
+            const ADVar<3> q_darcy = FVM_Ops::Op_Boundary_ScaleFlux_AD<3, ADVar<3>>(raw, k_n);
+            return q_darcy * mobility;
         }
 
-        return FVM_Ops::Op_Boundary_Neumann_AD<3, ADVar<3>>(area, bcP.c);
+        return FVM_Ops::Op_Boundary_Neumann_AD<3, ADVar<3>>(area, bc.c);
     }
 } // namespace end
 
@@ -609,10 +632,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D(
     std::vector<std::array<double, 3>> jacobianFull(residual.size(), std::array<double, 3>{ 0.0, 0.0, 0.0 });
     stats = Assemble_2D_FullJac(
         mgr, bcMgr, dofOffset, fm, fieldName, residual, jacobianFull,
-        nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
+        nullptr, nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
 
+    const BoundaryFieldTags tags = BuildBoundaryFieldTags();
+    const int jacSlot = ResolvePrimaryJacobianSlot(tags, fieldName, dofOffset);
     for (size_t i = 0; i < jacobianDiag.size(); ++i) {
-        jacobianDiag[i] += jacobianFull[i][dofOffset];
+        jacobianDiag[i] += jacobianFull[i][jacSlot];
     }
     return stats;
 }
@@ -626,6 +651,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
     std::vector<double>& residual,
     std::vector<std::array<double, 3>>& jacobianFull,
     const BoundarySetting::BoundaryConditionManager* coupledPressureBC,
+    const BoundarySetting::BoundaryConditionManager* coupledSaturationBC,
     bool single_phase_use_co2,
     const CapRelPerm::VGParams& vg,
     const CapRelPerm::RelPermParams& rp)
@@ -714,14 +740,14 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
             }
 
             if (is_temp_eq) {
-                const ADVar<3> q_mass_total = ComputePressureDrivenBoundaryMassFlux(
-                    coupledPressureBC, face.physicalGroupId, face.midpoint, area, T_geom, state.P, state.k_n);
+                const ADVar<3> q_mass_w = ComputePhaseBoundaryMassFlux(
+                    coupledPressureBC, face.physicalGroupId, face.midpoint, area, T_geom, state.P, state.k_n, state.mob_w);
+                ADVar<3> q_mass_g = MakeConstAD<3>(0.0);
                 if (state.has_sw) {
-                    q_flux += q_mass_total * (state.mob_w * state.h_w + state.mob_g * state.h_g);
+                    q_mass_g = ComputePhaseBoundaryMassFlux(
+                        coupledSaturationBC, face.physicalGroupId, face.midpoint, area, T_geom, state.Sw, state.k_n, state.mob_g);
                 }
-                else {
-                    q_flux += q_mass_total * (state.mob_w * state.h_w);
-                }
+                q_flux += q_mass_w * state.h_w + q_mass_g * state.h_g;
             }
 
             AddBoundaryEqContribution(eqIdx, q_flux, residual, jacobianFull);
@@ -793,9 +819,18 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
             const bool isStart = (endId == 0);
             const Vector boundaryPoint = isStart ? p0 : p1;
             const Vector boundaryNormal = tanUnit * (isStart ? -1.0 : 1.0);
+            const bool isTerminalEndpoint =
+                (isStart && elem.id == 1) ||
+                (!isStart && elem.id == static_cast<int>(frac.intersections.size()) - 1);
 
             const int inferredTag = InferBoundaryTagFromPoint(boundaryPoint, bounds, false);
-            if (inferredTag < 0 || !bcMgr.HasBC(inferredTag)) continue;
+            if (inferredTag < 0) {
+                if (isTerminalEndpoint) {
+                    ++stats.inferredTagFail;
+                }
+                continue;
+            }
+            if (!bcMgr.HasBC(inferredTag)) continue;
 
             const auto bc = bcMgr.GetBCCoefficients(inferredTag, boundaryPoint);
             auto& tagStats = TouchBoundaryTagStats(stats, inferredTag, bc.type);
@@ -845,14 +880,14 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_2D_FullJac(
             }
 
             if (is_temp_eq) {
-                const ADVar<3> q_mass_total = ComputePressureDrivenBoundaryMassFlux(
-                    coupledPressureBC, inferredTag, boundaryPoint, area, T_geom, state.P, state.k_n);
+                const ADVar<3> q_mass_w = ComputePhaseBoundaryMassFlux(
+                    coupledPressureBC, inferredTag, boundaryPoint, area, T_geom, state.P, state.k_n, state.mob_w);
+                ADVar<3> q_mass_g = MakeConstAD<3>(0.0);
                 if (state.has_sw) {
-                    q_flux += q_mass_total * (state.mob_w * state.h_w + state.mob_g * state.h_g);
+                    q_mass_g = ComputePhaseBoundaryMassFlux(
+                        coupledSaturationBC, inferredTag, boundaryPoint, area, T_geom, state.Sw, state.k_n, state.mob_g);
                 }
-                else {
-                    q_flux += q_mass_total * (state.mob_w * state.h_w);
-                }
+                q_flux += q_mass_w * state.h_w + q_mass_g * state.h_g;
             }
 
             AddBoundaryEqContribution(eqIdx, q_flux, residual, jacobianFull);
@@ -904,10 +939,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D(
     std::vector<std::array<double, 3>> jacobianFull(residual.size(), std::array<double, 3>{ 0.0, 0.0, 0.0 });
     stats = Assemble_3D_FullJac(
         mgr, bcMgr, dofOffset, fm, fieldName, residual, jacobianFull,
-        nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
+        nullptr, nullptr, false, CapRelPerm::VGParams(), CapRelPerm::RelPermParams());
 
+    const BoundaryFieldTags tags = BuildBoundaryFieldTags();
+    const int jacSlot = ResolvePrimaryJacobianSlot(tags, fieldName, dofOffset);
     for (size_t i = 0; i < jacobianDiag.size(); ++i) {
-        jacobianDiag[i] += jacobianFull[i][dofOffset];
+        jacobianDiag[i] += jacobianFull[i][jacSlot];
     }
     return stats;
 }
@@ -921,6 +958,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
     std::vector<double>& residual,
     std::vector<std::array<double, 3>>& jacobianFull,
     const BoundarySetting::BoundaryConditionManager* coupledPressureBC,
+    const BoundarySetting::BoundaryConditionManager* coupledSaturationBC,
     bool single_phase_use_co2,
     const CapRelPerm::VGParams& vg,
     const CapRelPerm::RelPermParams& rp)
@@ -1009,14 +1047,14 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
             }
 
             if (is_temp_eq) {
-                const ADVar<3> q_mass_total = ComputePressureDrivenBoundaryMassFlux(
-                    coupledPressureBC, face.physicalGroupId, face.midpoint, area, T_geom, state.P, state.k_n);
+                const ADVar<3> q_mass_w = ComputePhaseBoundaryMassFlux(
+                    coupledPressureBC, face.physicalGroupId, face.midpoint, area, T_geom, state.P, state.k_n, state.mob_w);
+                ADVar<3> q_mass_g = MakeConstAD<3>(0.0);
                 if (state.has_sw) {
-                    q_flux += q_mass_total * (state.mob_w * state.h_w + state.mob_g * state.h_g);
+                    q_mass_g = ComputePhaseBoundaryMassFlux(
+                        coupledSaturationBC, face.physicalGroupId, face.midpoint, area, T_geom, state.Sw, state.k_n, state.mob_g);
                 }
-                else {
-                    q_flux += q_mass_total * (state.mob_w * state.h_w);
-                }
+                q_flux += q_mass_w * state.h_w + q_mass_g * state.h_g;
             }
 
             AddBoundaryEqContribution(eqIdx, q_flux, residual, jacobianFull);
@@ -1049,7 +1087,11 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
         if (edge.ownerCell_solverIndex < nMat) continue;
 
         const int inferredTag = InferBoundaryTagFromPoint(edge.midpoint, bounds, true);
-        if (inferredTag < 0 || !bcMgr.HasBC(inferredTag)) continue;
+        if (inferredTag < 0) {
+            ++stats.inferredTagFail;
+            continue;
+        }
+        if (!bcMgr.HasBC(inferredTag)) continue;
 
         const int solverIdx = edge.ownerCell_solverIndex;
         const int localIdx = solverIdx - nMat;
@@ -1072,7 +1114,11 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
             continue;
         }
 
-        const double dist = std::max(edge.ownerToNeighbor.Mag(), 1.0e-12);
+        double dist = std::abs(edge.ownerToNeighbor * edge.normal);
+        if (dist <= 1.0e-12) {
+            dist = edge.ownerToNeighbor.Mag();
+        }
+        dist = std::max(dist, 1.0e-12);
         const double area = std::max(edge.length, 0.0);
         const double T_geom = area / dist;
 
@@ -1110,14 +1156,14 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_3D_FullJac(
         }
 
         if (is_temp_eq) {
-            const ADVar<3> q_mass_total = ComputePressureDrivenBoundaryMassFlux(
-                coupledPressureBC, inferredTag, edge.midpoint, area, T_geom, state.P, state.k_n);
+            const ADVar<3> q_mass_w = ComputePhaseBoundaryMassFlux(
+                coupledPressureBC, inferredTag, edge.midpoint, area, T_geom, state.P, state.k_n, state.mob_w);
+            ADVar<3> q_mass_g = MakeConstAD<3>(0.0);
             if (state.has_sw) {
-                q_flux += q_mass_total * (state.mob_w * state.h_w + state.mob_g * state.h_g);
+                q_mass_g = ComputePhaseBoundaryMassFlux(
+                    coupledSaturationBC, inferredTag, edge.midpoint, area, T_geom, state.Sw, state.k_n, state.mob_g);
             }
-            else {
-                q_flux += q_mass_total * (state.mob_w * state.h_w);
-            }
+            q_flux += q_mass_w * state.h_w + q_mass_g * state.h_g;
         }
 
         AddBoundaryEqContribution(eqIdx, q_flux, residual, jacobianFull);
@@ -1710,12 +1756,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
         ADVar<3> krg = MakeConstAD3(0.0);
         if (has_sw) {
             if (step.domain == WellTargetDomain::Fracture) {
-                // [DAY6-08-Well] 裂缝：线性kr + Pc=0
+                // [DAY6-08-Well] Fracture: linear kr and Pc=0
                 if (Sw_const.val < 0.0) Sw_const = MakeConstAD3(0.0);
                 else if (Sw_const.val > 1.0) Sw_const = MakeConstAD3(1.0);
                 krw = Sw_const;
                 krg = MakeConstAD3(1.0) - Sw_const;
-                // Pc_cell 保持 0.0
+                // Pc_cell remains 0.0
             } else {
                 Sw_const = ClampSwForConstitutiveWell<3>(Sw_cell, vg);
                 Pc_cell = CapRelPerm::pc_vG<3>(Sw_const, vg);
@@ -1941,12 +1987,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
         ADVar<3> krg = MakeConstAD3(0.0);
         if (has_sw) {
             if (step.domain == WellTargetDomain::Fracture) {
-                // [DAY6-08-Well] 裂缝：线性kr + Pc=0
+                // [DAY6-08-Well] Fracture: linear kr and Pc=0
                 if (Sw_const.val < 0.0) Sw_const = MakeConstAD3(0.0);
                 else if (Sw_const.val > 1.0) Sw_const = MakeConstAD3(1.0);
                 krw = Sw_const;
                 krg = MakeConstAD3(1.0) - Sw_const;
-                // Pc_cell 保持 0.0
+                // Pc_cell remains 0.0
             } else {
                 Sw_const = ClampSwForConstitutiveWell<3>(Sw_cell, vg);
                 Pc_cell = CapRelPerm::pc_vG<3>(Sw_const, vg);
@@ -2069,3 +2115,4 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
 
     return stats;
 }
+

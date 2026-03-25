@@ -34,6 +34,7 @@ struct BoundaryAssemblyStats {
     int fractureBCCount = 0;
     double sumResidual = 0.0;
     double sumJacobianDiag = 0.0;
+    int inferredTagFail = 0; ///< Geometry-inferred boundary-tag failures
 
     int visitedEqRows = 0;  ///< 访问的总方程行数
     int nonzeroEqRows = 0;  ///< 产生非零贡献的方程行数
@@ -63,6 +64,7 @@ public:
         std::vector<double>& residual,
         std::vector<std::array<double, 3>>& jacobianFull,
         const BoundarySetting::BoundaryConditionManager* coupledPressureBC = nullptr,
+        const BoundarySetting::BoundaryConditionManager* coupledSaturationBC = nullptr,
         bool single_phase_use_co2 = false,
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
@@ -87,6 +89,7 @@ public:
         std::vector<double>& residual,
         std::vector<std::array<double, 3>>& jacobianFull,
         const BoundarySetting::BoundaryConditionManager* coupledPressureBC = nullptr,
+        const BoundarySetting::BoundaryConditionManager* coupledSaturationBC = nullptr,
         bool single_phase_use_co2 = false,
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
         const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
@@ -148,3 +151,4 @@ public:
 };
 
 #endif // BOUNDARY_ASSEMBLER_H
+

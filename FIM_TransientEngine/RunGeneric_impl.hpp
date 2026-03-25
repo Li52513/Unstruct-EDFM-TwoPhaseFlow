@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "StepKernels.hpp"
 #include "../FIM_BlockSparseMatrix.h"
@@ -599,13 +599,13 @@ namespace FIM_Engine {
                                 BoundaryAssembler::Assemble_2D_FullJac(
                                     mgr, *modules.pressure_bc, 0, fm,
                                     PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
-                                    bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                                    bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_use_co2, modules.vg_params, modules.rp_params);
                             }
                             else {
                                 BoundaryAssembler::Assemble_3D_FullJac(
                                     mgr, *modules.pressure_bc, 0, fm,
                                     PhysicalProperties_string_op::PressureEquation_String::FIM().pressure_field,
-                                    bc_res, bc_jac3, modules.pressure_bc, bc_use_co2, modules.vg_params, modules.rp_params);
+                                    bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_use_co2, modules.vg_params, modules.rp_params);
                             }
 
                             for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -1581,12 +1581,12 @@ namespace FIM_Engine {
                     if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                         bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
                             mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                            modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
+                            modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
                     }
                     else {
                         bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
                             mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                            modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
+                            modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
                     }
                     (void)bc_stats;
                     for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -2151,12 +2151,12 @@ namespace FIM_Engine {
                         if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                             bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
                                 mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
+                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
                         }
                         else {
                             bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
                                 mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                modules.pressure_bc, sp_use_co2, vg_cfg, rp_cfg);
+                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
                         }
 
                         int appliedEq = 0;
@@ -2205,7 +2205,8 @@ namespace FIM_Engine {
                                 << " (visited=" << bc_stats.visitedEqRows
                                 << ", nonzero=" << bc_stats.nonzeroEqRows
                                 << ", zero_row=" << bc_stats.zeroEqRows
-                                << ", invalid=" << bc_stats.invalidEqRows << ")\n";
+                                << ", invalid=" << bc_stats.invalidEqRows
+                                << ", infer_tag_fail=" << bc_stats.inferredTagFail << ")\n";
                             for (const auto& kv : bc_stats.perTagType) {
                                 const auto& v = kv.second;
                                 std::cout << "      [BC-TAG] field=" << fieldLabel
@@ -3222,4 +3223,5 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
+
 
