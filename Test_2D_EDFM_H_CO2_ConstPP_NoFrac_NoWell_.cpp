@@ -180,7 +180,7 @@ double ComputeMeshCharLength(const MeshManager& mgr) {
  */
 struct TestCaseSpec {
     // --- 标识 ---
-    std::string case_name = "h_co2_constpp_nofrac_nowell";  // 输出子目录名
+    std::string case_name = "h_co2_constpp_nofrac_nowell_zhengjiao";  // 输出子目录名
     std::string output_base_dir = "Test/Transient/FullCaseTest";  // 输出根目录（可外部修改）
     std::string sub_dir = "H_CO2_ConstPP";  // 输出中间目录
 
@@ -241,7 +241,7 @@ struct TestCaseSpec {
     double dt_relres_grow_factor           = 1.08;    // 收敛良好时 dt 增长因子 [-]
 
     // 重力
-    Vector gravity_vector = Vector(0.0, 0.0, -9.81);  // 重力加速度 [m/s^2]
+    Vector gravity_vector = Vector(0.0, -9.81, 0.0);  // 重力加速度 [m/s^2]
 
     // 诊断输出
     FIM_Engine::DiagLevel diag_level = FIM_Engine::DiagLevel::Off;  // Off/Summary/Hotspot/Forensic
@@ -401,7 +401,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     // BuildSolidMatrixGrid_2D 完成：
     //   (1) gmsh 生成网格  (2) 面索引映射  (3) 单元分类
     //   (4) 边界面标记 (LEFT/RIGHT/TOP/BOTTOM)  (5) 面法向量计算（OverRelaxed 修正）
-    MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
+    MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, true);
     mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
 
     // 注意：本工况无裂缝，跳过 addFracture / DetectAndSubdivideFractures
