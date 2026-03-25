@@ -73,9 +73,9 @@ namespace FIM_Engine {
             AD_Fluid::ADFluidProperties<N> props;
             props.rho = ADVar<N>(1000.0);
             props.mu  = ADVar<N>(1.0e-3);
-            props.cp  = ADVar<N>(0.0);   // zero heat capacity → F_conv = ρ·h·u = 0
+            props.cp  = ADVar<N>(0.0);   // zero heat capacity �?F_conv = ρ·h·u = 0
             props.cv  = ADVar<N>(0.0);
-            props.h   = ADVar<N>(0.0);   // zero enthalpy → no convective heat transport
+            props.h   = ADVar<N>(0.0);   // zero enthalpy �?no convective heat transport
             props.k   = ADVar<N>(0.6);   // keep conductivity (but ΔT_IC=0, so conduction is also zero)
             props.isFallback = false;
             props.near_bound = false;
@@ -166,19 +166,13 @@ namespace FIM_Engine {
             AD_Fluid::ADFluidProperties<N> propsG{};
 
             if constexpr (N == 3) {
-                // [DAY6-08] 按域判断：裂缝线性kr+Pc=0，基质vG
-                propsW = AD_Fluid::Evaluator::evaluateWater<N>(P_ad, T_ad);
-                rho_w = propsW.rho.val;
-                mu_w  = propsW.mu.val;
+                sw_constitutive = ClampSwForConstitutive(sw, vg_params);
+                const ADVar<N> Sw_const_ad(sw_constitutive);
                 if (i >= nMat) {
-                    double sw_c = std::max(0.0, std::min(1.0, sw));
-                    sw_constitutive = sw_c;
-                    krw = sw_c;
-                    krg = 1.0 - sw_c;
+                    krw = sw_constitutive;
+                    krg = 1.0 - sw_constitutive;
                     propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_ad, T_ad);  // Pc=0
                 } else {
-                    sw_constitutive = ClampSwForConstitutive(sw, vg_params);
-                    const ADVar<N> Sw_const_ad(sw_constitutive);
                     const ADVar<N> Pc_const_ad = CapRelPerm::pc_vG<N>(Sw_const_ad, vg_params);
                     const ADVar<N> P_gas_ad = P_ad + Pc_const_ad;
                     propsG = AD_Fluid::Evaluator::evaluateCO2<N>(P_gas_ad, T_ad);
@@ -188,7 +182,6 @@ namespace FIM_Engine {
                     krg = krg_ad.val;
                 }
             }
-
             double lambda_w_mob = krw / std::max(mu_w, 1e-18);
 
             if (i < nMat) {
@@ -237,3 +230,4 @@ namespace FIM_Engine {
     }
 
 } // namespace FIM_Engine
+
