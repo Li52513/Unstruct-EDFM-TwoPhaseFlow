@@ -243,7 +243,7 @@ public:
      */
     std::vector<int> getFracElemSolverIndexfromCellGlobalId(int cellGlobalID) const;
 
-    /**
+    /**getIJK()
      * @brief   【适用2D EDFM】 获取特定基岩网格内存在的裂缝段
      * @param   特定网格单元的全局ID
      * @details 访问经rebuildFractureMap函数构建与基岩网格单元cell Id之间的拓扑关系之后，并获取CellLocalIndexToFracElemLocalIdMap_的value值

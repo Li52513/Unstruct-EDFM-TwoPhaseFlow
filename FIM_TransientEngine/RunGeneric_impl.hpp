@@ -365,66 +365,45 @@ namespace FIM_Engine {
 
                     std::vector<Vector> nonorth_grad_P(nMat, Vector(0.0, 0.0, 0.0));
                     if (params.enable_non_orthogonal_correction && nMat > 0) {
-                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                            bool gg_ok = false;
-                            try {
-                                volScalarField p_tmp("n1_p_tmp", static_cast<size_t>(nMat), 0.0);
-                                for (int ci = 0; ci < nMat; ++ci) p_tmp[ci] = state.P[ci];
-                                const BoundarySetting::BoundaryConditionManager* bc_grad = modules.pressure_bc;
-                                FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_grad);
-                                auto grad_field = grad_solver.compute(p_tmp, FVM_Grad::Method::GreenGauss);
-                                if (grad_field && grad_field->data.size() >= static_cast<size_t>(nMat)) {
-                                    for (int ci = 0; ci < nMat; ++ci) {
-                                        nonorth_grad_P[ci] = (*grad_field)[ci];
-                                    }
-                                    gg_ok = true;
+                        bool gg_ok = false;
+                        try {
+                            volScalarField p_tmp("n1_p_tmp", static_cast<size_t>(nMat), 0.0);
+                            for (int ci = 0; ci < nMat; ++ci) p_tmp[ci] = state.P[ci];
+                            const BoundarySetting::BoundaryConditionManager* bc_grad = modules.pressure_bc;
+                            FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_grad);
+                            auto grad_field = grad_solver.compute(p_tmp, FVM_Grad::Method::GreenGauss);
+                            if (grad_field && grad_field->data.size() >= static_cast<size_t>(nMat)) {
+                                for (int ci = 0; ci < nMat; ++ci) {
+                                    nonorth_grad_P[ci] = (*grad_field)[ci];
                                 }
-                            }
-                            catch (...) {
-                                gg_ok = false;
-                            }
-
-                            if (!gg_ok) {
-                                const auto& mesh_faces = mgr.mesh().getFaces();
-                                for (const auto& mf : mesh_faces) {
-                                    if (mf.isBoundary()) continue;
-                                    const int nI = mf.ownerCell_index;
-                                    const int nJ = mf.neighborCell_index;
-                                    if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
-                                    const double volI = std::max(vols[nI], 1.0e-30);
-                                    const double volJ = std::max(vols[nJ], 1.0e-30);
-                                    const double pFace = 0.5 * (state.P[nI] + state.P[nJ]);
-                                    const double Ax = mf.normal.m_x * mf.length;
-                                    const double Ay = mf.normal.m_y * mf.length;
-                                    nonorth_grad_P[nI].m_x += pFace * Ax / volI;
-                                    nonorth_grad_P[nI].m_y += pFace * Ay / volI;
-                                    nonorth_grad_P[nJ].m_x -= pFace * Ax / volJ;
-                                    nonorth_grad_P[nJ].m_y -= pFace * Ay / volJ;
-                                }
+                                gg_ok = true;
                             }
                         }
-                        else {
-                            for (const auto& conn : connMgr.GetConnections()) {
-                                if (conn.type != ConnectionType::Matrix_Matrix) continue;
-                                const int nI = conn.nodeI, nJ = conn.nodeJ;
+                        catch (...) {
+                            gg_ok = false;
+                        }
+
+                        if (!gg_ok) {
+                            const auto& mesh_faces = mgr.mesh().getFaces();
+                            for (const auto& mf : mesh_faces) {
+                                if (mf.isBoundary()) continue;
+                                const int nI = mf.ownerCell_index;
+                                const int nJ = mf.neighborCell_index;
                                 if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
                                 const double volI = std::max(vols[nI], 1.0e-30);
                                 const double volJ = std::max(vols[nJ], 1.0e-30);
                                 const double pFace = 0.5 * (state.P[nI] + state.P[nJ]);
-                                // 3D fallback: Connection lacks explicit face normal;
-                                // approximate area direction from centre-line.
-                                const Vector d_ij = blockCenters[nJ] - blockCenters[nI];
-                                double dmag = d_ij.Mag();
-                                if (dmag <= 1.0e-20) dmag = std::max(conn.aux_dist, 1.0e-20);
-                                const double inv_dmag = 1.0 / dmag;
-                                const double nx = d_ij.m_x * inv_dmag;
-                                const double ny = d_ij.m_y * inv_dmag;
-                                const double Ax = nx * conn.aux_area;
-                                const double Ay = ny * conn.aux_area;
+                                double area = std::max(mf.vectorE.Mag(), 0.0);
+                                if (area <= 1.0e-20) area = std::max(mf.length, 0.0);
+                                const double Ax = mf.normal.m_x * area;
+                                const double Ay = mf.normal.m_y * area;
+                                const double Az = mf.normal.m_z * area;
                                 nonorth_grad_P[nI].m_x += pFace * Ax / volI;
                                 nonorth_grad_P[nI].m_y += pFace * Ay / volI;
+                                nonorth_grad_P[nI].m_z += pFace * Az / volI;
                                 nonorth_grad_P[nJ].m_x -= pFace * Ax / volJ;
                                 nonorth_grad_P[nJ].m_y -= pFace * Ay / volJ;
+                                nonorth_grad_P[nJ].m_z -= pFace * Az / volJ;
                             }
                         }
                     }
@@ -521,7 +500,8 @@ namespace FIM_Engine {
                                 if (vT_mag > 1.0e-15) {
                                     const double gPx = 0.5 * (nonorth_grad_P[i].m_x + nonorth_grad_P[j].m_x);
                                     const double gPy = 0.5 * (nonorth_grad_P[i].m_y + nonorth_grad_P[j].m_y);
-                                    const double corr_P = gPx * conn.vectorT.m_x + gPy * conn.vectorT.m_y;
+                                    const double gPz = 0.5 * (nonorth_grad_P[i].m_z + nonorth_grad_P[j].m_z);
+                                    const double corr_P = gPx * conn.vectorT.m_x + gPy * conn.vectorT.m_y + gPz * conn.vectorT.m_z;
                                     const double K_eff = (conn.aux_area > 1.0e-12)
                                         ? conn.T_Flow * conn.aux_dist / conn.aux_area
                                         : 0.0;
@@ -1326,7 +1306,7 @@ namespace FIM_Engine {
                 struct ProbeCellPropsCache {
                     double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
                     double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
-                    double Pc = 0.0, krw = 1.0, krg = 0.0;
+                    double Pc = 0.0, dPc_dSw = 0.0, krw = 1.0, krg = 0.0;
                 };
                 std::vector<ProbeCellPropsCache> cprop(totalBlocks);
                 for (int ci = 0; ci < totalBlocks; ++ci) {
@@ -1340,20 +1320,24 @@ namespace FIM_Engine {
                     }
                     if constexpr (N == 3) {
                         const double sw_ci = eval_state.Sw[ci];
-                        double pc_s = 0.0, krw_s = 1.0, krg_s = 0.0;
+                        double pc_s = 0.0, dpc_dsw_s = 0.0, krw_s = 1.0, krg_s = 0.0;
                         if (ci >= nMat) {
                             const double sw_c = std::max(0.0, std::min(1.0, sw_ci));
                             krw_s = sw_c; krg_s = 1.0 - sw_c;
                         }
                         else {
                             ADVar<N> SwC(sw_ci);
+                            SwC.grad(1) = 1.0;
                             ADVar<N> SwCC = ClampSwForConstitutive<N>(SwC, vg_cfg, sw_constitutive_eps);
-                            pc_s = CapRelPerm::pc_vG<N>(SwCC, vg_cfg).val;
+                            ADVar<N> pc_ad = CapRelPerm::pc_vG<N>(SwCC, vg_cfg);
+                            pc_s = pc_ad.val;
+                            dpc_dsw_s = pc_ad.grad(1);
                             ADVar<N> krw0, krg0;
                             CapRelPerm::kr_Mualem_vG<N>(SwCC, vg_cfg, rp_cfg, krw0, krg0);
                             krw_s = krw0.val; krg_s = krg0.val;
                         }
                         cprop[ci].Pc = pc_s;
+                        cprop[ci].dPc_dSw = dpc_dsw_s;
                         cprop[ci].krw = krw_s;
                         cprop[ci].krg = krg_s;
                         ADVar<N> Pg0(p_ci + pc_s), T0(t_ci);
@@ -1366,9 +1350,11 @@ namespace FIM_Engine {
 
                 std::vector<Vector> nonorth_grad_P(nMat, Vector(0.0, 0.0, 0.0));
                 std::vector<Vector> nonorth_grad_T_cell(nMat, Vector(0.0, 0.0, 0.0));
+                std::vector<Vector> nonorth_grad_Sw(nMat, Vector(0.0, 0.0, 0.0));
                 if (params.enable_non_orthogonal_correction && nMat > 0) {
                     std::fill(nonorth_grad_P.begin(), nonorth_grad_P.end(), Vector(0.0, 0.0, 0.0));
                     std::fill(nonorth_grad_T_cell.begin(), nonorth_grad_T_cell.end(), Vector(0.0, 0.0, 0.0));
+                    std::fill(nonorth_grad_Sw.begin(), nonorth_grad_Sw.end(), Vector(0.0, 0.0, 0.0));
 
                     auto compute_matrix_gg_grad = [&](const std::vector<double>& values,
                         const BoundarySetting::BoundaryConditionManager* bc_mgr,
@@ -1392,8 +1378,13 @@ namespace FIM_Engine {
                         eval_state.P, modules.pressure_bc, "n23_probe_p_tmp", nonorth_grad_P);
                     const bool ok_t = compute_matrix_gg_grad(
                         eval_state.T, modules.temperature_bc, "n23_probe_t_tmp", nonorth_grad_T_cell);
+                    bool ok_sw = true;
+                    if constexpr (N == 3) {
+                        ok_sw = compute_matrix_gg_grad(
+                            eval_state.Sw, modules.saturation_bc, "n23_probe_sw_tmp", nonorth_grad_Sw);
+                    }
 
-                    if (!(ok_p && ok_t)) {
+                    if (!(ok_p && ok_t && ok_sw)) {
                         const auto& mesh_faces = mgr.mesh().getFaces();
                         for (const auto& mf : mesh_faces) {
                             if (mf.isBoundary()) continue;
@@ -1422,6 +1413,16 @@ namespace FIM_Engine {
                             nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
                             nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
                             nonorth_grad_T_cell[nJ].m_z -= Tf * Az / vol_J;
+
+                            if constexpr (N == 3) {
+                                const double Swf = 0.5 * (eval_state.Sw[nI] + eval_state.Sw[nJ]);
+                                nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
+                                nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
+                                nonorth_grad_Sw[nI].m_z += Swf * Az / vol_I;
+                                nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
+                                nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
+                                nonorth_grad_Sw[nJ].m_z -= Swf * Az / vol_J;
+                            }
                         }
                     }
                 }
@@ -1514,8 +1515,8 @@ namespace FIM_Engine {
                             const double dPhi_w_sign = (eval_state.P[j] - eval_state.P[i])
                                 - 0.5 * (cprop[i].rho_w + cprop[j].rho_w) * g_dx_w;
                             const double mob_w = (dPhi_w_sign < 0.0)
-                                ? cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
-                                : cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
+                                ? cprop[i].krw * cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
+                                : cprop[j].krw * cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
                             const double mass_w_corr = K_eff * mob_w * corr_P;
                             const double heat_corr = conn.T_Heat * corr_T;
                             const double h_w_upwind = (dPhi_w_sign < 0.0) ? cprop[i].h_w : cprop[j].h_w;
@@ -1526,10 +1527,16 @@ namespace FIM_Engine {
                                 const double dPhi_g_sign = (eval_state.P[j] - eval_state.P[i])
                                     + (cprop[j].Pc - cprop[i].Pc)
                                     - 0.5 * (cprop[i].rho_g + cprop[j].rho_g) * g_dx_w;
+                                const double gSw_x = 0.5 * (nonorth_grad_Sw[i].m_x + nonorth_grad_Sw[j].m_x);
+                                const double gSw_y = 0.5 * (nonorth_grad_Sw[i].m_y + nonorth_grad_Sw[j].m_y);
+                                const double gSw_z = 0.5 * (nonorth_grad_Sw[i].m_z + nonorth_grad_Sw[j].m_z);
+                                const double corr_Sw = gSw_x * conn.vectorT.m_x + gSw_y * conn.vectorT.m_y + gSw_z * conn.vectorT.m_z;
+                                const double dPc_dSw = 0.5 * (cprop[i].dPc_dSw + cprop[j].dPc_dSw);
+                                const double corr_Pc = corr_Sw * dPc_dSw;
                                 const double mob_g = (dPhi_g_sign < 0.0)
-                                    ? cprop[i].rho_g / std::max(cprop[i].mu_g, 1e-20)
-                                    : cprop[j].rho_g / std::max(cprop[j].mu_g, 1e-20);
-                                const double mass_g_corr = K_eff * mob_g * corr_P;
+                                    ? cprop[i].krg * cprop[i].rho_g / std::max(cprop[i].mu_g, 1e-20)
+                                    : cprop[j].krg * cprop[j].rho_g / std::max(cprop[j].mu_g, 1e-20);
+                                const double mass_g_corr = K_eff * mob_g * (corr_P + corr_Pc);
                                 const double h_g_upwind = (dPhi_g_sign < 0.0) ? cprop[i].h_g : cprop[j].h_g;
                                 conv_heat_corr += mass_g_corr * h_g_upwind;
                                 probe_mat.AddResidual(i, 1, -mass_g_corr);
@@ -1573,35 +1580,61 @@ namespace FIM_Engine {
                 }
 
                 // 4) boundary source
-                auto assembleBoundaryFieldProbe = [&](const BoundarySetting::BoundaryConditionManager* bcMgr, int dofOffset, const std::string& fieldName) {
-                    if (!bcMgr || dofOffset < 0) return;
+                if constexpr (N == 3) {
                     std::vector<double> bc_res(totalEq, 0.0);
                     std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
                     BoundaryAssemblyStats bc_stats;
                     if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                        bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
-                            mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                            modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                        bc_stats = BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
+                            mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
+                            pressureDof, pressureDof, saturationDof, temperatureDof,
+                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
                     }
                     else {
-                        bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
-                            mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                            modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                        bc_stats = BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
+                            mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
+                            pressureDof, pressureDof, saturationDof, temperatureDof,
+                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
                     }
                     (void)bc_stats;
                     for (int bi = 0; bi < totalBlocks; ++bi) {
-                        const int eqIdx = mgr.getEquationIndex(bi, dofOffset);
-                        if (eqIdx < 0 || eqIdx >= totalEq) continue;
-                        const double r_bc = bc_res[eqIdx];
-                        if (std::abs(r_bc) <= 1e-16) continue;
-                        probe_mat.AddResidual(bi, dofOffset, r_bc);
+                        for (int eq = 0; eq < 3; ++eq) {
+                            const int eqIdx = mgr.getEquationIndex(bi, eq);
+                            if (eqIdx < 0 || eqIdx >= totalEq) continue;
+                            const double r_bc = bc_res[eqIdx];
+                            if (std::abs(r_bc) <= 1e-16) continue;
+                            probe_mat.AddResidual(bi, eq, r_bc);
+                        }
                     }
-                    };
-                assembleBoundaryFieldProbe(modules.pressure_bc, pressureDof, pEqCfg.pressure_field);
-                if constexpr (N == 3) {
-                    assembleBoundaryFieldProbe(modules.saturation_bc, saturationDof, sEqCfg.saturation);
                 }
-                assembleBoundaryFieldProbe(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field);
+                else {
+                    auto assembleBoundaryFieldProbe = [&](const BoundarySetting::BoundaryConditionManager* bcMgr, int dofOffset, const std::string& fieldName) {
+                        if (!bcMgr || dofOffset < 0) return;
+                        std::vector<double> bc_res(totalEq, 0.0);
+                        std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                        BoundaryAssemblyStats bc_stats;
+                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                            bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
+                                mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                        }
+                        else {
+                            bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
+                                mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                        }
+                        (void)bc_stats;
+                        for (int bi = 0; bi < totalBlocks; ++bi) {
+                            const int eqIdx = mgr.getEquationIndex(bi, dofOffset);
+                            if (eqIdx < 0 || eqIdx >= totalEq) continue;
+                            const double r_bc = bc_res[eqIdx];
+                            if (std::abs(r_bc) <= 1e-16) continue;
+                            probe_mat.AddResidual(bi, dofOffset, r_bc);
+                        }
+                        };
+                    assembleBoundaryFieldProbe(modules.pressure_bc, pressureDof, pEqCfg.pressure_field);
+                    assembleBoundaryFieldProbe(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field);
+                }
 
                 Eigen::VectorXd b_probe = probe_mat.ExportEigenResidual();
                 // 鈹€鈹€ ConstantWaterNoConvection: freeze T probe rows to match main Newton system 鈹€鈹€
@@ -1734,7 +1767,7 @@ namespace FIM_Engine {
                 struct CellPropsCache {
                     double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
                     double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
-                    double Pc = 0.0, krw = 1.0, krg = 0.0;
+                    double Pc = 0.0, dPc_dSw = 0.0, krw = 1.0, krg = 0.0;
                 };
                 std::vector<CellPropsCache> cprop(totalBlocks);
                 for (int ci = 0; ci < totalBlocks; ++ci) {
@@ -1748,19 +1781,23 @@ namespace FIM_Engine {
                     }
                     if constexpr (N == 3) {
                         const double sw_ci = state.Sw[ci];
-                        double pc_s = 0.0, krw_s = 1.0, krg_s = 0.0;
+                        double pc_s = 0.0, dpc_dsw_s = 0.0, krw_s = 1.0, krg_s = 0.0;
                         if (ci >= nMat) {
                             const double sw_c = (sw_ci < 0.0) ? 0.0 : (sw_ci > 1.0) ? 1.0 : sw_ci;
                             krw_s = sw_c; krg_s = 1.0 - sw_c;
                         } else {
                             ADVar<N> SwC(sw_ci);
+                            SwC.grad(1) = 1.0;
                             ADVar<N> SwCC = ClampSwForConstitutive<N>(SwC, vg_cfg, sw_constitutive_eps);
-                            pc_s  = CapRelPerm::pc_vG<N>(SwCC, vg_cfg).val;
+                            ADVar<N> pc_ad = CapRelPerm::pc_vG<N>(SwCC, vg_cfg);
+                            pc_s  = pc_ad.val;
+                            dpc_dsw_s = pc_ad.grad(1);
                             ADVar<N> krw0, krg0;
                             CapRelPerm::kr_Mualem_vG<N>(SwCC, vg_cfg, rp_cfg, krw0, krg0);
                             krw_s = krw0.val; krg_s = krg0.val;
                         }
                         cprop[ci].Pc  = pc_s;
+                        cprop[ci].dPc_dSw = dpc_dsw_s;
                         cprop[ci].krw = krw_s;
                         cprop[ci].krg = krg_s;
                         {
@@ -1986,8 +2023,8 @@ namespace FIM_Engine {
                             const double dPhi_w_sign = (state.P[j] - state.P[i])
                                 - 0.5*(cprop[i].rho_w + cprop[j].rho_w) * g_dx_w;
                             const double mob_w = (dPhi_w_sign < 0.0)
-                                ? cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
-                                : cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
+                                ? cprop[i].krw * cprop[i].rho_w / std::max(cprop[i].mu_w, 1e-20)
+                                : cprop[j].krw * cprop[j].rho_w / std::max(cprop[j].mu_w, 1e-20);
                             // Correction contributions (explicit 鈫?residual only, no Jacobian)
                             const double mass_w_corr = K_eff * mob_w * corr_P;
                             const double heat_corr   = conn.T_Heat * corr_T;
@@ -2000,10 +2037,16 @@ namespace FIM_Engine {
                                 const double dPhi_g_sign = (state.P[j] - state.P[i])
                                     + (cprop[j].Pc - cprop[i].Pc)
                                     - 0.5*(cprop[i].rho_g + cprop[j].rho_g) * g_dx_w;
+                                const double gSw_x = 0.5 * (nonorth_grad_Sw[i].m_x + nonorth_grad_Sw[j].m_x);
+                                const double gSw_y = 0.5 * (nonorth_grad_Sw[i].m_y + nonorth_grad_Sw[j].m_y);
+                                const double gSw_z = 0.5 * (nonorth_grad_Sw[i].m_z + nonorth_grad_Sw[j].m_z);
+                                const double corr_Sw = gSw_x * conn.vectorT.m_x + gSw_y * conn.vectorT.m_y + gSw_z * conn.vectorT.m_z;
+                                const double dPc_dSw = 0.5 * (cprop[i].dPc_dSw + cprop[j].dPc_dSw);
+                                const double corr_Pc = corr_Sw * dPc_dSw;
                                 const double mob_g = (dPhi_g_sign < 0.0)
-                                    ? cprop[i].rho_g / std::max(cprop[i].mu_g, 1e-20)
-                                    : cprop[j].rho_g / std::max(cprop[j].mu_g, 1e-20);
-                                const double mass_g_corr = K_eff * mob_g * corr_P;
+                                    ? cprop[i].krg * cprop[i].rho_g / std::max(cprop[i].mu_g, 1e-20)
+                                    : cprop[j].krg * cprop[j].rho_g / std::max(cprop[j].mu_g, 1e-20);
+                                const double mass_g_corr = K_eff * mob_g * (corr_P + corr_Pc);
                                 const double h_g_upwind = (dPhi_g_sign < 0.0) ? cprop[i].h_g : cprop[j].h_g;
                                 conv_heat_corr += mass_g_corr * h_g_upwind;
                                 global_mat.AddResidual(i, 1, -mass_g_corr);
@@ -2138,32 +2181,28 @@ namespace FIM_Engine {
                 }
                 // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-                auto assembleBoundaryField = [&](const BoundarySetting::BoundaryConditionManager* bcMgr,
-                    int dofOffset,
-                    const std::string& fieldName,
-                    const char* fieldLabel) {
-                        if (!bcMgr || dofOffset < 0) return;
+                if constexpr (N == 3) {
+                    std::vector<double> bc_res(totalEq, 0.0);
+                    std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                    BoundaryAssemblyStats bc_stats;
+                    if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                        bc_stats = BoundaryAssembler::Assemble_2D_CoupledN3_FullJac(
+                            mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
+                            pressureDof, pressureDof, saturationDof, temperatureDof,
+                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    }
+                    else {
+                        bc_stats = BoundaryAssembler::Assemble_3D_CoupledN3_FullJac(
+                            mgr, fm, modules.pressure_bc, modules.saturation_bc, modules.temperature_bc,
+                            pressureDof, pressureDof, saturationDof, temperatureDof,
+                            bc_res, bc_jac3, sp_use_co2, vg_cfg, rp_cfg);
+                    }
 
-                        std::vector<double> bc_res(totalEq, 0.0);
-                        std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
-                        BoundaryAssemblyStats bc_stats;
-
-                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                            bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
-                                mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
-                        }
-                        else {
-                            bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
-                                mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
-                                modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
-                        }
-
-                        int appliedEq = 0;
-                        for (int bi = 0; bi < totalBlocks; ++bi) {
-                            const int eqIdx = mgr.getEquationIndex(bi, dofOffset);
+                    int appliedEq = 0;
+                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                        for (int eq = 0; eq < 3; ++eq) {
+                            const int eqIdx = mgr.getEquationIndex(bi, eq);
                             if (eqIdx < 0 || eqIdx >= totalEq) continue;
-
                             const double r_bc = bc_res[eqIdx];
                             const double dRdP = bc_jac3[eqIdx][0];
                             const double dRdSw = bc_jac3[eqIdx][1];
@@ -2175,56 +2214,99 @@ namespace FIM_Engine {
                                 continue;
                             }
 
-                            global_mat.AddResidual(bi, dofOffset, r_bc);
-                            global_mat.AddDiagJacobian(bi, dofOffset, 0, dRdP);
-                            if constexpr (N == 2) {
-                                global_mat.AddDiagJacobian(bi, dofOffset, 1, dRdT);
-                            }
-                            else {
-                                global_mat.AddDiagJacobian(bi, dofOffset, 1, dRdSw);
-                                global_mat.AddDiagJacobian(bi, dofOffset, 2, dRdT);
-                            }
+                            global_mat.AddResidual(bi, eq, r_bc);
+                            global_mat.AddDiagJacobian(bi, eq, 0, dRdP);
+                            global_mat.AddDiagJacobian(bi, eq, 1, dRdSw);
+                            global_mat.AddDiagJacobian(bi, eq, 2, dRdT);
                             ++appliedEq;
 
                             if (params.diag_level != DiagLevel::Off && eqIdx >= 0 && eqIdx < eq_contribs.size()) {
                                 eq_contribs[eqIdx].R_bc += r_bc;
-                                if constexpr (N == 2) {
+                                if (eq == 0) eq_contribs[eqIdx].D_bc += dRdP;
+                                else if (eq == 1) eq_contribs[eqIdx].D_bc += dRdSw;
+                                else eq_contribs[eqIdx].D_bc += dRdT;
+                            }
+                        }
+                    }
+
+                    if (params.diag_level != DiagLevel::Off) {
+                        std::cout << "    [BC-SUM] field=N3-Coupled"
+                            << " faces=" << bc_stats.matrixBCCount + bc_stats.fractureBCCount
+                            << " applied_eq=" << appliedEq
+                            << " (visited=" << bc_stats.visitedEqRows
+                            << ", nonzero=" << bc_stats.nonzeroEqRows
+                            << ", zero_row=" << bc_stats.zeroEqRows
+                            << ", invalid=" << bc_stats.invalidEqRows
+                            << ", infer_tag_fail=" << bc_stats.inferredTagFail
+                            << ", sat_comp_used=" << bc_stats.satCompositionUsed
+                            << ", sat_drive_ignored=" << bc_stats.satDriveIgnored << ")\n";
+                    }
+                    if (bc_stats.satDriveIgnored > 0) {
+                        std::cout << "    [BC-WARN] N=3 saturation_bc Neumann/Robin is ignored as independent drive under pressure-driven-two-phase semantics; count="
+                            << bc_stats.satDriveIgnored << "\n";
+                    }
+                }
+                else {
+                    auto assembleBoundaryField = [&](const BoundarySetting::BoundaryConditionManager* bcMgr,
+                        int dofOffset,
+                        const std::string& fieldName,
+                        const char* fieldLabel) {
+                            if (!bcMgr || dofOffset < 0) return;
+
+                            std::vector<double> bc_res(totalEq, 0.0);
+                            std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                            BoundaryAssemblyStats bc_stats;
+
+                            if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                                bc_stats = BoundaryAssembler::Assemble_2D_FullJac(
+                                    mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                                    modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                            }
+                            else {
+                                bc_stats = BoundaryAssembler::Assemble_3D_FullJac(
+                                    mgr, *bcMgr, dofOffset, fm, fieldName, bc_res, bc_jac3,
+                                    modules.pressure_bc, modules.saturation_bc, sp_use_co2, vg_cfg, rp_cfg);
+                            }
+
+                            int appliedEq = 0;
+                            for (int bi = 0; bi < totalBlocks; ++bi) {
+                                const int eqIdx = mgr.getEquationIndex(bi, dofOffset);
+                                if (eqIdx < 0 || eqIdx >= totalEq) continue;
+
+                                const double r_bc = bc_res[eqIdx];
+                                const double dRdP = bc_jac3[eqIdx][0];
+                                const double dRdT = bc_jac3[eqIdx][2];
+                                if (std::abs(r_bc) <= 1e-16 &&
+                                    std::abs(dRdP) <= 1e-16 &&
+                                    std::abs(dRdT) <= 1e-16) {
+                                    continue;
+                                }
+
+                                global_mat.AddResidual(bi, dofOffset, r_bc);
+                                global_mat.AddDiagJacobian(bi, dofOffset, 0, dRdP);
+                                global_mat.AddDiagJacobian(bi, dofOffset, 1, dRdT);
+                                ++appliedEq;
+
+                                if (params.diag_level != DiagLevel::Off && eqIdx >= 0 && eqIdx < eq_contribs.size()) {
+                                    eq_contribs[eqIdx].R_bc += r_bc;
                                     eq_contribs[eqIdx].D_bc += (dofOffset == 0) ? dRdP : dRdT;
                                 }
-                                else {
-                                    if (dofOffset == 0) eq_contribs[eqIdx].D_bc += dRdP;
-                                    else if (dofOffset == 1) eq_contribs[eqIdx].D_bc += dRdSw;
-                                    else if (dofOffset == 2) eq_contribs[eqIdx].D_bc += dRdT;
-                                }
                             }
-                        }
-                        if (params.diag_level != DiagLevel::Off) {
-                            std::cout << "    [BC-SUM] field=" << fieldLabel
-                                << " faces=" << bc_stats.matrixBCCount + bc_stats.fractureBCCount
-                                << " applied_eq=" << appliedEq
-                                << " (visited=" << bc_stats.visitedEqRows
-                                << ", nonzero=" << bc_stats.nonzeroEqRows
-                                << ", zero_row=" << bc_stats.zeroEqRows
-                                << ", invalid=" << bc_stats.invalidEqRows
-                                << ", infer_tag_fail=" << bc_stats.inferredTagFail << ")\n";
-                            for (const auto& kv : bc_stats.perTagType) {
-                                const auto& v = kv.second;
-                                std::cout << "      [BC-TAG] field=" << fieldLabel
-                                    << " key=" << kv.first
-                                    << " faces=" << v.faces
-                                    << " applied=" << v.applied
-                                    << " skipped=" << v.skipped
-                                    << " |sumR|=" << v.sumR
-                                    << " |sumDiag|=" << v.sumDiag << "\n";
+                            if (params.diag_level != DiagLevel::Off) {
+                                std::cout << "    [BC-SUM] field=" << fieldLabel
+                                    << " faces=" << bc_stats.matrixBCCount + bc_stats.fractureBCCount
+                                    << " applied_eq=" << appliedEq
+                                    << " (visited=" << bc_stats.visitedEqRows
+                                    << ", nonzero=" << bc_stats.nonzeroEqRows
+                                    << ", zero_row=" << bc_stats.zeroEqRows
+                                    << ", invalid=" << bc_stats.invalidEqRows
+                                    << ", infer_tag_fail=" << bc_stats.inferredTagFail << ")\n";
                             }
-                        }
-                    };
+                        };
 
-                assembleBoundaryField(modules.pressure_bc, pressureDof, pEqCfg.pressure_field, "P");
-                if constexpr (N == 3) {
-                    assembleBoundaryField(modules.saturation_bc, saturationDof, sEqCfg.saturation, "Sw");
+                    assembleBoundaryField(modules.pressure_bc, pressureDof, pEqCfg.pressure_field, "P");
+                    assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, "T");
                 }
-                assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, "T");
                 auto A = global_mat.GetFrozenMatrix(); // Issue#11: O(nnz) CSR value-update, no Triplet sort
                 auto b = global_mat.ExportEigenResidual();
 
