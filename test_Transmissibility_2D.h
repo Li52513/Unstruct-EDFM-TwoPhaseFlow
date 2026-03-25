@@ -50,8 +50,8 @@ namespace Benchmark2D {
 
         meshMgr.setDistanceMetric(DistanceMetric::CrossAwareGauss);
         meshMgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
-        meshMgr.BuildFracturetoFractureTopology();
         meshMgr.BuildGlobalSystemIndexing();
+        meshMgr.BuildFracturetoFractureTopology();
 
         meshMgr.exportMesh(exportPrefix + "_MatrixMesh");
         meshMgr.exportFractures(exportPrefix + "_FractureMesh");

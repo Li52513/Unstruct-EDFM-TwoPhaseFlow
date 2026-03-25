@@ -24,23 +24,24 @@
 #include "Test_FVM_Ops_AD.h"
 #include "Test_Day5_GlobalAssembly_Jacobian.h"
 #include "Test_Day6_TransientSolver.h"
-#include "Test_Day6_DebugLadder.h"
-#include "Test_ValidationSuite.h"
+#include "FullCaseTest.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
 #include "ADVar.hpp"
 #include "test_MartixAssemble.h"
 
+#include <array>
 #include <exception>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
 struct CaseEntry {
-    const char* name;
-    const char* desc;
+    std::string name;
+    std::string desc;
     std::function<int()> run;
 };
 
@@ -101,7 +102,7 @@ void PrintCases(const std::vector<CaseEntry>& cases) {
 } // namespace
 
 int main (int argc, char** argv) {
-    const std::vector<CaseEntry> cases = {
+    std::vector<CaseEntry> cases = {
         {"day1_arch_conn", "Day1 explicit gate: run R4(trans_2d) + R5(trans_3d)", []() { return RunDay1ArchitectureFreeze(); }},
         {"day1_arch_conn_repro", "Day1 reproducibility gate: trans_2d x2 + trans_3d x2", []() { return RunDay1ArchitectureFreezeRepro(); }},
         {"day2_fvm_ad", "Day2 FVM-AD operator acceptance tests (default)", []() { return RunDay2FvmAd(); }},
@@ -129,16 +130,20 @@ int main (int argc, char** argv) {
         {"day6_t01_f1", "Day6 T01 immediate split gate: F1 single-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F1(); return 0; }},
         {"day6_t01_f2", "Day6 T01 immediate split gate: F2 crossing-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F2(); return 0; }},
         {"day6_t1_2d_sp_nowell_analytical", "Day6 T1 baseline: 2D no-well single-phase diffusion with Fourier analytical validation", []() { Test_Day6::Run_Day6_T1_2D_SP_NoWell_Analytical(); return 0; }},
-        {"day6l1_2d_sp_co2_const_nowell_analytical", "Day6L1 (AD N=1): 2D pressure-only constant-baseline no-well analytical baseline (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical(); return 0; }},
-        {"day6l2_2d_sp_co2_const_nowell_grid", "Day6L2 (AD N=1): 2D pressure-only constant-baseline no-well grid convergence (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence(); return 0; }},
-        {"day6l3_2d_sp_co2_const_nowell_solver", "Day6L3 (AD N=1): 2D pressure-only constant-baseline no-well solver robustness (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness(); return 0; }},
-        {"day6l4_2d_sp_co2_varprop_nowell", "Day6L4 (AD N=1): 2D pressure-only CO2-EOS no-well nonlinear stress (forced non-orth + VTK)", []() { Test_Day6::Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear(); return 0; }},
-        {"day6ladder_2d_sp_co2_const_nowell_all", "Day6 ladder (AD N=1): run L1+L2+L3+L4 pressure-only debug chain (forced non-orth + VTK)", []() { Test_Day6::Run_Day6Ladder_2D_SP_CO2Const_NoWell_All(); return 0; }},
-        {"day6l1_2d_sp_co2_const_nowell_analytical_legacy", "Day6L1 legacy: custom SparseLU pressure-only analytical baseline", []() { Test_Day6::Run_Day6L1_2D_SP_CO2Const_NoWell_Analytical_Legacy(); return 0; }},
-        {"day6l2_2d_sp_co2_const_nowell_grid_legacy", "Day6L2 legacy: custom SparseLU pressure-only grid convergence", []() { Test_Day6::Run_Day6L2_2D_SP_CO2Const_NoWell_GridConvergence_Legacy(); return 0; }},
-        {"day6l3_2d_sp_co2_const_nowell_solver_legacy", "Day6L3 legacy: custom SparseLU pressure-only solver robustness", []() { Test_Day6::Run_Day6L3_2D_SP_CO2Const_NoWell_SolverRobustness_Legacy(); return 0; }},
-        {"day6l4_2d_sp_co2_varprop_nowell_legacy", "Day6L4 legacy: custom SparseLU pressure-only variable-property stress", []() { Test_Day6::Run_Day6L4_2D_SP_CO2VarProp_NoWell_Nonlinear_Legacy(); return 0; }},
-        {"day6ladder_2d_sp_co2_const_nowell_all_legacy", "Day6 ladder legacy: run L1+L2+L3+L4 legacy chain", []() { Test_Day6::Run_Day6Ladder_2D_SP_CO2Const_NoWell_All_Legacy(); return 0; }},
+        {"day6l1_2d_sp_co2_const_nowell_analytical", "Day6L1 (AD N=1): 2D pressure-only constant-baseline no-well analytical baseline (forced non-orth + VTK)", []() { FullCaseTest::RunN1L1ConstNoWellAnalytical(); return 0; }},
+        {"day6l2_2d_sp_co2_const_nowell_grid", "Day6L2 (AD N=1): 2D pressure-only constant-baseline no-well grid convergence (forced non-orth + VTK)", []() { FullCaseTest::RunN1L2ConstNoWellGrid(); return 0; }},
+        {"day6l3_2d_sp_co2_const_nowell_solver", "Day6L3 (AD N=1): 2D pressure-only constant-baseline no-well solver robustness (forced non-orth + VTK)", []() { FullCaseTest::RunN1L3ConstNoWellSolver(); return 0; }},
+        {"day6l4_2d_sp_co2_varprop_nowell", "Day6L4 (AD N=1): 2D pressure-only CO2-EOS no-well nonlinear stress (forced non-orth + VTK)", []() { FullCaseTest::RunN1L4VarPropNoWell(); return 0; }},
+        {"day6l4_2d_sp_co2_varprop_nowell_singlefrac", "Day6L4 (AD N=1): 2D pressure-only CO2-EOS no-well single-fracture nonlinear stress (forced non-orth + VTK)", []() { FullCaseTest::RunN1L4VarPropNoWellSingleFrac(); return 0; }},
+        {"day6ladder_2d_sp_co2_const_nowell_all", "Day6 ladder (AD N=1): run L1+L2+L3+L4 pressure-only debug chain (forced non-orth + VTK)", []() { FullCaseTest::RunN1LadderAll(); return 0; }},
+        {"day6l1_2d_sp_co2_const_nowell_analytical_legacy", "Day6L1 legacy: custom SparseLU pressure-only analytical baseline", []() { FullCaseTest::RunN1L1ConstNoWellAnalyticalLegacy(); return 0; }},
+        {"day6l2_2d_sp_co2_const_nowell_grid_legacy", "Day6L2 legacy: custom SparseLU pressure-only grid convergence", []() { FullCaseTest::RunN1L2ConstNoWellGridLegacy(); return 0; }},
+        {"day6l3_2d_sp_co2_const_nowell_solver_legacy", "Day6L3 legacy: custom SparseLU pressure-only solver robustness", []() { FullCaseTest::RunN1L3ConstNoWellSolverLegacy(); return 0; }},
+        {"day6l4_2d_sp_co2_varprop_nowell_legacy", "Day6L4 legacy: custom SparseLU pressure-only variable-property stress", []() { FullCaseTest::RunN1L4VarPropNoWellLegacy(); return 0; }},
+        {"day6ladder_2d_sp_co2_const_nowell_all_legacy", "Day6 ladder legacy: run L1+L2+L3+L4 legacy chain", []() { FullCaseTest::RunN1LadderAllLegacy(); return 0; }},
+        {"full_n1_template_const_nowell_nofrac", "FullCase N=1 template: 2D single-phase CO2 const-property no-well no-fracture", []() { FullCaseTest::RunN1TemplateConstNoWellNoFrac(); return 0; }},
+        {"full_n1_template_const_nowell_singlefrac", "FullCase N=1 template: 2D single-phase CO2 const-property no-well single-fracture", []() { FullCaseTest::RunN1TemplateConstNoWellSingleFrac(); return 0; }},
+        {"full_n1_template_const_nowell_crossfrac", "FullCase N=1 template: 2D single-phase CO2 const-property no-well cross-fracture", []() { FullCaseTest::RunN1TemplateConstNoWellCrossFrac(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
@@ -162,23 +167,103 @@ int main (int argc, char** argv) {
         {"trans_2d", "2D transmissibility benchmark (MM/FI/NNC/FF)", []() { Benchmark2D::run_TransmissibilityBenchmark_2D(); return 0; }},
         {"trans_3d", "3D transmissibility benchmark (MM/FI/NNC/FF)", []() { Benchmark3D::run_TransmissibilityBenchmark_3D(); return 0; }},
         {"trans_all", "2D + 3D transmissibility benchmarks", []() { Benchmark2D::run_TransmissibilityBenchmark_2D(); Benchmark3D::run_TransmissibilityBenchmark_3D(); return 0; }},
-        // ---- ValidationSuite ----
-        {"val_t1_const_nofrac",    "ValidationSuite T1: Const NoFrac (analytical)",      []() { ValidationSuite::Val_T1_Const_NoFrac();    return 0; }},
-        {"val_t1_const_singlefrac","ValidationSuite T1: Const SingleFrac (stability)",   []() { ValidationSuite::Val_T1_Const_SingleFrac(); return 0; }},
-        {"val_t1_const_crossfrac", "ValidationSuite T1: Const CrossFrac (stability)",    []() { ValidationSuite::Val_T1_Const_CrossFrac();  return 0; }},
-        {"val_t1_var_nofrac",      "ValidationSuite T1: Var NoFrac (EOS cross-check)",   []() { ValidationSuite::Val_T1_Var_NoFrac();      return 0; }},
-        {"val_t1_var_singlefrac",  "ValidationSuite T1: Var SingleFrac (EOS stability)", []() { ValidationSuite::Val_T1_Var_SingleFrac();  return 0; }},
-        {"val_t1_var_crossfrac",   "ValidationSuite T1: Var CrossFrac (EOS stability)",  []() { ValidationSuite::Val_T1_Var_CrossFrac();   return 0; }},
-        {"val_t1", "ValidationSuite T1: no-well single-phase pressure diffusion (6 variants)", []() { ValidationSuite::Run_All_T1(); return 0; }},
-        {"val_t2", "ValidationSuite T2: no-well single-phase thermal diffusion (6 variants)", []() { ValidationSuite::Run_All_T2(); return 0; }},
-        {"val_t3", "ValidationSuite T3: no-well two-phase Buckley-Leverett (6 variants)", []() { ValidationSuite::Run_All_T3(); return 0; }},
-        {"val_t4", "ValidationSuite T4: no-well two-phase + heat (6 variants)", []() { ValidationSuite::Run_All_T4(); return 0; }},
-        {"val_t5", "ValidationSuite T5: with-well single-phase Theis (6 variants)", []() { ValidationSuite::Run_All_T5(); return 0; }},
-        {"val_t6", "ValidationSuite T6: with-well single-phase thermal front (6 variants)", []() { ValidationSuite::Run_All_T6(); return 0; }},
-        {"val_t7", "ValidationSuite T7: with-well two-phase radial BL (6 variants)", []() { ValidationSuite::Run_All_T7(); return 0; }},
-        {"val_t8", "ValidationSuite T8: with-well two-phase radial BL + heat (6 variants)", []() { ValidationSuite::Run_All_T8(); return 0; }},
-        {"val_suite_all", "ValidationSuite: run all 48 validation scenarios T1..T8", []() { ValidationSuite::Run_ValidationSuite_All(); return 0; }},
+        // ---- ValidationSuite migrated into FullCaseTest dispatcher ----
+        {"val_t1_const_nofrac",    "ValidationSuite T1: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t1_const_nofrac"); return 0; }},
+        {"val_t1_const_singlefrac","ValidationSuite T1: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t1_const_singlefrac"); return 0; }},
+        {"val_t1_const_crossfrac", "ValidationSuite T1: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t1_const_crossfrac"); return 0; }},
+        {"val_t1_var_nofrac",      "ValidationSuite T1: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t1_var_nofrac"); return 0; }},
+        {"val_t1_var_singlefrac",  "ValidationSuite T1: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t1_var_singlefrac"); return 0; }},
+        {"val_t1_var_crossfrac",   "ValidationSuite T1: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t1_var_crossfrac"); return 0; }},
+        {"val_t2_const_nofrac",    "ValidationSuite T2: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t2_const_nofrac"); return 0; }},
+        {"val_t2_const_singlefrac","ValidationSuite T2: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t2_const_singlefrac"); return 0; }},
+        {"val_t2_const_crossfrac", "ValidationSuite T2: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t2_const_crossfrac"); return 0; }},
+        {"val_t2_var_nofrac",      "ValidationSuite T2: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t2_var_nofrac"); return 0; }},
+        {"val_t2_var_singlefrac",  "ValidationSuite T2: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t2_var_singlefrac"); return 0; }},
+        {"val_t2_var_crossfrac",   "ValidationSuite T2: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t2_var_crossfrac"); return 0; }},
+        {"val_t3_const_nofrac",    "ValidationSuite T3: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t3_const_nofrac"); return 0; }},
+        {"val_t3_const_singlefrac","ValidationSuite T3: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t3_const_singlefrac"); return 0; }},
+        {"val_t3_const_crossfrac", "ValidationSuite T3: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t3_const_crossfrac"); return 0; }},
+        {"val_t3_var_nofrac",      "ValidationSuite T3: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t3_var_nofrac"); return 0; }},
+        {"val_t3_var_singlefrac",  "ValidationSuite T3: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t3_var_singlefrac"); return 0; }},
+        {"val_t3_var_crossfrac",   "ValidationSuite T3: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t3_var_crossfrac"); return 0; }},
+        {"val_t4_const_nofrac",    "ValidationSuite T4: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t4_const_nofrac"); return 0; }},
+        {"val_t4_const_singlefrac","ValidationSuite T4: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t4_const_singlefrac"); return 0; }},
+        {"val_t4_const_crossfrac", "ValidationSuite T4: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t4_const_crossfrac"); return 0; }},
+        {"val_t4_var_nofrac",      "ValidationSuite T4: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t4_var_nofrac"); return 0; }},
+        {"val_t4_var_singlefrac",  "ValidationSuite T4: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t4_var_singlefrac"); return 0; }},
+        {"val_t4_var_crossfrac",   "ValidationSuite T4: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t4_var_crossfrac"); return 0; }},
+        {"val_t5_const_nofrac",    "ValidationSuite T5: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t5_const_nofrac"); return 0; }},
+        {"val_t5_const_singlefrac","ValidationSuite T5: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t5_const_singlefrac"); return 0; }},
+        {"val_t5_const_crossfrac", "ValidationSuite T5: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t5_const_crossfrac"); return 0; }},
+        {"val_t5_var_nofrac",      "ValidationSuite T5: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t5_var_nofrac"); return 0; }},
+        {"val_t5_var_singlefrac",  "ValidationSuite T5: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t5_var_singlefrac"); return 0; }},
+        {"val_t5_var_crossfrac",   "ValidationSuite T5: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t5_var_crossfrac"); return 0; }},
+        {"val_t6_const_nofrac",    "ValidationSuite T6: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t6_const_nofrac"); return 0; }},
+        {"val_t6_const_singlefrac","ValidationSuite T6: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t6_const_singlefrac"); return 0; }},
+        {"val_t6_const_crossfrac", "ValidationSuite T6: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t6_const_crossfrac"); return 0; }},
+        {"val_t6_var_nofrac",      "ValidationSuite T6: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t6_var_nofrac"); return 0; }},
+        {"val_t6_var_singlefrac",  "ValidationSuite T6: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t6_var_singlefrac"); return 0; }},
+        {"val_t6_var_crossfrac",   "ValidationSuite T6: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t6_var_crossfrac"); return 0; }},
+        {"val_t7_const_nofrac",    "ValidationSuite T7: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t7_const_nofrac"); return 0; }},
+        {"val_t7_const_singlefrac","ValidationSuite T7: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t7_const_singlefrac"); return 0; }},
+        {"val_t7_const_crossfrac", "ValidationSuite T7: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t7_const_crossfrac"); return 0; }},
+        {"val_t7_var_nofrac",      "ValidationSuite T7: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t7_var_nofrac"); return 0; }},
+        {"val_t7_var_singlefrac",  "ValidationSuite T7: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t7_var_singlefrac"); return 0; }},
+        {"val_t7_var_crossfrac",   "ValidationSuite T7: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t7_var_crossfrac"); return 0; }},
+        {"val_t8_const_nofrac",    "ValidationSuite T8: Const NoFrac (analytical)",      []() { FullCaseTest::RunValidationCaseByKey("val_t8_const_nofrac"); return 0; }},
+        {"val_t8_const_singlefrac","ValidationSuite T8: Const SingleFrac (stability)",   []() { FullCaseTest::RunValidationCaseByKey("val_t8_const_singlefrac"); return 0; }},
+        {"val_t8_const_crossfrac", "ValidationSuite T8: Const CrossFrac (stability)",    []() { FullCaseTest::RunValidationCaseByKey("val_t8_const_crossfrac"); return 0; }},
+        {"val_t8_var_nofrac",      "ValidationSuite T8: Var NoFrac (EOS cross-check)",   []() { FullCaseTest::RunValidationCaseByKey("val_t8_var_nofrac"); return 0; }},
+        {"val_t8_var_singlefrac",  "ValidationSuite T8: Var SingleFrac (EOS stability)", []() { FullCaseTest::RunValidationCaseByKey("val_t8_var_singlefrac"); return 0; }},
+        {"val_t8_var_crossfrac",   "ValidationSuite T8: Var CrossFrac (EOS stability)",  []() { FullCaseTest::RunValidationCaseByKey("val_t8_var_crossfrac"); return 0; }},
+        {"val_t1", "ValidationSuite T1: no-well single-phase pressure diffusion (6 variants)", []() { FullCaseTest::RunValidationGroup(1); return 0; }},
+        {"val_t2", "ValidationSuite T2: no-well single-phase thermal diffusion (6 variants)", []() { FullCaseTest::RunValidationGroup(2); return 0; }},
+        {"val_t3", "ValidationSuite T3: no-well two-phase Buckley-Leverett (6 variants)", []() { FullCaseTest::RunValidationGroup(3); return 0; }},
+        {"val_t4", "ValidationSuite T4: no-well two-phase + heat (6 variants)", []() { FullCaseTest::RunValidationGroup(4); return 0; }},
+        {"val_t5", "ValidationSuite T5: with-well single-phase Theis (6 variants)", []() { FullCaseTest::RunValidationGroup(5); return 0; }},
+        {"val_t6", "ValidationSuite T6: with-well single-phase thermal front (6 variants)", []() { FullCaseTest::RunValidationGroup(6); return 0; }},
+        {"val_t7", "ValidationSuite T7: with-well two-phase radial BL (6 variants)", []() { FullCaseTest::RunValidationGroup(7); return 0; }},
+        {"val_t8", "ValidationSuite T8: with-well two-phase radial BL + heat (6 variants)", []() { FullCaseTest::RunValidationGroup(8); return 0; }},
+        {"val_suite_all", "ValidationSuite: run all 48 validation scenarios T1..T8", []() { FullCaseTest::RunValidationAllMigrated(); return 0; }},
     };
+
+    const std::array<std::pair<const char*, FullCaseTest::TopologyVariant>, 3> topologyDefs = {{
+        {"nofrac", FullCaseTest::TopologyVariant::NoFrac},
+        {"singlefrac", FullCaseTest::TopologyVariant::SingleFrac},
+        {"crossfrac", FullCaseTest::TopologyVariant::CrossFrac}
+    }};
+
+    for (int scenarioId = 1; scenarioId <= 8; ++scenarioId) {
+        const std::string tLabel = "t" + std::to_string(scenarioId);
+        for (const auto& topologyDef : topologyDefs) {
+            const std::string case2D = "2d_" + tLabel + "_" + topologyDef.first;
+            const std::string desc2D = "FullCase 2D " + tLabel + " " + topologyDef.first + " (Const topology split)";
+            cases.push_back({ case2D, desc2D, [scenarioId, topology = topologyDef.second]() {
+                FullCaseTest::Run2DCase(scenarioId, topology);
+                return 0;
+            }});
+
+            const std::string case3D = "3d_" + tLabel + "_" + topologyDef.first;
+            const std::string desc3D = "FullCase 3D " + tLabel + " " + topologyDef.first + " (Day6 3D mirrored)";
+            cases.push_back({ case3D, desc3D, [scenarioId, topology = topologyDef.second]() {
+                FullCaseTest::Run3DCase(scenarioId, topology);
+                return 0;
+            }});
+        }
+    }
+
+    cases.push_back({"2d_all", "FullCase: run all 2D cases (T1..T8 x NoFrac/SingleFrac/CrossFrac)", []() {
+        FullCaseTest::Run2DAll();
+        return 0;
+    }});
+    cases.push_back({"3d_all", "FullCase: run all 3D cases (T1..T8 x NoFrac/SingleFrac/CrossFrac)", []() {
+        FullCaseTest::Run3DAll();
+        return 0;
+    }});
+    cases.push_back({"all", "FullCase: run all 2D+3D cases (48 total)", []() {
+        FullCaseTest::RunAll();
+        return 0;
+    }});
 
     bool showHelp = false;
     bool showList = false;

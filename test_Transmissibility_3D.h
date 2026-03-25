@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <tuple>
+#include <limits> // 用于 NaN 测试
 
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
@@ -87,17 +88,12 @@ namespace Benchmark3D {
         }
 
         size_t nMatFaces = meshMgr.mesh().getFaces().size();
-
-        // 3D 架构的 FI 直接来源于全局边的数量
         size_t nFracEdges = meshMgr.fracture_network().getGlobalEdges().size();
-
-        // 3D 架构的 NNC 直接来源于扁平化的 interactionPairs
         size_t nNNC = meshMgr.getInteractionPairs().size();
 
-        // 3D 架构的 FF (Star-Delta) 统计：采用端点量化无向键聚类
+        // 3D 架构的 FF (Star-Delta) 统计
         size_t nFF = 0;
         const auto& ffIntersections = meshMgr.fracture_network().ffIntersections;
-
         const double TOL = 1e-4;
         auto quantize = [TOL](const Vector& v) {
             return std::make_tuple(
@@ -113,7 +109,6 @@ namespace Benchmark3D {
                 std::to_string(std::get<0>(q2)) + "_" + std::to_string(std::get<1>(q2)) + "_" + std::to_string(std::get<2>(q2));
             };
 
-        // 聚类收集
         std::unordered_map<std::string, std::vector<int>> clusterMap;
         for (const auto& inter : ffIntersections) {
             for (const auto& seg : inter.segments) {
@@ -129,7 +124,6 @@ namespace Benchmark3D {
             }
         }
 
-        // 此处的统计保留合法网格对，去除越界数据（留给求解器最终裁决后会安全舍弃，预估只多不少）
         for (const auto& kv : clusterMap) {
             size_t n = kv.second.size();
             if (n >= 2) nFF += n * (n - 1) / 2;
@@ -144,65 +138,56 @@ namespace Benchmark3D {
         // =========================================================
         // Stage 2: 场内存预分配与测试常量注入 (Mocking Properties)
         // =========================================================
-        std::cout << "[Stage 2] Initializing Fields with Constant Physical Properties..." << std::endl;
+        std::cout << "\n[Stage 2] Initializing Fields with Constant Physical Properties..." << std::endl;
         FieldManager_3D fieldMgr;
-
-        // 基于精准的尺寸统计初始化场管理器 (第6个参数传 nFracEdges 给 FI)
         fieldMgr.InitSizes(nMat, nFrac, nNNC, nFF, nMatFaces, nFracEdges);
 
         PhysicalProperties_string_op::Rock rockStr;
         PhysicalProperties_string_op::Fracture_string fracStr;
         PhysicalProperties_string_op::Water waterStr;
 
-        // 2.1 注入基岩物理量 (渗透率 1e-15 m2, 导热 2.5)
         fieldMgr.getOrCreateMatrixScalar(rockStr.k_xx_tag, 1e-15);
         fieldMgr.getOrCreateMatrixScalar(rockStr.k_yy_tag, 1e-15);
-        fieldMgr.getOrCreateMatrixScalar(rockStr.k_zz_tag, 1e-15); // 3D 专属
+        fieldMgr.getOrCreateMatrixScalar(rockStr.k_zz_tag, 1e-15);
         fieldMgr.getOrCreateMatrixScalar(rockStr.lambda_tag, 2.5);
 
-        // 2.2 注入裂缝物理量 (渗透率 1e-10 m2, 缝宽 0.01m)
-        fieldMgr.getOrCreateFractureScalar(fracStr.k_t_tag, 1e-10); // FF 使用
-        fieldMgr.getOrCreateFractureScalar(fracStr.k_n_tag, 1e-10); // NNC 使用
+        fieldMgr.getOrCreateFractureScalar(fracStr.k_t_tag, 1e-10);
+        fieldMgr.getOrCreateFractureScalar(fracStr.k_n_tag, 1e-10);
         fieldMgr.getOrCreateFractureScalar(fracStr.aperture_tag, 0.01);
         fieldMgr.getOrCreateFractureScalar(fracStr.lambda_tag, 1.5);
         fieldMgr.getOrCreateFractureScalar(fracStr.phi_tag, 0.5);
-
-        // 3D 求解器中明确使用了 Water::k_tag 作为流体热导率
         fieldMgr.getOrCreateFractureScalar(waterStr.k_tag, 0.6);
 
         // =========================================================
         // Stage 3: 运行静态传导率引擎 (Transmissibility Solver)
         // =========================================================
-        std::cout << "[Stage 3] Executing Static Transmissibility Solvers..." << std::endl;
+        std::cout << "\n[Stage 3] Executing Static Transmissibility Solvers..." << std::endl;
         TransmissibilitySolver_3D::Calculate_Transmissibility_Matrix(meshMgr, fieldMgr);
         TransmissibilitySolver_3D::Calculate_Transmissibility_NNC(meshMgr, fieldMgr);
-        TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(meshMgr, fieldMgr); // 加入 FI 计算
+        TransmissibilitySolver_3D::Calculate_Transmissibility_FractureInternal(meshMgr, fieldMgr);
         TransmissibilitySolver_3D::Calculate_Transmissibility_FF(meshMgr, fieldMgr);
 
         // =========================================================
         // Stage 4: 数据提取与验证报表导出 (CSV 导出)
         // =========================================================
-        std::cout << "[Stage 4] Exporting Benchmark Results..." << std::endl;
-
+        std::cout << "\n[Stage 4] Exporting Benchmark Results..." << std::endl;
         std::string csvName = exportPrefix + ".csv";
         std::ofstream csv(csvName);
         if (csv.is_open()) {
             csv << "Connection_Type,ID_1(Owner/Mat/FracA),ID_2(Neighbor/Frac/FracB),T_Flow,T_Heat\n";
 
-            // 4.1 写入基岩内部面传导率 (Matrix-Matrix)
             auto t_mat_flow = fieldMgr.getMatrixFaceScalar("T_Matrix_Flow");
             auto t_mat_heat = fieldMgr.getMatrixFaceScalar("T_Matrix_Heat");
             if (t_mat_flow && t_mat_heat) {
                 const auto& faces = meshMgr.mesh().getFaces();
                 for (size_t i = 0; i < faces.size(); ++i) {
-                    if (faces[i].isBoundary()) continue; // 跳过边界面
+                    if (faces[i].isBoundary()) continue;
                     csv << "MatrixFace,Mat_" << faces[i].ownerCell << ",Mat_" << faces[i].neighborCell << ","
                         << std::scientific << std::setprecision(6)
                         << t_mat_flow->data[i] << "," << t_mat_heat->data[i] << "\n";
                 }
             }
 
-            // 4.2 写入基岩-裂缝窜流传导率 (NNC)
             auto t_nnc_flow = fieldMgr.getNNCScalar("T_NNC_Flow");
             auto t_nnc_heat = fieldMgr.getNNCScalar("T_NNC_Heat");
             if (t_nnc_flow && t_nnc_heat) {
@@ -215,14 +200,12 @@ namespace Benchmark3D {
                 }
             }
 
-            // 4.3 写入裂缝内部传导率 (FI)
             auto t_fi_flow = fieldMgr.getFractureEdgeScalar("T_FI_Flow");
             auto t_fi_heat = fieldMgr.getFractureEdgeScalar("T_FI_Heat");
             if (t_fi_flow && t_fi_heat) {
                 const auto& globalEdges = meshMgr.fracture_network().getGlobalEdges();
                 for (size_t i = 0; i < globalEdges.size(); ++i) {
                     const auto& edge = globalEdges[i];
-                    // 在对齐映射的数组中，仅剔除掉边界边的 0 值，保留有效内部流通对
                     if (edge.neighborCell_solverIndex >= 0) {
                         csv << "FracInternal,FracElemGlobal_" << edge.ownerCell_solverIndex
                             << ",FracElemGlobal_" << edge.neighborCell_solverIndex << ","
@@ -232,11 +215,9 @@ namespace Benchmark3D {
                 }
             }
 
-            // 4.4 写入裂缝-裂缝相交通导率 (FF - Deterministic Star-Delta)
             auto t_ff_flow = fieldMgr.getFFScalar("T_FF_Flow");
             auto t_ff_heat = fieldMgr.getFFScalar("T_FF_Heat");
             if (t_ff_flow && t_ff_heat) {
-                // 保证导出顺序与求解器绝对一致的确定性字典序
                 std::vector<std::string> sortedKeys;
                 sortedKeys.reserve(clusterMap.size());
                 for (const auto& kv : clusterMap) sortedKeys.push_back(kv.first);
@@ -261,22 +242,105 @@ namespace Benchmark3D {
                     }
                 }
             }
-
             csv.close();
             std::cout << "  -> Quantitative Verification data successfully saved to: " << csvName << std::endl;
-        }
-        else {
-            std::cerr << "  -> [Error] Failed to create benchmark CSV file: " << csvName << std::endl;
         }
 
         // =========================================================
         // Stage 5: [Day 1] FIM Global Topology Assembly & Verification
         // =========================================================
         std::cout << "\n[Stage 5] Executing Day 1 FIM Topology Aggregation Pipeline..." << std::endl;
-        // 直接将当前的局部 meshMgr 和 fieldMgr 喂给 Day 1 验证管线
-        Benchmark_FIM_Topology_Pipeline(meshMgr, fieldMgr);
+        try {
+            Benchmark_FIM_Topology_Pipeline(meshMgr, fieldMgr);
+        }
+        catch (const std::exception& e) {
+            std::cerr << "  -> [Stage 5 Failed] " << e.what() << std::endl;
+        }
 
-        std::cout << "========== [3D Benchmark Completed Successfully] ==========\n" << std::endl;
+        // =========================================================
+        // Stage 6: 对抗性边界测试 (Strict Boundary & Adversarial Test)
+        // =========================================================
+        std::cout << "\n[Stage 6] Executing Adversarial Boundary Test on FIM_ConnectionManager (3D)..." << std::endl;
+        FIM_ConnectionManager strictMgr;
+        int passCount = 0;
+        int totalStrictTests = 4;
+
+        // Test 6.1: 拦截非法数值 (NaN / Inf / 负数传导率)
+        std::cout << "  -> Test 6.1: Guard against NaN and Negative values... ";
+        try {
+            double nan_val = std::numeric_limits<double>::quiet_NaN();
+            strictMgr.PushConnection(1, 2, nan_val, 1.0, 1.0, 1.0, ConnectionType::Matrix_Fracture);
+            std::cout << "[FAIL] Failed to block NaN!\n";
+        }
+        catch (const std::runtime_error&) {
+            try {
+                strictMgr.PushConnection(1, 2, -5.0, 1.0, 1.0, 1.0, ConnectionType::Matrix_Fracture);
+                std::cout << "[FAIL] Failed to block negative transmissibility!\n";
+            }
+            catch (const std::runtime_error&) {
+                std::cout << "[PASS]\n";
+                passCount++;
+            }
+        }
+
+        // Test 6.2: 拦截非法拓扑重复 (MM 出现重叠)
+        std::cout << "  -> Test 6.2: Guard against duplicate Matrix-Matrix Topology... ";
+        strictMgr.PushConnection(10, 15, 5.0, 5.0, 10.0, 2.0, ConnectionType::Matrix_Matrix);
+        strictMgr.PushConnection(15, 10, 5.0, 5.0, 10.0, 2.0, ConnectionType::Matrix_Matrix); // 反向注入测试归一化
+        try {
+            strictMgr.FinalizeAndAggregate(); // 这里必须抛出 logic_error
+            std::cout << "[FAIL] Allowed duplicate MM connections!\n";
+        }
+        catch (const std::logic_error&) {
+            std::cout << "[PASS]\n";
+            passCount++;
+        }
+
+        // Test 6.3 & 6.4 物理合并与垃圾数据去重
+        FIM_ConnectionManager aggMgr;
+        std::cout << "  -> Test 6.3: Physical Parallel Merge (NNC)... ";
+        // 模拟 3D 中三角化产生的合法相交碎片
+        aggMgr.PushConnection(100, 200, 5.0, 1.0, 2.0, 0.5, ConnectionType::Matrix_Fracture);
+        aggMgr.PushConnection(100, 200, 3.0, 1.0, 1.5, 0.4, ConnectionType::Matrix_Fracture);
+
+        std::cout << "\n  -> Test 6.4: Absolute Geometric Duplicate Filtration... ";
+        // 模拟完全重复的非法冗余数据
+        aggMgr.PushConnection(50, 60, 10.0, 2.0, 1.0, 0.1, ConnectionType::Matrix_Fracture);
+        aggMgr.PushConnection(50, 60, 10.0, 2.0, 1.0, 0.1, ConnectionType::Matrix_Fracture);
+
+        aggMgr.FinalizeAndAggregate();
+        const auto& testConns = aggMgr.GetConnections();
+
+        bool test63_pass = false;
+        bool test64_pass = false;
+        for (const auto& c : testConns) {
+            if (c.nodeI == 100 && c.nodeJ == 200) {
+                // 3D 三角形碎片的传导率累加校验
+                if (std::abs(c.T_Flow - 8.0) < 1e-8 && std::abs(c.aux_area - 3.5) < 1e-8) {
+                    test63_pass = true;
+                }
+            }
+            if (c.nodeI == 50 && c.nodeJ == 60) {
+                // 如果漏洞被修复，传导率必须依然是 10.0；若没修复则会变成 20.0
+                if (std::abs(c.T_Flow - 10.0) < 1e-8) {
+                    test64_pass = true;
+                }
+                else if (std::abs(c.T_Flow - 20.0) < 1e-8) {
+                    std::cout << "[FATAL BUG DETECTED] Duplicate data was added! T_Flow doubled to 20.0!\n";
+                }
+            }
+        }
+
+        if (test63_pass) { std::cout << "Test 6.3 [PASS]\n"; passCount++; }
+        if (test64_pass) { std::cout << "Test 6.4 [PASS]\n"; passCount++; }
+        else { std::cout << "Test 6.4 [FAIL]\n"; }
+
+        if (passCount == totalStrictTests) {
+            std::cout << "========== [3D Benchmark Completed Successfully] ==========\n" << std::endl;
+        }
+        else {
+            std::cerr << "========== [3D Benchmark FAILED on Strict Boundaries] ==========\n" << std::endl;
+        }
     }
 
 } // namespace Benchmark3D

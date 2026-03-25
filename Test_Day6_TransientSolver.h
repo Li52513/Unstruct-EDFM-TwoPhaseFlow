@@ -7,6 +7,12 @@
 
 namespace Test_Day6 {
 
+    enum class CampaignTopologyAxis {
+        F0 = 0, // no fracture
+        F1 = 1, // single fracture
+        F2 = 2  // crossing fractures
+    };
+
     /** @brief 运行 2D 单相 注入/生产 瞬态测试 (>= 50步) */
     void Run_Day6_Transient_2D_SP_InjProd();
 
@@ -41,6 +47,12 @@ namespace Test_Day6 {
     void Run_Day6_Campaign_2D_T01_F0();
     void Run_Day6_Campaign_2D_T01_F1();
     void Run_Day6_Campaign_2D_T01_F2();
+
+    /** @brief Day6 campaign helper: run one 2D scenario (T01..T16) on one topology axis (F0/F1/F2). */
+    void Run_Day6_Campaign_2D_Single(int scenarioId, CampaignTopologyAxis topology);
+
+    /** @brief Day6 campaign helper: run one 3D scenario (T01..T16) on one topology axis (F0/F1/F2). */
+    void Run_Day6_Campaign_3D_Single(int scenarioId, CampaignTopologyAxis topology);
 
     /** @brief T1 baseline: 2D no-well single-phase pressure diffusion (constant fluid + constant rock) with Fourier analytical check */
     void Run_Day6_T1_2D_SP_NoWell_Analytical();

@@ -128,21 +128,32 @@ public:
         };
         std::unordered_map<ConnectionKey, std::vector<Sig>, ConnectionKeyHash> signatures;
 
-        // pair = (aux_area, aux_dist)
-
         for (const auto& raw : rawBuffer_) {
             ConnectionKey key{ raw.type, raw.nodeI, raw.nodeJ };
             auto it = aggMap.find(key);
 
+            // 如果是新连接，直接插入并跳过本次循环
             if (it == aggMap.end()) {
                 aggMap.insert({ key, raw });
                 signatures[key].push_back({ raw.aux_area, raw.aux_dist, raw.T_Flow, raw.T_Heat });
                 continue;
             }
 
-            const size_t tid = TypeToIdx(raw.type);
+            // ==========================================================
+            // 🛡️ 第一道防线：拓扑铁律审查 (优先级最高)
+            // ==========================================================
+            // 只要是 Matrix 或 FI 发生重复，不管数据长啥样，绝对是致命的网格拓扑错误！
+            if (raw.type == ConnectionType::Matrix_Matrix || raw.type == ConnectionType::Fracture_Internal) {
+                throw std::logic_error(
+                    "[FIM Topology Error] Duplicate Matrix/FI connection at (" +
+                    std::to_string(raw.nodeI) + "," + std::to_string(raw.nodeJ) + ")"
+                );
+            }
 
-            bool sameGeom = false;
+            // ==========================================================
+            // 🛡️ 第二道防线：几何与传导率绝对查重 (专门针对合法的 NNC 和 FF 重叠)
+            // ==========================================================
+            const size_t tid = TypeToIdx(raw.type);
             bool sameGeomAndTrans = false;
             auto& sigs = signatures[key];
 
@@ -150,7 +161,6 @@ public:
                 const bool g = NearlyEqual(s.area, raw.aux_area, 1e-6, 1e-10) &&
                     NearlyEqual(s.dist, raw.aux_dist, 1e-6, 1e-10);
                 if (g) {
-                    sameGeom = true;
                     const bool t = NearlyEqual(s.tf, raw.T_Flow, 1e-6, 1e-12) &&
                         NearlyEqual(s.th, raw.T_Heat, 1e-6, 1e-12);
                     if (t) {
@@ -162,39 +172,42 @@ public:
 
             if (sameGeomAndTrans) {
                 stats_.geometric_duplicate_by_type[tid]++;
-                continue;
-
+                continue; // 成功识别出“毒药数据”，直接跳过，防止物理叠加
             }
             else {
                 stats_.physical_parallel_by_type[tid]++;
                 sigs.push_back({ raw.aux_area, raw.aux_dist, raw.T_Flow, raw.T_Heat });
             }
-            if (raw.type == ConnectionType::Matrix_Fracture || raw.type == ConnectionType::Fracture_Fracture) {
-                it->second.T_Flow += raw.T_Flow;
-                it->second.T_Heat += raw.T_Heat;
-                double totalArea = it->second.aux_area + raw.aux_area;
-                if (totalArea > 1e-14) {
-                    it->second.aux_dist =
-                        (it->second.aux_dist * it->second.aux_area + raw.aux_dist * raw.aux_area) / totalArea;
-                }
-                it->second.aux_area = totalArea;
 
-                stats_.merged_count++;
-                stats_.merged_by_type[tid]++;
+            // ==========================================================
+            // 第三步：合法的物理等效叠加 (执行并联物理量计算)
+            // ==========================================================
+            it->second.T_Flow += raw.T_Flow;
+            it->second.T_Heat += raw.T_Heat;
+
+            double totalArea = it->second.aux_area + raw.aux_area;
+
+            // 修复隐患：采用算术平均防止极小面积下特征距离冻结失真
+            if (totalArea > 1e-14) {
+                it->second.aux_dist =
+                    (it->second.aux_dist * it->second.aux_area + raw.aux_dist * raw.aux_area) / totalArea;
             }
             else {
-                throw std::logic_error(
-                    "[FIM Topology Error] Duplicate Matrix/FI connection at (" +
-                    std::to_string(raw.nodeI) + "," + std::to_string(raw.nodeJ) + ")"
-                );
+                it->second.aux_dist = (it->second.aux_dist + raw.aux_dist) * 0.5;
             }
+            it->second.aux_area = totalArea;
+
+            stats_.merged_count++;
+            stats_.merged_by_type[tid]++;
         }
 
+        // 数据清洗完毕，开始组装全局输出
         globalConnections_.clear();
         globalConnections_.reserve(aggMap.size());
         for (const auto& kv : aggMap) globalConnections_.push_back(kv.second);
         rawBuffer_.clear();
 
+        // 维持严格的排序输出以保证雅可比装配一致性
         std::sort(globalConnections_.begin(), globalConnections_.end(),
             [](const Connection& a, const Connection& b) {
                 if (a.type != b.type) return static_cast<int>(a.type) < static_cast<int>(b.type);

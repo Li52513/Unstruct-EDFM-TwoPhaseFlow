@@ -39,11 +39,7 @@ namespace Test_Day6 {
 
 namespace {
 
-enum class TopologyAxis {
-    F0 = 0,
-    F1 = 1,
-    F2 = 2
-};
+using TopologyAxis = CampaignTopologyAxis;
 
 struct PhysicalScenarioDef {
     int id = 0;
@@ -945,6 +941,12 @@ void RunSingle2DOrThrow(int scenarioId, TopologyAxis topology) {
     const auto& scenario = GetScenarioOrThrow(scenarioId);
     const auto outcome = RunScenario2D(scenario, topology);
     ThrowIfOutcomeFailed(outcome, 2);
+}
+
+void RunSingle3DOrThrow(int scenarioId, TopologyAxis topology) {
+    const auto& scenario = GetScenarioOrThrow(scenarioId);
+    const auto outcome = RunScenario3D(scenario, topology);
+    ThrowIfOutcomeFailed(outcome, 3);
 }
 
 } // namespace
@@ -1881,6 +1883,14 @@ void Run_Day6_Campaign_2D_T01_F1() {
 
 void Run_Day6_Campaign_2D_T01_F2() {
     RunSingle2DOrThrow(1, TopologyAxis::F2);
+}
+
+void Run_Day6_Campaign_2D_Single(int scenarioId, CampaignTopologyAxis topology) {
+    RunSingle2DOrThrow(scenarioId, topology);
+}
+
+void Run_Day6_Campaign_3D_Single(int scenarioId, CampaignTopologyAxis topology) {
+    RunSingle3DOrThrow(scenarioId, topology);
 }
 
 } // namespace Test_Day6
