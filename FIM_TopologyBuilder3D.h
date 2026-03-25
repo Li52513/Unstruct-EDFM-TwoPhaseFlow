@@ -56,7 +56,13 @@ private:
             double dist = (faces[i].midpoint - cells[nodeI].center).Mag() +
                 (cells[nodeJ].center - faces[i].midpoint).Mag();
 
-            connMgr.PushConnection(nodeI, nodeJ, pFlow->data[i], pHeat->data[i], faces[i].vectorE.Mag(), std::max(dist, 1e-12), ConnectionType::Matrix_Matrix);
+            connMgr.PushConnection(
+                nodeI, nodeJ,
+                pFlow->data[i], pHeat->data[i],
+                faces[i].vectorE.Mag(), std::max(dist, 1e-12),
+                ConnectionType::Matrix_Matrix,
+                faces[i].vectorT
+            );
         }
     }
 
