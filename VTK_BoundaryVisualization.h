@@ -11,6 +11,16 @@ enum class VTKBCTransportKind {
     Saturation
 };
 
+enum class VTKBCPrimaryFluidModel {
+    Water,
+    CO2
+};
+
+enum class VTKBCWaterFamilyDerivePolicy {
+    LegacyWaterEvaluator,
+    FollowPrimaryFluid
+};
+
 struct VTKBCVariableBinding {
     std::string field_name;
     const BoundarySetting::BoundaryConditionManager* bc = nullptr;
@@ -19,6 +29,11 @@ struct VTKBCVariableBinding {
 
 struct VTKBoundaryVisualizationContext {
     std::vector<VTKBCVariableBinding> bindings;
+
+    // Keep legacy compatibility by default.
+    // In single-phase runs, *_w_* tags can represent the configured primary fluid.
+    VTKBCWaterFamilyDerivePolicy water_family_policy = VTKBCWaterFamilyDerivePolicy::LegacyWaterEvaluator;
+    VTKBCPrimaryFluidModel primary_fluid_model = VTKBCPrimaryFluidModel::Water;
 
     // Export controls / numerical guards
     bool export_bc_mask = true;
@@ -38,5 +53,9 @@ struct VTKBoundaryVisualizationContext {
             if (b.transport_kind == kind && b.bc) return &b;
         }
         return nullptr;
+    }
+
+    bool usePrimaryForWaterFamily() const {
+        return water_family_policy == VTKBCWaterFamilyDerivePolicy::FollowPrimaryFluid;
     }
 };

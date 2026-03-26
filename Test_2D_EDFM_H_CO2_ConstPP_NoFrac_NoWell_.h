@@ -2,7 +2,8 @@
 
 /**
  * @file  Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h
- * @brief Standalone test: 2D single-phase CO2, constant properties, no-fracture, no-well pressure diffusion.
+ * @brief Standalone analytical-validation test: 2D single-phase CO2, constant properties,
+ *        no-fracture, no-well pressure diffusion.
  */
 
 #include <string>

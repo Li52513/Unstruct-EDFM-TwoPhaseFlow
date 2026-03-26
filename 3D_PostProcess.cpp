@@ -316,6 +316,8 @@ namespace {
         const CapRelPerm::VGParams vg;
         const CapRelPerm::RelPermParams rp;
         const double eps = std::max(1.0e-20, ctx.coeff_floor);
+        const bool usePrimaryForWFamily = ctx.usePrimaryForWaterFamily();
+        const bool primaryIsCO2 = (ctx.primary_fluid_model == VTKBCPrimaryFluidModel::CO2);
 
         for (size_t i = 0; i < outVals.size(); ++i) {
             if (i >= boundaryMask.size() || boundaryMask[i] == 0) continue;
@@ -327,7 +329,10 @@ namespace {
 
             ADVar<1> Pw_ad(Pw); Pw_ad.grad(0) = 1.0;
             ADVar<1> T_ad(T);
-            const auto wProps = AD_Fluid::Evaluator::evaluateWater<1>(Pw_ad, T_ad);
+            // Keep legacy *_w_* output names for compatibility; physical source is policy-driven.
+            const auto wProps = (usePrimaryForWFamily && primaryIsCO2)
+                ? AD_Fluid::Evaluator::evaluateCO2<1>(Pw_ad, T_ad)
+                : AD_Fluid::Evaluator::evaluateWater<1>(Pw_ad, T_ad);
 
             ADVar<1> Sw_ad(Sw);
             ADVar<1> krw_ad, krg_ad;

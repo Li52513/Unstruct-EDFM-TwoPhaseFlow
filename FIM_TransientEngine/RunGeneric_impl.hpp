@@ -390,6 +390,11 @@ namespace FIM_Engine {
             const auto t_cfg_n1 = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
             const PhysicalProperties_string_op::Water w_cfg_n1;
             VTKBoundaryVisualizationContext vtk_bc_ctx;
+            vtk_bc_ctx.water_family_policy = VTKBCWaterFamilyDerivePolicy::FollowPrimaryFluid;
+            vtk_bc_ctx.primary_fluid_model =
+                (use_eos || modules.single_phase_fluid == SinglePhaseFluidModel::CO2)
+                ? VTKBCPrimaryFluidModel::CO2
+                : VTKBCPrimaryFluidModel::Water;
             if (modules.pressure_bc) {
                 vtk_bc_ctx.bindings.push_back(
                     VTKBCVariableBinding{ p_cfg_n1.pressure_field, modules.pressure_bc, VTKBCTransportKind::Pressure });
@@ -1064,6 +1069,15 @@ namespace FIM_Engine {
         const int saturationDof = (N == 3) ? 1 : -1;
         const int temperatureDof = (N == 3) ? 2 : 1;
         VTKBoundaryVisualizationContext vtk_bc_ctx;
+        vtk_bc_ctx.water_family_policy = VTKBCWaterFamilyDerivePolicy::FollowPrimaryFluid;
+        if constexpr (N == 3) {
+            vtk_bc_ctx.primary_fluid_model = VTKBCPrimaryFluidModel::Water;
+        }
+        else {
+            vtk_bc_ctx.primary_fluid_model = sp_use_co2
+                ? VTKBCPrimaryFluidModel::CO2
+                : VTKBCPrimaryFluidModel::Water;
+        }
         if (modules.pressure_bc) {
             vtk_bc_ctx.bindings.push_back(
                 VTKBCVariableBinding{ pEqCfg.pressure_field, modules.pressure_bc, VTKBCTransportKind::Pressure });
@@ -1141,8 +1155,6 @@ namespace FIM_Engine {
             }
         }
         well_mgr.PrintSummary();
-        // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
-
         const Vector gravityVec = params.gravity_vector;
 
         FIM_ConnectionManager connMgr;
@@ -1167,9 +1179,8 @@ namespace FIM_Engine {
             global_mat.AddOffDiagBlock(conn.nodeI, conn.nodeJ, Eigen::Matrix<double, N, N>::Zero());
             global_mat.AddOffDiagBlock(conn.nodeJ, conn.nodeI, Eigen::Matrix<double, N, N>::Zero());
         }
-        // 閳光偓閳光偓 Step 3: register well 閳?reservoir off-diagonal blocks in pattern 閳光偓閳光偓
         well_mgr.RegisterPatternConnections(global_mat);
-        // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
+        
         global_mat.FreezePattern();
 
         const auto str_rock = PhysicalProperties_string_op::Rock();
@@ -1470,7 +1481,6 @@ namespace FIM_Engine {
                         ADVar<N> Sw_old_const = ClampSwForConstitutive<N>(Sw_old, vg_cfg, sw_constitutive_eps);
                         ADVar<N> Sg = ADVar<N>(1.0) - Sw;
                         ADVar<N> Sg_old = ADVar<N>(1.0) - Sw_old;
-                        // [DAY6-08] 鐟佸倻绱?Pc=0閿涘苯鐔€鐠愩劋绻氶幐?vG
                         ADVar<N> Pc     = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_const,     vg_cfg);
                         ADVar<N> Pc_old = (bi >= nMat) ? ADVar<N>(0.0) : CapRelPerm::pc_vG<N>(Sw_old_const, vg_cfg);
                         ADVar<N> Pg = P + Pc;

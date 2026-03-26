@@ -357,6 +357,8 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
 
     const auto pEqCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
     VTKBoundaryVisualizationContext bcVizCtx;
+    bcVizCtx.water_family_policy = VTKBCWaterFamilyDerivePolicy::FollowPrimaryFluid;
+    bcVizCtx.primary_fluid_model = VTKBCPrimaryFluidModel::CO2;
     bcVizCtx.bindings.push_back(
         VTKBCVariableBinding{ pEqCfg.pressure_field, &bcP, VTKBCTransportKind::Pressure });
 
