@@ -53,6 +53,7 @@ namespace FIM_Engine {
     };
 
     struct TransientSolverParams {
+        std::string output_root_dir = "Test/Transient/Day6";
         int max_steps = 50;
         double dt_init = 1.0;
         double dt_min = 1e-4;

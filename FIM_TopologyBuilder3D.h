@@ -9,6 +9,7 @@
 #include "FIM_ConnectionManager.h"
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
+#include "SolverContrlStrName_op.h"
 
 class FIM_TopologyBuilder3D {
 public:
@@ -37,13 +38,20 @@ public:
 
 private:
     static void _loadMatrix(FIM_ConnectionManager& connMgr, const MeshManager_3D& meshMgr, const FieldManager_3D& fieldMgr) {
-        auto pFlow = fieldMgr.getMatrixFaceScalar("T_Matrix_Flow");
-        auto pHeat = fieldMgr.getMatrixFaceScalar("T_Matrix_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& faces = meshMgr.mesh().getFaces();
         const auto& cells = meshMgr.mesh().getCells();
         const auto& cellId2Idx = meshMgr.mesh().getCellId2Index();
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getMatrixFaceScalar(tTags.matrix_flow);
+        auto pHeat = fieldMgr.getMatrixFaceScalar(tTags.matrix_heat);
+        if (!pFlow || !pHeat) {
+            for (const auto& face : faces) {
+                if (!face.isBoundary()) {
+                    throw std::runtime_error("[Build 3D] Missing matrix transmissibility fields.");
+                }
+            }
+            return;
+        }
 
         if (pFlow->data.size() != faces.size() || pHeat->data.size() != faces.size()) {
             throw std::runtime_error("[Build 3D] Matrix face field size mismatch with mesh faces.");
@@ -75,11 +83,18 @@ private:
     }
 
     static void _loadFI(FIM_ConnectionManager& connMgr, const MeshManager_3D& meshMgr, const FieldManager_3D& fieldMgr) {
-        auto pFlow = fieldMgr.getFractureEdgeScalar("T_FI_Flow");
-        auto pHeat = fieldMgr.getFractureEdgeScalar("T_FI_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& edges = meshMgr.fracture_network().getGlobalEdges();
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getFractureEdgeScalar(tTags.fi_flow);
+        auto pHeat = fieldMgr.getFractureEdgeScalar(tTags.fi_heat);
+        if (!pFlow || !pHeat) {
+            for (const auto& edge : edges) {
+                if (edge.ownerCell_solverIndex >= 0 && edge.neighborCell_solverIndex >= 0) {
+                    throw std::runtime_error("[Build 3D] Missing FI transmissibility fields.");
+                }
+            }
+            return;
+        }
         if (edges.size() != pFlow->data.size() || edges.size() != pHeat->data.size())
             throw std::runtime_error("[Build 3D] FI Transmissibility array size mismatches Geometry Edges.");
 
@@ -92,11 +107,16 @@ private:
     }
 
     static void _loadNNC(FIM_ConnectionManager& connMgr, const MeshManager_3D& meshMgr, const FieldManager_3D& fieldMgr) {
-        auto pFlow = fieldMgr.getNNCScalar("T_NNC_Flow");
-        auto pHeat = fieldMgr.getNNCScalar("T_NNC_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& pairs = meshMgr.getInteractionPairs();
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getNNCScalar(tTags.nnc_flow);
+        auto pHeat = fieldMgr.getNNCScalar(tTags.nnc_heat);
+        if (!pFlow || !pHeat) {
+            if (!pairs.empty()) {
+                throw std::runtime_error("[Build 3D] Missing NNC transmissibility fields.");
+            }
+            return;
+        }
         if (pairs.size() != pFlow->data.size() || pairs.size() != pHeat->data.size()) {
             throw std::runtime_error("[Build 3D] NNC Geometry pairs size mismatches Transmissibility array lengths!");
         }
@@ -109,11 +129,16 @@ private:
     }
 
     static void _loadFF(FIM_ConnectionManager& connMgr, const MeshManager_3D& meshMgr, const FieldManager_3D& fieldMgr) {
-        auto pFlow = fieldMgr.getFFScalar("T_FF_Flow");
-        auto pHeat = fieldMgr.getFFScalar("T_FF_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& ffPairs = fieldMgr.ff_topology;
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getFFScalar(tTags.ff_flow);
+        auto pHeat = fieldMgr.getFFScalar(tTags.ff_heat);
+        if (!pFlow || !pHeat) {
+            if (!ffPairs.empty()) {
+                throw std::runtime_error("[Build 3D] Missing FF transmissibility fields.");
+            }
+            return;
+        }
         if (ffPairs.size() != pFlow->data.size() || ffPairs.size() != pHeat->data.size()) {
             throw std::runtime_error("[Build 3D] FF Topology pairs mismatch with array lengths!");
         }

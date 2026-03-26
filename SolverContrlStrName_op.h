@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -151,6 +152,44 @@ namespace PhysicalProperties_string_op
         std::string mass_acc_w = "mass_acc_w";     // 水相质量累积项 (Mass^n)
         std::string mass_acc_g = "mass_acc_g";     // 气相质量累积项
         std::string energy_acc = "energy_acc";     // 能量累积项
+    };
+
+
+    struct TransmissibilityFields
+    {
+        std::string matrix_flow = "T_Matrix_Flow";
+        std::string matrix_heat = "T_Matrix_Heat";
+        std::string fi_flow = "T_FI_Flow";
+        std::string fi_heat = "T_FI_Heat";
+        std::string nnc_flow = "T_NNC_Flow";
+        std::string nnc_heat = "T_NNC_Heat";
+        std::string ff_flow = "T_FF_Flow";
+        std::string ff_heat = "T_FF_Heat";
+    };
+
+    struct WellAuxiliaryFields
+    {
+        std::string mob_density_w = "mob_density_w";
+        std::string mob_density_g = "mob_density_g";
+    };
+
+    struct LegacyFieldAliasPolicy
+    {
+        std::array<std::string, 4> pressure_aliases = { "Pressure", "p_w", "P", "p" };
+        std::array<std::string, 3> temperature_aliases = { "Temperature", "T", "T_res" };
+        std::array<std::string, 4> saturation_aliases = { "Saturation", "Sw", "s_w", "sw" };
+    };
+
+    struct TransientInternalFieldNames
+    {
+        std::string pressure_viz = "P";
+        std::string saturation_viz = "S_w";
+        std::string nonorth_probe_p_tmp = "n23_probe_p_tmp";
+        std::string nonorth_probe_t_tmp = "n23_probe_t_tmp";
+        std::string nonorth_probe_sw_tmp = "n23_probe_sw_tmp";
+        std::string nonorth_main_p_tmp = "n23_main_p_tmp";
+        std::string nonorth_main_t_tmp = "n23_main_t_tmp";
+        std::string nonorth_main_sw_tmp = "n23_main_sw_tmp";
     };
 
     // =========================================================

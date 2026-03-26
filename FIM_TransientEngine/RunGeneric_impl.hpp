@@ -81,6 +81,339 @@ namespace FIM_Engine {
             }
         }
 
+        struct FluxCellPropsCache {
+            double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
+            double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
+            double Pc = 0.0, dPc_dSw = 0.0, krw = 1.0, krg = 0.0;
+        };
+
+        template <typename MeshMgrType>
+        inline bool ComputeMatrixGreenGaussGradient(
+            const MeshMgrType& mgr,
+            int nMat,
+            const std::vector<double>& values,
+            const BoundarySetting::BoundaryConditionManager* bc_mgr,
+            const std::string& tmp_name,
+            std::vector<Vector>& grad_out)
+        {
+            try {
+                volScalarField tmp(tmp_name, static_cast<size_t>(nMat), 0.0);
+                for (int ci = 0; ci < nMat; ++ci) tmp[ci] = values[ci];
+                FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_mgr);
+                auto grad_field = grad_solver.compute(tmp, FVM_Grad::Method::GreenGauss);
+                if (!grad_field || grad_field->data.size() < static_cast<size_t>(nMat)) return false;
+                for (int ci = 0; ci < nMat; ++ci) grad_out[ci] = (*grad_field)[ci];
+                return true;
+            }
+            catch (...) {
+                return false;
+            }
+        }
+
+        template <typename MeshMgrType>
+        inline void AccumulateFallbackMatrixFaceGradients(
+            const MeshMgrType& mgr,
+            int nMat,
+            const std::vector<double>& vols,
+            const std::vector<double>& pressure_values,
+            const std::vector<double>& temperature_values,
+            const std::vector<double>* saturation_values,
+            std::vector<Vector>& grad_p,
+            std::vector<Vector>& grad_t,
+            std::vector<Vector>& grad_sw)
+        {
+            const auto& mesh_faces = mgr.mesh().getFaces();
+            for (const auto& mf : mesh_faces) {
+                if (mf.isBoundary()) continue;
+                const int nI = mf.ownerCell_index;
+                const int nJ = mf.neighborCell_index;
+                if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
+
+                const double vol_I = std::max(vols[nI], 1.0e-30);
+                const double vol_J = std::max(vols[nJ], 1.0e-30);
+                const double Pf = 0.5 * (pressure_values[nI] + pressure_values[nJ]);
+                const double Tf = 0.5 * (temperature_values[nI] + temperature_values[nJ]);
+                const double Ax = mf.normal.m_x * mf.length;
+                const double Ay = mf.normal.m_y * mf.length;
+                const double Az = mf.normal.m_z * mf.length;
+
+                grad_p[nI].m_x += Pf * Ax / vol_I;
+                grad_p[nI].m_y += Pf * Ay / vol_I;
+                grad_p[nI].m_z += Pf * Az / vol_I;
+                grad_p[nJ].m_x -= Pf * Ax / vol_J;
+                grad_p[nJ].m_y -= Pf * Ay / vol_J;
+                grad_p[nJ].m_z -= Pf * Az / vol_J;
+
+                grad_t[nI].m_x += Tf * Ax / vol_I;
+                grad_t[nI].m_y += Tf * Ay / vol_I;
+                grad_t[nI].m_z += Tf * Az / vol_I;
+                grad_t[nJ].m_x -= Tf * Ax / vol_J;
+                grad_t[nJ].m_y -= Tf * Ay / vol_J;
+                grad_t[nJ].m_z -= Tf * Az / vol_J;
+
+                if (saturation_values) {
+                    const double Swf = 0.5 * ((*saturation_values)[nI] + (*saturation_values)[nJ]);
+                    grad_sw[nI].m_x += Swf * Ax / vol_I;
+                    grad_sw[nI].m_y += Swf * Ay / vol_I;
+                    grad_sw[nI].m_z += Swf * Az / vol_I;
+                    grad_sw[nJ].m_x -= Swf * Ax / vol_J;
+                    grad_sw[nJ].m_y -= Swf * Ay / vol_J;
+                    grad_sw[nJ].m_z -= Swf * Az / vol_J;
+                }
+            }
+        }
+
+        template <int N, typename MeshMgrType>
+        inline void PrepareNonOrthogonalGradients(
+            const MeshMgrType& mgr,
+            const FIM_StateMap<N>& state,
+            int nMat,
+            const std::vector<double>& vols,
+            const BoundarySetting::BoundaryConditionManager* pressure_bc,
+            const BoundarySetting::BoundaryConditionManager* temperature_bc,
+            const BoundarySetting::BoundaryConditionManager* saturation_bc,
+            const std::string& pressure_tmp_name,
+            const std::string& temperature_tmp_name,
+            const std::string& saturation_tmp_name,
+            std::vector<Vector>& grad_p,
+            std::vector<Vector>& grad_t,
+            std::vector<Vector>& grad_sw)
+        {
+            std::fill(grad_p.begin(), grad_p.end(), Vector(0.0, 0.0, 0.0));
+            std::fill(grad_t.begin(), grad_t.end(), Vector(0.0, 0.0, 0.0));
+            std::fill(grad_sw.begin(), grad_sw.end(), Vector(0.0, 0.0, 0.0));
+
+            const bool ok_p = ComputeMatrixGreenGaussGradient(
+                mgr, nMat, state.P, pressure_bc, pressure_tmp_name, grad_p);
+            const bool ok_t = ComputeMatrixGreenGaussGradient(
+                mgr, nMat, state.T, temperature_bc, temperature_tmp_name, grad_t);
+            bool ok_sw = true;
+            if constexpr (N == 3) {
+                ok_sw = ComputeMatrixGreenGaussGradient(
+                    mgr, nMat, state.Sw, saturation_bc, saturation_tmp_name, grad_sw);
+            }
+
+            if (!(ok_p && ok_t && ok_sw)) {
+                const std::vector<double>* sw_values = nullptr;
+                if constexpr (N == 3) sw_values = &state.Sw;
+                AccumulateFallbackMatrixFaceGradients(
+                    mgr, nMat, vols, state.P, state.T, sw_values, grad_p, grad_t, grad_sw);
+            }
+        }
+
+        inline std::string BuildFailureSnapshotPath(
+            const std::string& output_root,
+            const std::string& caseName,
+            int step,
+            int iter_used)
+        {
+            return BuildCaseOutputFile(
+                output_root,
+                caseName,
+                "fail_snapshot_step" + std::to_string(step) + "_iter" + std::to_string(iter_used) + ".json");
+        }
+
+        inline std::string BuildVtkTagPath(
+            const std::string& output_root,
+            const std::string& caseName,
+            const std::string& tag)
+        {
+            return BuildCaseOutputFile(output_root, caseName, tag + ".vtk");
+        }
+
+        template <typename MeshMgrType, typename FieldMgrType, typename SyncFn>
+        inline std::string ExportVtkSnapshotFile(
+            MeshMgrType& mgr,
+            FieldMgrType& fm,
+            const VTKBoundaryVisualizationContext* vtk_bc_ctx_ptr,
+            const std::string& output_root,
+            const std::string& caseName,
+            const std::string& tag,
+            double time_s,
+            bool check_sw,
+            SyncFn&& sync_fn)
+        {
+            sync_fn();
+            const std::string fname = BuildVtkTagPath(output_root, caseName, tag);
+            if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, time_s);
+            }
+            else {
+                PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, time_s);
+            }
+            VerifyVtkExport(fname, check_sw);
+            return fname;
+        }
+
+        template <int N, typename EvalWPhaseFn, typename EvalGPhaseFn>
+        inline std::vector<ADVar<N>> EvaluateConnectionFlux(
+            const Connection& conn,
+            int i,
+            int j,
+            int nMat,
+            const FIM_StateMap<N>& state,
+            const std::vector<Vector>& blockCenters,
+            const Vector& gravityVec,
+            bool wrt_i,
+            const std::vector<FluxCellPropsCache>* passive_cache,
+            EvalWPhaseFn&& eval_w_phase,
+            EvalGPhaseFn&& eval_g_phase,
+            const CapRelPerm::VGParams& vg_cfg,
+            const CapRelPerm::RelPermParams& rp_cfg,
+            double sw_constitutive_eps)
+        {
+            std::vector<ADVar<N>> F(N);
+            ADVar<N> P_i(state.P[i]), T_i(state.T[i]), P_j(state.P[j]), T_j(state.T[j]);
+            const Vector& x_i = blockCenters[i];
+            const Vector& x_j = blockCenters[j];
+            const bool use_passive_cache =
+                (passive_cache != nullptr) &&
+                (static_cast<int>(passive_cache->size()) > std::max(i, j));
+
+            if constexpr (N == 2) {
+                if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
+                else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
+
+                AD_Fluid::ADFluidProperties<N> pW_i, pW_j;
+                if (use_passive_cache) {
+                    if (wrt_i) {
+                        pW_i = eval_w_phase(P_i, T_i);
+                        pW_j.rho = ADVar<N>((*passive_cache)[j].rho_w);
+                        pW_j.mu = ADVar<N>((*passive_cache)[j].mu_w);
+                        pW_j.h = ADVar<N>((*passive_cache)[j].h_w);
+                    }
+                    else {
+                        pW_i.rho = ADVar<N>((*passive_cache)[i].rho_w);
+                        pW_i.mu = ADVar<N>((*passive_cache)[i].mu_w);
+                        pW_i.h = ADVar<N>((*passive_cache)[i].h_w);
+                        pW_j = eval_w_phase(P_j, T_j);
+                    }
+                }
+                else {
+                    pW_i = eval_w_phase(P_i, T_i);
+                    pW_j = eval_w_phase(P_j, T_j);
+                }
+
+                ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
+                ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
+                ADVar<N> mob_i = pW_i.rho / pW_i.mu;
+                ADVar<N> mob_j = pW_j.rho / pW_j.mu;
+                ADVar<N> up_mob = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi, mob_i, mob_j);
+                F[0] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mob, dPhi);
+                ADVar<N> up_h = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi, pW_i.h, pW_j.h);
+                F[1] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], up_h);
+                return F;
+            }
+
+            ADVar<N> Sw_i(state.Sw[i]), Sw_j(state.Sw[j]);
+            if (wrt_i) { P_i.grad(0) = 1.0; Sw_i.grad(1) = 1.0; T_i.grad(2) = 1.0; }
+            else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
+
+            ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
+            ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
+            if (use_passive_cache) {
+                if (wrt_i) {
+                    if (i >= nMat) {
+                        Sw_i_const = Sw_i;
+                        Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
+                    }
+                    else {
+                        Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg_cfg, sw_constitutive_eps);
+                        Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg_cfg);
+                        CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg_cfg, rp_cfg, krw_i, krg_i);
+                    }
+                    Pc_j = ADVar<N>((*passive_cache)[j].Pc);
+                    krw_j = ADVar<N>((*passive_cache)[j].krw);
+                    krg_j = ADVar<N>((*passive_cache)[j].krg);
+                }
+                else {
+                    Pc_i = ADVar<N>((*passive_cache)[i].Pc);
+                    krw_i = ADVar<N>((*passive_cache)[i].krw);
+                    krg_i = ADVar<N>((*passive_cache)[i].krg);
+                    if (j >= nMat) {
+                        Sw_j_const = Sw_j;
+                        Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
+                    }
+                    else {
+                        Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg_cfg, sw_constitutive_eps);
+                        Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg_cfg);
+                        CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg_cfg, rp_cfg, krw_j, krg_j);
+                    }
+                }
+            }
+            else {
+                if (i >= nMat) {
+                    Sw_i_const = Sw_i;
+                    Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
+                }
+                else {
+                    Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg_cfg, sw_constitutive_eps);
+                    Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg_cfg);
+                    CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg_cfg, rp_cfg, krw_i, krg_i);
+                }
+                if (j >= nMat) {
+                    Sw_j_const = Sw_j;
+                    Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
+                }
+                else {
+                    Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg_cfg, sw_constitutive_eps);
+                    Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg_cfg);
+                    CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg_cfg, rp_cfg, krw_j, krg_j);
+                }
+            }
+
+            ADVar<N> Pg_i = P_i + Pc_i;
+            ADVar<N> Pg_j = P_j + Pc_j;
+            AD_Fluid::ADFluidProperties<N> pW_i, pW_j, pG_i, pG_j;
+            if (use_passive_cache) {
+                if (wrt_i) {
+                    pW_i = eval_w_phase(P_i, T_i);
+                    pG_i = eval_g_phase(Pg_i, T_i);
+                    pW_j.rho = ADVar<N>((*passive_cache)[j].rho_w);
+                    pW_j.mu = ADVar<N>((*passive_cache)[j].mu_w);
+                    pW_j.h = ADVar<N>((*passive_cache)[j].h_w);
+                    pG_j.rho = ADVar<N>((*passive_cache)[j].rho_g);
+                    pG_j.mu = ADVar<N>((*passive_cache)[j].mu_g);
+                    pG_j.h = ADVar<N>((*passive_cache)[j].h_g);
+                }
+                else {
+                    pW_i.rho = ADVar<N>((*passive_cache)[i].rho_w);
+                    pW_i.mu = ADVar<N>((*passive_cache)[i].mu_w);
+                    pW_i.h = ADVar<N>((*passive_cache)[i].h_w);
+                    pG_i.rho = ADVar<N>((*passive_cache)[i].rho_g);
+                    pG_i.mu = ADVar<N>((*passive_cache)[i].mu_g);
+                    pG_i.h = ADVar<N>((*passive_cache)[i].h_g);
+                    pW_j = eval_w_phase(P_j, T_j);
+                    pG_j = eval_g_phase(Pg_j, T_j);
+                }
+            }
+            else {
+                pW_i = eval_w_phase(P_i, T_i);
+                pW_j = eval_w_phase(P_j, T_j);
+                pG_i = eval_g_phase(Pg_i, T_i);
+                pG_j = eval_g_phase(Pg_j, T_j);
+            }
+
+            ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
+            ADVar<N> rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
+            ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
+            ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
+
+            ADVar<N> mobW_i = krw_i * pW_i.rho / pW_i.mu;
+            ADVar<N> mobW_j = krw_j * pW_j.rho / pW_j.mu;
+            ADVar<N> mobG_i = krg_i * pG_i.rho / pG_i.mu;
+            ADVar<N> mobG_j = krg_j * pG_j.rho / pG_j.mu;
+            ADVar<N> up_mobW = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_w, mobW_i, mobW_j);
+            ADVar<N> up_mobG = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_g, mobG_i, mobG_j);
+
+            F[0] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mobW, dPhi_w);
+            F[1] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mobG, dPhi_g);
+            ADVar<N> up_h_w = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_w, pW_i.h, pW_j.h);
+            ADVar<N> up_h_g = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_g, pG_i.h, pG_j.h);
+            F[2] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], F[1], up_h_w, up_h_g);
+            return F;
+        }
+
         template<typename MeshMgrType>
         inline int NormalizeCompletionSolverIndex(
             const WellScheduleStep& step,
@@ -251,7 +584,7 @@ namespace FIM_Engine {
             }
 
             std::cout << "\n========== Starting Transient Scenario (N=1 AD): " << caseName << " ==========\n";
-            MakePath(caseName);
+            MakePath(params.output_root_dir, caseName);
             InjectStaticProperties(fm);
             if (modules.property_initializer) {
                 modules.property_initializer(mgr, fm);
@@ -405,6 +738,7 @@ namespace FIM_Engine {
             }
             const VTKBoundaryVisualizationContext* vtk_bc_ctx_ptr =
                 vtk_bc_ctx.bindings.empty() ? nullptr : &vtk_bc_ctx;
+            const PhysicalProperties_string_op::TransientInternalFieldNames internalNamesN1;
             auto sync_pressure_only_state_to_fields = [&]() {
                 if (use_eos) {
                     SyncStateToFieldManager(state, fm, mgr, modules.single_phase_fluid, modules.fluid_property_eval, modules.vg_params, modules.rp_params);
@@ -418,7 +752,7 @@ namespace FIM_Engine {
                 auto f_hw = fm.getOrCreateMatrixScalar(w_cfg_n1.h_tag, 0.0);
                 auto f_lamw_mob = fm.getOrCreateMatrixScalar(w_cfg_n1.lambda_w_tag, 1.0 / std::max(baseline_mu, 1.0e-20));
                 auto f_kw = fm.getOrCreateMatrixScalar(w_cfg_n1.k_tag, 0.6);
-                auto f_P_viz = fm.getOrCreateMatrixScalar("P", 0.0);
+                auto f_P_viz = fm.getOrCreateMatrixScalar(internalNamesN1.pressure_viz, 0.0);
 
                 auto frac_pw = fm.getOrCreateFractureScalar(p_cfg_n1.pressure_field, 0.0);
                 auto frac_T = fm.getOrCreateFractureScalar(t_cfg_n1.temperatue_field, t_eval);
@@ -427,7 +761,7 @@ namespace FIM_Engine {
                 auto frac_hw = fm.getOrCreateFractureScalar(w_cfg_n1.h_tag, 0.0);
                 auto frac_lamw_mob = fm.getOrCreateFractureScalar(w_cfg_n1.lambda_w_tag, 1.0 / std::max(baseline_mu, 1.0e-20));
                 auto frac_kw = fm.getOrCreateFractureScalar(w_cfg_n1.k_tag, 0.6);
-                auto frac_P_viz = fm.getOrCreateFractureScalar("P", 0.0);
+                auto frac_P_viz = fm.getOrCreateFractureScalar(internalNamesN1.pressure_viz, 0.0);
 
                 const double lam_w_mob = 1.0 / std::max(baseline_mu, 1.0e-20);
                 for (int i = 0; i < totalBlocks; ++i) {
@@ -488,15 +822,9 @@ namespace FIM_Engine {
 
             auto export_vtk_snapshot = [&](const std::string& tag, int step_idx) {
                 if (modules.disable_default_vtk_output) return;
-                sync_pressure_only_state_to_fields();
-                const std::string fname = "Test/Transient/Day6/" + caseName + "/" + tag + ".vtk";
-                if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
-                }
-                else {
-                    PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
-                }
-                VerifyVtkExport(fname, false);
+                const std::string fname = ExportVtkSnapshotFile(
+                    mgr, fm, vtk_bc_ctx_ptr, params.output_root_dir, caseName, tag, t, false,
+                    [&]() { sync_pressure_only_state_to_fields(); });
                 if (tag == "final") final_vtk_exported = true;
                 ++vtk_export_count;
                 EmitSnapshot(modules, tag, step_idx, t, fname);
@@ -1010,7 +1338,7 @@ namespace FIM_Engine {
         }
 
         std::cout << "\n========== Starting Transient Scenario: " << caseName << " ==========\n";
-        MakePath(caseName);
+        MakePath(params.output_root_dir, caseName);
         InjectStaticProperties(fm);
         if (modules.property_initializer) {
             modules.property_initializer(mgr, fm);
@@ -1021,6 +1349,7 @@ namespace FIM_Engine {
         const FluidPropertyEvalContext fluid_ctx =
             BuildFluidPropertyEvalContext(sp_model, modules.fluid_property_eval);
         const FluidPropertyEvalConfig& fluid_cfg = fluid_ctx.config;
+        const PhysicalProperties_string_op::TransientInternalFieldNames internalNames;
         const bool sp_use_co2 = (N == 2) && fluid_cfg.single_phase_is_co2;
         auto eval_w_phase = [&](const ADVar<N>& P, const ADVar<N>& T) {
             if constexpr (N == 3) {
@@ -1498,12 +1827,7 @@ namespace FIM_Engine {
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleAccumulation(bi, acc_eqs, probe_mat);
                 }
 
-                struct ProbeCellPropsCache {
-                    double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
-                    double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
-                    double Pc = 0.0, dPc_dSw = 0.0, krw = 1.0, krg = 0.0;
-                };
-                std::vector<ProbeCellPropsCache> cprop(totalBlocks);
+                std::vector<detail::FluxCellPropsCache> cprop(totalBlocks);
                 for (int ci = 0; ci < totalBlocks; ++ci) {
                     const double p_ci = eval_state.P[ci], t_ci = eval_state.T[ci];
                     {
@@ -1547,147 +1871,24 @@ namespace FIM_Engine {
                 std::vector<Vector> nonorth_grad_T_cell(nMat, Vector(0.0, 0.0, 0.0));
                 std::vector<Vector> nonorth_grad_Sw(nMat, Vector(0.0, 0.0, 0.0));
                 if (params.enable_non_orthogonal_correction && nMat > 0) {
-                    std::fill(nonorth_grad_P.begin(), nonorth_grad_P.end(), Vector(0.0, 0.0, 0.0));
-                    std::fill(nonorth_grad_T_cell.begin(), nonorth_grad_T_cell.end(), Vector(0.0, 0.0, 0.0));
-                    std::fill(nonorth_grad_Sw.begin(), nonorth_grad_Sw.end(), Vector(0.0, 0.0, 0.0));
-
-                    auto compute_matrix_gg_grad = [&](const std::vector<double>& values,
-                        const BoundarySetting::BoundaryConditionManager* bc_mgr,
-                        const char* tmp_name,
-                        std::vector<Vector>& grad_out) -> bool {
-                            try {
-                                volScalarField tmp(tmp_name, static_cast<size_t>(nMat), 0.0);
-                                for (int ci = 0; ci < nMat; ++ci) tmp[ci] = values[ci];
-                                FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_mgr);
-                                auto grad_field = grad_solver.compute(tmp, FVM_Grad::Method::GreenGauss);
-                                if (!grad_field || grad_field->data.size() < static_cast<size_t>(nMat)) return false;
-                                for (int ci = 0; ci < nMat; ++ci) grad_out[ci] = (*grad_field)[ci];
-                                return true;
-                            }
-                            catch (...) {
-                                return false;
-                            }
-                        };
-
-                    const bool ok_p = compute_matrix_gg_grad(
-                        eval_state.P, modules.pressure_bc, "n23_probe_p_tmp", nonorth_grad_P);
-                    const bool ok_t = compute_matrix_gg_grad(
-                        eval_state.T, modules.temperature_bc, "n23_probe_t_tmp", nonorth_grad_T_cell);
-                    bool ok_sw = true;
-                    if constexpr (N == 3) {
-                        ok_sw = compute_matrix_gg_grad(
-                            eval_state.Sw, modules.saturation_bc, "n23_probe_sw_tmp", nonorth_grad_Sw);
-                    }
-
-                    if (!(ok_p && ok_t && ok_sw)) {
-                        const auto& mesh_faces = mgr.mesh().getFaces();
-                        for (const auto& mf : mesh_faces) {
-                            if (mf.isBoundary()) continue;
-                            const int nI = mf.ownerCell_index;
-                            const int nJ = mf.neighborCell_index;
-                            if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
-
-                            const double vol_I = std::max(vols[nI], 1.0e-30);
-                            const double vol_J = std::max(vols[nJ], 1.0e-30);
-                            const double Pf = 0.5 * (eval_state.P[nI] + eval_state.P[nJ]);
-                            const double Tf = 0.5 * (eval_state.T[nI] + eval_state.T[nJ]);
-                            const double Ax = mf.normal.m_x * mf.length;
-                            const double Ay = mf.normal.m_y * mf.length;
-                            const double Az = mf.normal.m_z * mf.length;
-
-                            nonorth_grad_P[nI].m_x += Pf * Ax / vol_I;
-                            nonorth_grad_P[nI].m_y += Pf * Ay / vol_I;
-                            nonorth_grad_P[nI].m_z += Pf * Az / vol_I;
-                            nonorth_grad_P[nJ].m_x -= Pf * Ax / vol_J;
-                            nonorth_grad_P[nJ].m_y -= Pf * Ay / vol_J;
-                            nonorth_grad_P[nJ].m_z -= Pf * Az / vol_J;
-
-                            nonorth_grad_T_cell[nI].m_x += Tf * Ax / vol_I;
-                            nonorth_grad_T_cell[nI].m_y += Tf * Ay / vol_I;
-                            nonorth_grad_T_cell[nI].m_z += Tf * Az / vol_I;
-                            nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
-                            nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
-                            nonorth_grad_T_cell[nJ].m_z -= Tf * Az / vol_J;
-
-                            if constexpr (N == 3) {
-                                const double Swf = 0.5 * (eval_state.Sw[nI] + eval_state.Sw[nJ]);
-                                nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
-                                nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
-                                nonorth_grad_Sw[nI].m_z += Swf * Az / vol_I;
-                                nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
-                                nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
-                                nonorth_grad_Sw[nJ].m_z -= Swf * Az / vol_J;
-                            }
-                        }
-                    }
+                    detail::PrepareNonOrthogonalGradients(
+                        mgr, eval_state, nMat, vols,
+                        modules.pressure_bc, modules.temperature_bc, modules.saturation_bc,
+                        internalNames.nonorth_probe_p_tmp,
+                        internalNames.nonorth_probe_t_tmp,
+                        internalNames.nonorth_probe_sw_tmp,
+                        nonorth_grad_P, nonorth_grad_T_cell, nonorth_grad_Sw);
                 }
 
                 // 2) flux
                 for (const auto& conn : connMgr.GetConnections()) {
                     int i = conn.nodeI, j = conn.nodeJ;
-                    auto evalFlux = [&](bool wrt_i) -> std::vector<ADVar<N>> {
-                        std::vector<ADVar<N>> F(N);
-                        ADVar<N> P_i(eval_state.P[i]), T_i(eval_state.T[i]), P_j(eval_state.P[j]), T_j(eval_state.T[j]);
-                        const Vector& x_i = blockCenters[i]; const Vector& x_j = blockCenters[j];
-
-                        if constexpr (N == 2) {
-                            if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
-                            else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            auto pW_i = eval_w_phase(P_i, T_i);
-                            auto pW_j = eval_w_phase(P_j, T_j);
-                            ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
-                            ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
-                            ADVar<N> mob_i = pW_i.rho / pW_i.mu, mob_j = pW_j.rho / pW_j.mu;
-                            ADVar<N> up_mob = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi, mob_i, mob_j);
-                            F[0] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mob, dPhi);
-                            ADVar<N> up_h = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi, pW_i.h, pW_j.h);
-                            F[1] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], up_h);
-                        }
-                        else {
-                            ADVar<N> Sw_i(eval_state.Sw[i]), Sw_j(eval_state.Sw[j]);
-                            if (wrt_i) { P_i.grad(0) = 1.0; Sw_i.grad(1) = 1.0; T_i.grad(2) = 1.0; }
-                            else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
-                            const auto& vg = vg_cfg;
-                            const auto& rp = rp_cfg;
-                            // [DAY6-08] 閹稿鐓欓崚銈嗘焽閿涙俺顥囩紓婵堝殠閹湵r+Pc=0閿涘苯鐔€鐠愨暡G
-                            ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
-                            if (i >= nMat) {
-                                Sw_i_const = Sw_i;
-                                Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
-                            } else {
-                                Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
-                                Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg);
-                                CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
-                            }
-                            ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
-                            if (j >= nMat) {
-                                Sw_j_const = Sw_j;
-                                Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
-                            } else {
-                                Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
-                                Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
-                                CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
-                            }
-                            ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
-                            auto pW_i = eval_w_phase(P_i, T_i), pW_j = eval_w_phase(P_j, T_j);
-                            auto pG_i = eval_g_phase(Pg_i, T_i), pG_j = eval_g_phase(Pg_j, T_j);
-                            ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
-                            ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
-                            ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
-                            ADVar<N> mobW_i = krw_i * pW_i.rho / pW_i.mu, mobW_j = krw_j * pW_j.rho / pW_j.mu;
-                            ADVar<N> mobG_i = krg_i * pG_i.rho / pG_i.mu, mobG_j = krg_j * pG_j.rho / pG_j.mu;
-                            ADVar<N> up_mobW = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_w, mobW_i, mobW_j);
-                            ADVar<N> up_mobG = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_g, mobG_i, mobG_j);
-                            F[0] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mobW, dPhi_w);
-                            F[1] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mobG, dPhi_g);
-                            ADVar<N> up_h_w = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_w, pW_i.h, pW_j.h);
-                            ADVar<N> up_h_g = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_g, pG_i.h, pG_j.h);
-                            F[2] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], F[1], up_h_w, up_h_g);
-                        }
-                        return F;
-                        };
-                    auto f_wrt_i = evalFlux(true);
-                    auto f_wrt_j = evalFlux(false);
+                    auto f_wrt_i = detail::EvaluateConnectionFlux(
+                        conn, i, j, nMat, eval_state, blockCenters, gravityVec, true, nullptr,
+                        eval_w_phase, eval_g_phase, vg_cfg, rp_cfg, sw_constitutive_eps);
+                    auto f_wrt_j = detail::EvaluateConnectionFlux(
+                        conn, i, j, nMat, eval_state, blockCenters, gravityVec, false, nullptr,
+                        eval_w_phase, eval_g_phase, vg_cfg, rp_cfg, sw_constitutive_eps);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, probe_mat);
 
                     if (params.enable_non_orthogonal_correction &&
@@ -1964,12 +2165,7 @@ namespace FIM_Engine {
                 std::map<ConnectionType, ConnAuditStat> audit_stats;
 
                 // [DAY6-09] 閸楁洝鍑禒锝囧⒖閹呯处鐎涙﹫绱版０鍕吀缁犳鎮嘽ell閺嶅洭鍣洪悧鈺傗偓褝绱濋柆鍨帳passive娓氀冨晳娴ｆOS鐠嬪啰鏁?
-                struct CellPropsCache {
-                    double rho_w = 0.0, mu_w = 1e-3, h_w = 0.0;
-                    double rho_g = 0.0, mu_g = 1e-5, h_g = 0.0;
-                    double Pc = 0.0, dPc_dSw = 0.0, krw = 1.0, krg = 0.0;
-                };
-                std::vector<CellPropsCache> cprop(totalBlocks);
+                std::vector<detail::FluxCellPropsCache> cprop(totalBlocks);
                 for (int ci = 0; ci < totalBlocks; ++ci) {
                     const double p_ci = state.P[ci], t_ci = state.T[ci];
                     {
@@ -2017,79 +2213,13 @@ namespace FIM_Engine {
                 std::vector<Vector> nonorth_grad_T_cell(nMat, Vector(0.0, 0.0, 0.0));
                 std::vector<Vector> nonorth_grad_Sw(nMat, Vector(0.0, 0.0, 0.0));
                 if (params.enable_non_orthogonal_correction && nMat > 0) {
-                    std::fill(nonorth_grad_P.begin(), nonorth_grad_P.end(), Vector(0.0, 0.0, 0.0));
-                    std::fill(nonorth_grad_T_cell.begin(), nonorth_grad_T_cell.end(), Vector(0.0, 0.0, 0.0));
-                    std::fill(nonorth_grad_Sw.begin(), nonorth_grad_Sw.end(), Vector(0.0, 0.0, 0.0));
-
-                    auto compute_matrix_gg_grad = [&](const std::vector<double>& values,
-                        const BoundarySetting::BoundaryConditionManager* bc_mgr,
-                        const char* tmp_name,
-                        std::vector<Vector>& grad_out) -> bool {
-                            try {
-                                volScalarField tmp(tmp_name, static_cast<size_t>(nMat), 0.0);
-                                for (int ci = 0; ci < nMat; ++ci) tmp[ci] = values[ci];
-                                FVM_Grad grad_solver(mgr.mesh(), nullptr, nullptr, bc_mgr);
-                                auto grad_field = grad_solver.compute(tmp, FVM_Grad::Method::GreenGauss);
-                                if (!grad_field || grad_field->data.size() < static_cast<size_t>(nMat)) return false;
-                                for (int ci = 0; ci < nMat; ++ci) grad_out[ci] = (*grad_field)[ci];
-                                return true;
-                            }
-                            catch (...) {
-                                return false;
-                            }
-                        };
-
-                    const bool ok_p = compute_matrix_gg_grad(
-                        state.P, modules.pressure_bc, "n23_main_p_tmp", nonorth_grad_P);
-                    const bool ok_t = compute_matrix_gg_grad(
-                        state.T, modules.temperature_bc, "n23_main_t_tmp", nonorth_grad_T_cell);
-                    bool ok_sw = true;
-                    if constexpr (N == 3) {
-                        ok_sw = compute_matrix_gg_grad(
-                            state.Sw, modules.saturation_bc, "n23_main_sw_tmp", nonorth_grad_Sw);
-                    }
-
-                    if (!(ok_p && ok_t && ok_sw)) {
-                        const auto& mesh_faces = mgr.mesh().getFaces();
-                        for (const auto& mf : mesh_faces) {
-                            if (mf.isBoundary()) continue;
-                            const int nI = mf.ownerCell_index;
-                            const int nJ = mf.neighborCell_index;
-                            if (nI < 0 || nJ < 0 || nI >= nMat || nJ >= nMat) continue;
-
-                            const double vol_I = std::max(vols[nI], 1.0e-30);
-                            const double vol_J = std::max(vols[nJ], 1.0e-30);
-                            const double Pf = 0.5 * (state.P[nI] + state.P[nJ]);
-                            const double Tf = 0.5 * (state.T[nI] + state.T[nJ]);
-                            const double Ax = mf.normal.m_x * mf.length;
-                            const double Ay = mf.normal.m_y * mf.length;
-                            const double Az = mf.normal.m_z * mf.length;
-
-                            nonorth_grad_P[nI].m_x += Pf * Ax / vol_I;
-                            nonorth_grad_P[nI].m_y += Pf * Ay / vol_I;
-                            nonorth_grad_P[nI].m_z += Pf * Az / vol_I;
-                            nonorth_grad_P[nJ].m_x -= Pf * Ax / vol_J;
-                            nonorth_grad_P[nJ].m_y -= Pf * Ay / vol_J;
-                            nonorth_grad_P[nJ].m_z -= Pf * Az / vol_J;
-
-                            nonorth_grad_T_cell[nI].m_x += Tf * Ax / vol_I;
-                            nonorth_grad_T_cell[nI].m_y += Tf * Ay / vol_I;
-                            nonorth_grad_T_cell[nI].m_z += Tf * Az / vol_I;
-                            nonorth_grad_T_cell[nJ].m_x -= Tf * Ax / vol_J;
-                            nonorth_grad_T_cell[nJ].m_y -= Tf * Ay / vol_J;
-                            nonorth_grad_T_cell[nJ].m_z -= Tf * Az / vol_J;
-
-                            if constexpr (N == 3) {
-                                const double Swf = 0.5 * (state.Sw[nI] + state.Sw[nJ]);
-                                nonorth_grad_Sw[nI].m_x += Swf * Ax / vol_I;
-                                nonorth_grad_Sw[nI].m_y += Swf * Ay / vol_I;
-                                nonorth_grad_Sw[nI].m_z += Swf * Az / vol_I;
-                                nonorth_grad_Sw[nJ].m_x -= Swf * Ax / vol_J;
-                                nonorth_grad_Sw[nJ].m_y -= Swf * Ay / vol_J;
-                                nonorth_grad_Sw[nJ].m_z -= Swf * Az / vol_J;
-                            }
-                        }
-                    }
+                    detail::PrepareNonOrthogonalGradients(
+                        mgr, state, nMat, vols,
+                        modules.pressure_bc, modules.temperature_bc, modules.saturation_bc,
+                        internalNames.nonorth_main_p_tmp,
+                        internalNames.nonorth_main_t_tmp,
+                        internalNames.nonorth_main_sw_tmp,
+                        nonorth_grad_P, nonorth_grad_T_cell, nonorth_grad_Sw);
                 }
                 for (const auto& conn : connMgr.GetConnections()) {
                     audit_stats[conn.type].conn_count++;
@@ -2097,104 +2227,12 @@ namespace FIM_Engine {
                     audit_stats[conn.type].sum_abs_theat += std::abs(conn.T_Heat);
 
                     int i = conn.nodeI, j = conn.nodeJ;
-                    auto evalFlux = [&](bool wrt_i) -> std::vector<ADVar<N>> {
-                        std::vector<ADVar<N>> F(N);
-                        ADVar<N> P_i(state.P[i]), T_i(state.T[i]), P_j(state.P[j]), T_j(state.T[j]);
-                        const Vector& x_i = blockCenters[i]; const Vector& x_j = blockCenters[j];
-
-                        if constexpr (N == 2) {
-                            if (wrt_i) { P_i.grad(0) = 1.0; T_i.grad(1) = 1.0; }
-                            else { P_j.grad(0) = 1.0; T_j.grad(1) = 1.0; }
-                            // [DAY6-09] active娓氀冪暚閺佺OS閿涘assive娓氀傜矤缂傛挸鐡ㄩ弸鍕偓鐘茬埗闁插粐DVar閿涘牊顫惔锕€鍙忛梿璁圭礆
-                            AD_Fluid::ADFluidProperties<N> pW_i, pW_j;
-                            if (wrt_i) {
-                                pW_i = eval_w_phase(P_i, T_i);
-                                pW_j.rho = ADVar<N>(cprop[j].rho_w); pW_j.mu = ADVar<N>(cprop[j].mu_w); pW_j.h = ADVar<N>(cprop[j].h_w);
-                            } else {
-                                pW_i.rho = ADVar<N>(cprop[i].rho_w); pW_i.mu = ADVar<N>(cprop[i].mu_w); pW_i.h = ADVar<N>(cprop[i].h_w);
-                                pW_j = eval_w_phase(P_j, T_j);
-                            }
-                            ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho);
-                            ADVar<N> dPhi = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
-                            ADVar<N> mob_i = pW_i.rho / pW_i.mu, mob_j = pW_j.rho / pW_j.mu;
-                            ADVar<N> up_mob = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi, mob_i, mob_j);
-                            F[0] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mob, dPhi);
-                            ADVar<N> up_h = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi, pW_i.h, pW_j.h);
-                            F[1] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], up_h);
-                        }
-                        else {
-                            ADVar<N> Sw_i(state.Sw[i]), Sw_j(state.Sw[j]);
-                            if (wrt_i) { P_i.grad(0) = 1.0; Sw_i.grad(1) = 1.0; T_i.grad(2) = 1.0; }
-                            else { P_j.grad(0) = 1.0; Sw_j.grad(1) = 1.0; T_j.grad(2) = 1.0; }
-                            const auto& vg = vg_cfg;
-                            const auto& rp = rp_cfg;
-                            // [DAY6-09] active娓氀嶇窗鐎瑰本鏆D鐠侊紕鐣籯r/Pc/EOS閿涙埠assive娓氀嶇窗娴犲海绱︾€涙ɑ鐎柅鐘茬埗闁插粐DVar
-                            ADVar<N> Sw_i_const, Pc_i, krw_i, krg_i;
-                            ADVar<N> Sw_j_const, Pc_j, krw_j, krg_j;
-                            if (wrt_i) {
-                                // i 閺?active閿涙艾鐣弫?AD 鐠侊紕鐣?
-                                if (i >= nMat) {
-                                    Sw_i_const = Sw_i;
-                                    Pc_i = ADVar<N>(0.0); krw_i = Sw_i_const; krg_i = ADVar<N>(1.0) - Sw_i_const;
-                                } else {
-                                    Sw_i_const = ClampSwForConstitutive<N>(Sw_i, vg, sw_constitutive_eps);
-                                    Pc_i = CapRelPerm::pc_vG<N>(Sw_i_const, vg);
-                                    CapRelPerm::kr_Mualem_vG<N>(Sw_i_const, vg, rp, krw_i, krg_i);
-                                }
-                                // j 閺?passive閿涙矮绮犵紓鎾崇摠鐠囪褰囩敮鎼佸櫤
-                                Pc_j  = ADVar<N>(cprop[j].Pc);
-                                krw_j = ADVar<N>(cprop[j].krw);
-                                krg_j = ADVar<N>(cprop[j].krg);
-                            } else {
-                                // i 閺?passive閿涙矮绮犵紓鎾崇摠鐠囪褰囩敮鎼佸櫤
-                                Pc_i  = ADVar<N>(cprop[i].Pc);
-                                krw_i = ADVar<N>(cprop[i].krw);
-                                krg_i = ADVar<N>(cprop[i].krg);
-                                // j 閺?active閿涙艾鐣弫?AD 鐠侊紕鐣?
-                                if (j >= nMat) {
-                                    Sw_j_const = Sw_j;
-                                    Pc_j = ADVar<N>(0.0); krw_j = Sw_j_const; krg_j = ADVar<N>(1.0) - Sw_j_const;
-                                } else {
-                                    Sw_j_const = ClampSwForConstitutive<N>(Sw_j, vg, sw_constitutive_eps);
-                                    Pc_j = CapRelPerm::pc_vG<N>(Sw_j_const, vg);
-                                    CapRelPerm::kr_Mualem_vG<N>(Sw_j_const, vg, rp, krw_j, krg_j);
-                                }
-                            }
-                            ADVar<N> Pg_i = P_i + Pc_i, Pg_j = P_j + Pc_j;
-
-                            // [DAY6-09] active娓氀冪暚閺佺OS閿涘assive娓氀傜矤缂傛挸鐡ㄩ弸鍕偓鐘茬埗闁插粐DVar閿涘牊顫惔锕€鍙忛梿璁圭礆
-                            AD_Fluid::ADFluidProperties<N> pW_i, pW_j, pG_i, pG_j;
-                            if (wrt_i) {
-                                pW_i = eval_w_phase(P_i, T_i);
-                                pG_i = eval_g_phase(Pg_i, T_i);
-                                pW_j.rho = ADVar<N>(cprop[j].rho_w); pW_j.mu = ADVar<N>(cprop[j].mu_w); pW_j.h = ADVar<N>(cprop[j].h_w);
-                                pG_j.rho = ADVar<N>(cprop[j].rho_g); pG_j.mu = ADVar<N>(cprop[j].mu_g); pG_j.h = ADVar<N>(cprop[j].h_g);
-                            } else {
-                                pW_i.rho = ADVar<N>(cprop[i].rho_w); pW_i.mu = ADVar<N>(cprop[i].mu_w); pW_i.h = ADVar<N>(cprop[i].h_w);
-                                pG_i.rho = ADVar<N>(cprop[i].rho_g); pG_i.mu = ADVar<N>(cprop[i].mu_g); pG_i.h = ADVar<N>(cprop[i].h_g);
-                                pW_j = eval_w_phase(P_j, T_j);
-                                pG_j = eval_g_phase(Pg_j, T_j);
-                            }
-
-                            ADVar<N> rho_avg_w = ADVar<N>(0.5) * (pW_i.rho + pW_j.rho), rho_avg_g = ADVar<N>(0.5) * (pG_i.rho + pG_j.rho);
-                            ADVar<N> dPhi_w = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, rho_avg_w, x_i, x_j, gravityVec);
-                            ADVar<N> dPhi_g = FVM_Ops::Compute_Potential_Diff<N, ADVar<N>, Vector>(P_i, P_j, Pc_i, Pc_j, rho_avg_g, x_i, x_j, gravityVec);
-
-                            ADVar<N> mobW_i = krw_i * pW_i.rho / pW_i.mu, mobW_j = krw_j * pW_j.rho / pW_j.mu;
-                            ADVar<N> mobG_i = krg_i * pG_i.rho / pG_i.mu, mobG_j = krg_j * pG_j.rho / pG_j.mu;
-                            ADVar<N> up_mobW = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_w, mobW_i, mobW_j);
-                            ADVar<N> up_mobG = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_g, mobG_i, mobG_j);
-
-                            F[0] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mobW, dPhi_w);
-                            F[1] = FVM_Ops::Compute_Mass_Flux<N, ADVar<N>>(conn.T_Flow, up_mobG, dPhi_g);
-                            ADVar<N> up_h_w = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_w, pW_i.h, pW_j.h);
-                            ADVar<N> up_h_g = FVM_Ops::Op_Upwind_AD<N, ADVar<N>>(dPhi_g, pG_i.h, pG_j.h);
-                            F[2] = FVM_Ops::Compute_Heat_Flux<N, ADVar<N>>(conn.T_Heat, T_i, T_j, F[0], F[1], up_h_w, up_h_g);
-                        }
-                        return F;
-                        };
-                    auto f_wrt_i = evalFlux(true);
-                    auto f_wrt_j = evalFlux(false);
+                    auto f_wrt_i = detail::EvaluateConnectionFlux(
+                        conn, i, j, nMat, state, blockCenters, gravityVec, true, &cprop,
+                        eval_w_phase, eval_g_phase, vg_cfg, rp_cfg, sw_constitutive_eps);
+                    auto f_wrt_j = detail::EvaluateConnectionFlux(
+                        conn, i, j, nMat, state, blockCenters, gravityVec, false, &cprop,
+                        eval_w_phase, eval_g_phase, vg_cfg, rp_cfg, sw_constitutive_eps);
                     FIM_GlobalAssembler<N, ADVar<N>>::AssembleFlux(i, j, f_wrt_i, f_wrt_j, global_mat);
 
                     // 閳光偓閳光偓 Step 2: non-orthogonal deferred correction 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
@@ -2509,8 +2547,8 @@ namespace FIM_Engine {
                             }
                         };
 
-                    assembleBoundaryField(modules.pressure_bc, pressureDof, pEqCfg.pressure_field, "P");
-                    assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, "T");
+                    assembleBoundaryField(modules.pressure_bc, pressureDof, pEqCfg.pressure_field, pEqCfg.pressure_field.c_str());
+                    assembleBoundaryField(modules.temperature_bc, temperatureDof, tEqCfg.temperatue_field, tEqCfg.temperatue_field.c_str());
                 }
                 auto A = global_mat.GetFrozenMatrix(); // Issue#11: O(nnz) CSR value-update, no Triplet sort
                 auto b = global_mat.ExportEigenResidual();
@@ -2935,8 +2973,8 @@ namespace FIM_Engine {
                                 }
                             }
 
-                            const std::string snap_path = "Test/Transient/Day6/" + caseName + "/fail_snapshot_step" +
-                                std::to_string(step) + "_iter" + std::to_string(iter_used) + ".json";
+                            const std::string snap_path = detail::BuildFailureSnapshotPath(
+                                params.output_root_dir, caseName, step, iter_used);
                             std::ofstream ofs(snap_path);
                             if (ofs.is_open()) {
                                 ofs << std::setw(4) << snap << std::endl;
@@ -3331,13 +3369,18 @@ namespace FIM_Engine {
                     std::cout << "    [Rollback] step=" << (step + 1) << " new_dt=" << dt << " reason=" << fail_reason << "\n";
                     auto export_crash_vtk = [&]() {
                         try {
-                            SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
-                            const std::string cfname = "Test/Transient/Day6/" + caseName + "/crash.vtk";
-                            if constexpr (std::is_same_v<MeshMgrType, MeshManager>)
-                                PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(cfname, t);
-                            else
-                                PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(cfname, t);
-                            VerifyVtkExport(cfname, N == 3);
+                            const std::string cfname = detail::ExportVtkSnapshotFile(
+                                mgr,
+                                fm,
+                                vtk_bc_ctx_ptr,
+                                params.output_root_dir,
+                                caseName,
+                                "crash",
+                                t,
+                                N == 3,
+                                [&]() {
+                                    SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
+                                });
                             std::cout << "    [VTK Export PASS] " << cfname << " (crash snapshot t=" << std::scientific << t << "s)\n";
                         }
                         catch (const std::exception& ex) {
@@ -3428,28 +3471,22 @@ namespace FIM_Engine {
                     }
                 }
 
-                auto export_vtk_snapshot = [&](const std::string& suffix) {
-                    SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
-                    const std::string fname = "Test/Transient/Day6/" + caseName + suffix;
-                    if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                        PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
-                    }
-                    else {
-                        PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
-                    }
-                    VerifyVtkExport(fname, N == 3);
-                    if (suffix == "/final.vtk") final_vtk_exported = true;
+                auto export_vtk_snapshot = [&](const std::string& tag) {
+                    const std::string fname = detail::ExportVtkSnapshotFile(
+                        mgr,
+                        fm,
+                        vtk_bc_ctx_ptr,
+                        params.output_root_dir,
+                        caseName,
+                        tag,
+                        t,
+                        N == 3,
+                        [&]() {
+                            SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
+                        });
+                    if (tag == "final") final_vtk_exported = true;
                     vtk_export_count++;
-                    {
-                        const std::string tag = [&]() {
-                            if (suffix == "/final.vtk") return std::string("final");
-                            std::string out = suffix;
-                            if (!out.empty() && out.front() == '/') out.erase(out.begin());
-                            if (out.size() > 4 && out.substr(out.size() - 4) == ".vtk") out.resize(out.size() - 4);
-                            return out;
-                        }();
-                        detail::EmitSnapshot(modules, tag, step, t, fname);
-                    }
+                    detail::EmitSnapshot(modules, tag, step, t, fname);
                     std::cout << "    [VTK Export PASS] " << fname << "\n";
                     };
 
@@ -3463,7 +3500,7 @@ namespace FIM_Engine {
                 // before the first time-based VTK interval is reached.
                 if (!modules.disable_default_vtk_output) {
                     if (vtk_export_count == 0) {
-                        export_vtk_snapshot("/step_" + std::to_string(step) + ".vtk");
+                        export_vtk_snapshot("step_" + std::to_string(step));
                     }
 
                     if (active_vtk_interval_s > 0.0) {
@@ -3471,7 +3508,7 @@ namespace FIM_Engine {
                             next_vtk_output_time_s = t + active_vtk_interval_s;
                         }
                         if (t + 1.0e-12 >= next_vtk_output_time_s || reached_target_end) {
-                            export_vtk_snapshot("/step_" + std::to_string(step) + ".vtk");
+                            export_vtk_snapshot("step_" + std::to_string(step));
                             do {
                                 next_vtk_output_time_s += active_vtk_interval_s;
                             } while (next_vtk_output_time_s <= t + 1.0e-12);
@@ -3479,22 +3516,25 @@ namespace FIM_Engine {
                     }
                     else if (step % 10 == 0 || step == params.max_steps || reached_target_end) {
                         export_vtk_snapshot((step == params.max_steps || reached_target_end)
-                            ? "/final.vtk"
-                            : ("/step_" + std::to_string(step) + ".vtk"));
+                            ? "final"
+                            : ("step_" + std::to_string(step)));
                     }
                 }
             }
         }
         if (!final_vtk_exported && !modules.disable_default_vtk_output) {
-            SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
-            const std::string fname = "Test/Transient/Day6/" + caseName + "/final.vtk";
-            if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                PostProcess_2D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
-            }
-            else {
-                PostProcess_3D(mgr, fm, vtk_bc_ctx_ptr).ExportVTK(fname, t);
-            }
-            VerifyVtkExport(fname, N == 3);
+            const std::string fname = detail::ExportVtkSnapshotFile(
+                mgr,
+                fm,
+                vtk_bc_ctx_ptr,
+                params.output_root_dir,
+                caseName,
+                "final",
+                t,
+                N == 3,
+                [&]() {
+                    SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
+                });
             vtk_export_count++;
             detail::EmitSnapshot(modules, "final", completed_steps, t, fname);
             std::cout << "    [VTK Export PASS] " << fname << "\n";

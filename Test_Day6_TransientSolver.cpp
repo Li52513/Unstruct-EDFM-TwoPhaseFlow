@@ -1809,6 +1809,12 @@ void Run_Day6_MatrixAudit_2D_EDFM() {
     FIM_CaseKit::InitFieldManager(mgr, fm);
 
     auto preset = FIM_CaseKit::MakeDefaultPropertyPreset2D();
+    preset.enable_rock_region = false;
+    preset.rock_bg.kxx = 1.0e-10;
+    preset.rock_bg.kyy = 1.0e-10;
+    preset.rock_bg.kzz = 1.0e-10;
+    preset.frac.permeability = 1.0e-8;
+    preset.frac.aperture = 5.0e-3;
     FIM_Engine::InitialConditions ic;
     auto modules = FIM_CaseKit::BuildModules2D(preset, nullptr, nullptr, nullptr);
 
@@ -1817,6 +1823,8 @@ void Run_Day6_MatrixAudit_2D_EDFM() {
     params.matrix_audit_strict = true;
     params.matrix_audit_step = 1;
     params.matrix_audit_iter = 1;
+    params.matrix_audit_eps = 1.0e-18;
+    params.matrix_audit_coeff_tol = 1.0e-20;
     params.max_steps = 1;
     params.max_newton_iter = 1;
     params.abs_res_tol = 1e30; // 仅过一次残差及装配，不管牛顿收敛
@@ -1831,8 +1839,8 @@ void Run_Day6_MatrixAudit_3D_EDFM() {
     mgr.BuildSolidMatrixGrid_3D();
     std::vector<Vector> pts1 = { Vector(1, 1, 1), Vector(9, 1, 1), Vector(9, 9, 9), Vector(1, 9, 9) };
     std::vector<Vector> pts2 = { Vector(1, 9, 1), Vector(9, 9, 1), Vector(9, 1, 9), Vector(1, 1, 9) };
-    mgr.addFracturetoFractureNetwork(Fracture_2D(0, pts1));
-    mgr.addFracturetoFractureNetwork(Fracture_2D(1, pts2));
+    mgr.addFracturetoFractureNetwork(Fracture_2D(0, pts1, 5.0e4, 5.0e-2));
+    mgr.addFracturetoFractureNetwork(Fracture_2D(1, pts2, 5.0e4, 5.0e-2));
     mgr.meshAllFracturesinNetwork(2, 2);
 
     mgr.setupGlobalIndices();
@@ -1848,6 +1856,9 @@ void Run_Day6_MatrixAudit_3D_EDFM() {
     FIM_CaseKit::InitFieldManager(mgr, fm);
 
     auto preset = FIM_CaseKit::MakeDefaultPropertyPreset3D();
+    preset.enable_rock_region = false;
+    preset.rock_bg = RockPropertyParams(5.0e4, 5.0e4, 2.5e4, 0.16, 2600.0, 1000.0, 2.0, 1.0e-9);
+    preset.frac = FractureGlobalParams(0.7, 2400.0, 900.0, 2.0, 1.0);
     preset.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
     FIM_Engine::InitialConditions ic;
     auto modules = FIM_CaseKit::BuildModules3D(preset, nullptr, nullptr, nullptr);
@@ -1857,9 +1868,12 @@ void Run_Day6_MatrixAudit_3D_EDFM() {
     params.matrix_audit_strict = true;
     params.matrix_audit_step = 1;
     params.matrix_audit_iter = 1;
+    params.matrix_audit_eps = 1.0e-18;
+    params.matrix_audit_coeff_tol = 1.0e-20;
     params.max_steps = 1;
     params.max_newton_iter = 1;
     params.abs_res_tol = 1e30;
+    params.gravity_vector = Vector(0.0, 0.0, 0.0);
 
     FIM_Engine::RunGenericFIMTransient<2>(
         "day6_matrix_audit_3d_edfm", mgr, fm, ic, {}, params, FIM_Engine::SolverRoute::FIM, modules);

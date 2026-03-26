@@ -67,6 +67,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(const MeshMana
 
     // 2. 获取基岩体心物性场 (消除硬编码)
     PhysicalProperties_string_op::Rock rockStr; // 实例化名称结构体
+    PhysicalProperties_string_op::TransmissibilityFields tTags;
     auto Kxx = fieldMgr.getMatrixScalar(rockStr.k_xx_tag);
     auto Kyy = fieldMgr.getMatrixScalar(rockStr.k_yy_tag);
     auto Lam_m = fieldMgr.getMatrixScalar(rockStr.lambda_tag);
@@ -78,8 +79,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(const MeshMana
     }
 
     // 3. 获取或分配面心传导率场 (默认值 0.0)
-    auto T_Flow = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Flow", 0.0);
-    auto T_Heat = fieldMgr.getOrCreateMatrixFaceScalar("T_Matrix_Heat", 0.0);
+    auto T_Flow = fieldMgr.getOrCreateMatrixFaceScalar(tTags.matrix_flow, 0.0);
+    auto T_Heat = fieldMgr.getOrCreateMatrixFaceScalar(tTags.matrix_heat, 0.0);
 
     // 2D 模型的默认单位厚度
     const double thickness = 1.0;
@@ -143,6 +144,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FractureInternal(cons
     // 1. 获取物性标签
     PhysicalProperties_string_op::Fracture_string fracStr;
     PhysicalProperties_string_op::Water waterStr;
+    PhysicalProperties_string_op::TransmissibilityFields tTags;
     const double thickness = 1.0; // 2D 默认厚度
 
     const auto& frNet = meshMgr.fracture_network();
@@ -169,8 +171,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FractureInternal(cons
 
     // 3. 创建输出场 (使用您确认的 createFractureFaceScalar 函数)
     // 注意：这里创建的是 faceScalarField，通常用于存储面上的传导率
-    auto p_T_Flow = fieldMgr.createFractureFaceScalar("T_FI_Flow", 0.0);
-    auto p_T_Heat = fieldMgr.createFractureFaceScalar("T_FI_Heat", 0.0);
+    auto p_T_Flow = fieldMgr.createFractureFaceScalar(tTags.fi_flow, 0.0);
+    auto p_T_Heat = fieldMgr.createFractureFaceScalar(tTags.fi_heat, 0.0);
 
     if (!p_T_Flow || !p_T_Heat) {
         std::cerr << "[Error] Failed to create FractureFace fields!" << std::endl;
@@ -251,6 +253,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
     Rock rock_str;
     Fracture_string frac_str;
     Water waterStr;
+    TransmissibilityFields tTags;
 
     const double thickness = 1.0;
     const double minDist = 1e-6;
@@ -302,8 +305,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_NNC(const MeshManager
         throw std::runtime_error("[Solver 2D] Fluid lambda size mismatch with aperture size.");
     }
 
-    auto& T_Flow = fieldMgr.createNNCScalar("T_NNC_Flow", 0.0)->data;
-    auto& T_Heat = fieldMgr.createNNCScalar("T_NNC_Heat", 0.0)->data;
+    auto& T_Flow = fieldMgr.createNNCScalar(tTags.nnc_flow, 0.0)->data;
+    auto& T_Heat = fieldMgr.createNNCScalar(tTags.nnc_heat, 0.0)->data;
 
     struct NNCJob {
         int mIdx;
@@ -443,6 +446,7 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
 
     PhysicalProperties_string_op::Fracture_string fracStr;
     PhysicalProperties_string_op::Water waterStr;
+    PhysicalProperties_string_op::TransmissibilityFields tTags;
     const double thickness = 1.0;
 
     const auto& frNet = meshMgr.fracture_network();
@@ -565,8 +569,8 @@ void TransmissibilitySolver_2D::Calculate_Transmissibility_FF(const MeshManager&
         }
     }
 
-    auto& T_FF_Flow = fieldMgr.createFFScalar("T_FF_Flow", 0.0)->data;
-    auto& T_FF_Heat = fieldMgr.createFFScalar("T_FF_Heat", 0.0)->data;
+    auto& T_FF_Flow = fieldMgr.createFFScalar(tTags.ff_flow, 0.0)->data;
+    auto& T_FF_Heat = fieldMgr.createFFScalar(tTags.ff_heat, 0.0)->data;
     if (T_FF_Flow.size() != totalFFPairs) {
         T_FF_Flow.assign(totalFFPairs, 0.0);
         T_FF_Heat.assign(totalFFPairs, 0.0);

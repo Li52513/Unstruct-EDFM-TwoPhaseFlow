@@ -6,6 +6,7 @@
 #include "FIM_ConnectionManager.h"
 #include "MeshManager.h"
 #include "2D_FieldManager.h"
+#include "SolverContrlStrName_op.h"
 
 class FIM_TopologyBuilder2D {
 public:
@@ -36,12 +37,19 @@ public:
 
 private:
     static void _loadMatrix(FIM_ConnectionManager& connMgr, const MeshManager& meshMgr, const FieldManager_2D& fieldMgr) {
-        auto pFlow = fieldMgr.getMatrixFaceScalar("T_Matrix_Flow");
-        auto pHeat = fieldMgr.getMatrixFaceScalar("T_Matrix_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& faces = meshMgr.mesh().getFaces();
         const auto& cells = meshMgr.mesh().getCells();
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getMatrixFaceScalar(tTags.matrix_flow);
+        auto pHeat = fieldMgr.getMatrixFaceScalar(tTags.matrix_heat);
+        if (!pFlow || !pHeat) {
+            for (const auto& face : faces) {
+                if (!face.isBoundary()) {
+                    throw std::runtime_error("[Build 2D] Missing matrix transmissibility fields.");
+                }
+            }
+            return;
+        }
 
         if (pFlow->data.size() != faces.size() || pHeat->data.size() != faces.size()) {
             throw std::runtime_error("[Build 2D] Matrix face field size mismatch with mesh faces.");
@@ -74,15 +82,20 @@ private:
     }
 
     static void _loadFI(FIM_ConnectionManager& connMgr, const MeshManager& meshMgr, const FieldManager_2D& fieldMgr) {
-        auto pFlow = fieldMgr.getFractureFaceScalar("T_FI_Flow");
-        auto pHeat = fieldMgr.getFractureFaceScalar("T_FI_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& fracs = meshMgr.fracture_network().fractures;
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getFractureFaceScalar(tTags.fi_flow);
+        auto pHeat = fieldMgr.getFractureFaceScalar(tTags.fi_heat);
 
         size_t expected = 0;
         for (const auto& frac : fracs) {
             if (frac.elements.size() > 1) expected += (frac.elements.size() - 1);
+        }
+        if (!pFlow || !pHeat) {
+            if (expected > 0) {
+                throw std::runtime_error("[Build 2D] Missing FI transmissibility fields.");
+            }
+            return;
         }
 
         if (expected != pFlow->data.size() || expected != pHeat->data.size()) {
@@ -110,14 +123,19 @@ private:
     }
 
     static void _loadNNC(FIM_ConnectionManager& connMgr, const MeshManager& meshMgr, const FieldManager_2D& fieldMgr) {
-        auto pFlow = fieldMgr.getNNCScalar("T_NNC_Flow");
-        auto pHeat = fieldMgr.getNNCScalar("T_NNC_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& pairsMap = meshMgr.getNNCTopologyMap();
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getNNCScalar(tTags.nnc_flow);
+        auto pHeat = fieldMgr.getNNCScalar(tTags.nnc_heat);
 
         size_t totalNNCCount = 0;
         for (const auto& kv : pairsMap) totalNNCCount += kv.second.size();
+        if (!pFlow || !pHeat) {
+            if (totalNNCCount > 0) {
+                throw std::runtime_error("[Build 2D] Missing NNC transmissibility fields.");
+            }
+            return;
+        }
 
         if (totalNNCCount != pFlow->data.size() || totalNNCCount != pHeat->data.size()) {
             throw std::runtime_error("[Build 2D] NNC arrays mismatch with topology map.");
@@ -150,11 +168,16 @@ private:
     }
 
     static void _loadFF(FIM_ConnectionManager& connMgr, const MeshManager& meshMgr, const FieldManager_2D& fieldMgr) {
-        auto pFlow = fieldMgr.getFFScalar("T_FF_Flow");
-        auto pHeat = fieldMgr.getFFScalar("T_FF_Heat");
-        if (!pFlow || !pHeat) return;
-
         const auto& ffPairs = fieldMgr.ff_topology;
+        const PhysicalProperties_string_op::TransmissibilityFields tTags;
+        auto pFlow = fieldMgr.getFFScalar(tTags.ff_flow);
+        auto pHeat = fieldMgr.getFFScalar(tTags.ff_heat);
+        if (!pFlow || !pHeat) {
+            if (!ffPairs.empty()) {
+                throw std::runtime_error("[Build 2D] Missing FF transmissibility fields.");
+            }
+            return;
+        }
         if (ffPairs.size() != pFlow->data.size() || ffPairs.size() != pHeat->data.size()) {
             throw std::runtime_error("[Build 2D] FF topology mismatch with FF field arrays.");
         }

@@ -6,6 +6,7 @@
 #include "../SolverContrlStrName_op.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <string>
 
 #ifdef _WIN32
@@ -189,8 +190,34 @@ namespace FIM_Engine {
         return EvalSinglePhaseFluid<N>(BuildFluidPropertyEvalContext(model, fluid_cfg), P, T);
     }
 
-    inline void MakePath(const std::string& caseName) {
-        MKDIR("Test"); MKDIR("Test/Transient"); MKDIR("Test/Transient/Day6"); MKDIR(("Test/Transient/Day6/" + caseName).c_str());
+    inline std::string NormalizeOutputRoot(const std::string& output_root) {
+        return output_root.empty() ? TransientSolverParams().output_root_dir : output_root;
+    }
+
+    inline std::filesystem::path BuildCaseOutputDirPath(
+        const std::string& output_root,
+        const std::string& caseName)
+    {
+        return std::filesystem::path(NormalizeOutputRoot(output_root)) / caseName;
+    }
+
+    inline std::string BuildCaseOutputDir(
+        const std::string& output_root,
+        const std::string& caseName)
+    {
+        return BuildCaseOutputDirPath(output_root, caseName).generic_string();
+    }
+
+    inline std::string BuildCaseOutputFile(
+        const std::string& output_root,
+        const std::string& caseName,
+        const std::string& relative_name)
+    {
+        return (BuildCaseOutputDirPath(output_root, caseName) / relative_name).generic_string();
+    }
+
+    inline void MakePath(const std::string& output_root, const std::string& caseName) {
+        std::filesystem::create_directories(BuildCaseOutputDirPath(output_root, caseName));
     }
 
     template <typename FieldMgrType, typename MeshMgrType, int N>
@@ -211,6 +238,7 @@ namespace FIM_Engine {
         const auto satCfg = PhysicalProperties_string_op::SaturationEquation_String::FIM();
         const PhysicalProperties_string_op::Water wCfg;
         const PhysicalProperties_string_op::CO2 gCfg;
+        const PhysicalProperties_string_op::TransientInternalFieldNames internalNames;
 
         auto f_pw = fm.getOrCreateMatrixScalar(pCfg.pressure_field, 0.0);
         auto f_T = fm.getOrCreateMatrixScalar(tCfg.temperatue_field, 0.0);
@@ -224,21 +252,21 @@ namespace FIM_Engine {
         auto frac_hw = fm.getOrCreateFractureScalar(wCfg.h_tag, 0.0);
         auto frac_lamw_mob = fm.getOrCreateFractureScalar(wCfg.lambda_w_tag, 0.0);
 
-        auto f_P_viz = fm.getOrCreateMatrixScalar("P", 0.0);
-        auto frac_P_viz = fm.getOrCreateFractureScalar("P", 0.0);
+        auto f_P_viz = fm.getOrCreateMatrixScalar(internalNames.pressure_viz, 0.0);
+        auto frac_P_viz = fm.getOrCreateFractureScalar(internalNames.pressure_viz, 0.0);
 
         std::shared_ptr<volScalarField> f_sw, f_Sw_viz, f_rhog, f_hg, f_lamg_mob;
         std::shared_ptr<volScalarField> frac_sw, frac_Sw_viz, frac_rhog, frac_hg, frac_lamg_mob;
 
         if constexpr (N == 3) {
             f_sw = fm.getOrCreateMatrixScalar(satCfg.saturation, 0.0);
-            f_Sw_viz = fm.getOrCreateMatrixScalar("S_w", 0.0);
+            f_Sw_viz = fm.getOrCreateMatrixScalar(internalNames.saturation_viz, 0.0);
             f_rhog = fm.getOrCreateMatrixScalar(gCfg.rho_tag, 0.0);
             f_hg = fm.getOrCreateMatrixScalar(gCfg.h_tag, 0.0);
             f_lamg_mob = fm.getOrCreateMatrixScalar(gCfg.lambda_g_tag, 0.0);
 
             frac_sw = fm.getOrCreateFractureScalar(satCfg.saturation, 0.0);
-            frac_Sw_viz = fm.getOrCreateFractureScalar("S_w", 0.0);
+            frac_Sw_viz = fm.getOrCreateFractureScalar(internalNames.saturation_viz, 0.0);
             frac_rhog = fm.getOrCreateFractureScalar(gCfg.rho_tag, 0.0);
             frac_hg = fm.getOrCreateFractureScalar(gCfg.h_tag, 0.0);
             frac_lamg_mob = fm.getOrCreateFractureScalar(gCfg.lambda_g_tag, 0.0);

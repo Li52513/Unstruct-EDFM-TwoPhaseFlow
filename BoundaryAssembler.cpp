@@ -27,6 +27,8 @@ namespace {
         std::string k_xx;
         std::string k_yy;
         std::string k_zz;
+        std::string mob_density_w;
+        std::string mob_density_g;
         std::string rho_w;
         std::string rho_g;
         std::string lambda_w_mob;
@@ -45,10 +47,13 @@ namespace {
         const PhysicalProperties_string_op::Rock rock;
         const PhysicalProperties_string_op::Water water;
         const PhysicalProperties_string_op::CO2 gas;
+        const PhysicalProperties_string_op::WellAuxiliaryFields aux;
         tags.pressure = pCfg.pressure_field;
         tags.k_xx = rock.k_xx_tag;
         tags.k_yy = rock.k_yy_tag;
         tags.k_zz = rock.k_zz_tag;
+        tags.mob_density_w = aux.mob_density_w;
+        tags.mob_density_g = aux.mob_density_g;
         tags.rho_w = water.rho_tag;
         tags.rho_g = gas.rho_tag;
         tags.lambda_w_mob = water.lambda_w_tag;
@@ -419,6 +424,9 @@ namespace {
         std::string pressure;
         std::string temperature;
         std::string saturation;
+        std::array<std::string, 4> pressure_aliases;
+        std::array<std::string, 3> temperature_aliases;
+        std::array<std::string, 4> saturation_aliases;
         std::string k_xx;
         std::string k_yy;
         std::string k_zz;
@@ -438,9 +446,13 @@ namespace {
         const PhysicalProperties_string_op::Rock rock;
         const PhysicalProperties_string_op::Fracture_string frac;
         const PhysicalProperties_string_op::EffectiveProps eff;
+        const PhysicalProperties_string_op::LegacyFieldAliasPolicy aliases;
         tags.pressure = pCfg.pressure_field;
         tags.temperature = tCfg.temperatue_field;
         tags.saturation = sCfg.saturation;
+        tags.pressure_aliases = aliases.pressure_aliases;
+        tags.temperature_aliases = aliases.temperature_aliases;
+        tags.saturation_aliases = aliases.saturation_aliases;
         tags.k_xx = rock.k_xx_tag;
         tags.k_yy = rock.k_yy_tag;
         tags.k_zz = rock.k_zz_tag;
@@ -586,11 +598,11 @@ namespace {
         };
 
         auto getScalarWithAliases = [&](const std::string& primary,
-            std::initializer_list<const char*> aliases) -> std::shared_ptr<volScalarField> {
+            const auto& aliases) -> std::shared_ptr<volScalarField> {
                 auto fld = getScalar(primary);
                 if (fld) return fld;
-                for (const char* alias : aliases) {
-                    if (!alias || primary == alias) continue;
+                for (const auto& alias : aliases) {
+                    if (alias.empty() || primary == alias) continue;
                     fld = getScalar(alias);
                     if (fld) return fld;
                 }
@@ -598,9 +610,9 @@ namespace {
             };
 
         // Keep legacy test/workflow compatibility: support historical field aliases.
-        auto fP = getScalarWithAliases(tags.pressure, { "Pressure", "p_w", "P", "p" });
-        auto fT = getScalarWithAliases(tags.temperature, { "Temperature", "T", "T_res" });
-        auto fSw = getScalarWithAliases(tags.saturation, { "Saturation", "Sw", "s_w", "sw" });
+        auto fP = getScalarWithAliases(tags.pressure, tags.pressure_aliases);
+        auto fT = getScalarWithAliases(tags.temperature, tags.temperature_aliases);
+        auto fSw = getScalarWithAliases(tags.saturation, tags.saturation_aliases);
         if (!isValidLocalIdx(localIdx, fP)) {
             return s;
         }
@@ -1850,8 +1862,8 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
             pField_P = fm.getMatrixScalar(tags.pressure);
             pField_Kxx = fm.getMatrixScalar(tags.k_xx);
             pField_Kyy = fm.getMatrixScalar(tags.k_yy);
-            pField_MobDenW = fm.getMatrixScalar("mob_density_w");
-            pField_MobDenG = fm.getMatrixScalar("mob_density_g");
+            pField_MobDenW = fm.getMatrixScalar(tags.mob_density_w);
+            pField_MobDenG = fm.getMatrixScalar(tags.mob_density_g);
             pField_RhoW = fm.getMatrixScalar(tags.rho_w);
             pField_RhoG = fm.getMatrixScalar(tags.rho_g);
             pField_LamW = fm.getMatrixScalar(tags.lambda_w_mob);
@@ -1861,8 +1873,8 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
         }
         else {
             pField_P = fm.getFractureScalar(tags.pressure);
-            pField_MobDenW = fm.getFractureScalar("mob_density_w");
-            pField_MobDenG = fm.getFractureScalar("mob_density_g");
+            pField_MobDenW = fm.getFractureScalar(tags.mob_density_w);
+            pField_MobDenG = fm.getFractureScalar(tags.mob_density_g);
             pField_RhoW = fm.getFractureScalar(tags.rho_w);
             pField_RhoG = fm.getFractureScalar(tags.rho_g);
             pField_LamW = fm.getFractureScalar(tags.lambda_w_mob);
@@ -2068,8 +2080,8 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
             pField_Kxx = fm.getMatrixScalar(tags.k_xx);
             pField_Kyy = fm.getMatrixScalar(tags.k_yy);
             pField_Kzz = fm.getMatrixScalar(tags.k_zz);
-            pField_MobDenW = fm.getMatrixScalar("mob_density_w");
-            pField_MobDenG = fm.getMatrixScalar("mob_density_g");
+            pField_MobDenW = fm.getMatrixScalar(tags.mob_density_w);
+            pField_MobDenG = fm.getMatrixScalar(tags.mob_density_g);
             pField_RhoW = fm.getMatrixScalar(tags.rho_w);
             pField_RhoG = fm.getMatrixScalar(tags.rho_g);
             pField_LamW = fm.getMatrixScalar(tags.lambda_w_mob);
@@ -2079,8 +2091,8 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
         }
         else {
             pField_P = fm.getFractureScalar(tags.pressure);
-            pField_MobDenW = fm.getFractureScalar("mob_density_w");
-            pField_MobDenG = fm.getFractureScalar("mob_density_g");
+            pField_MobDenW = fm.getFractureScalar(tags.mob_density_w);
+            pField_MobDenG = fm.getFractureScalar(tags.mob_density_g);
             pField_RhoW = fm.getFractureScalar(tags.rho_w);
             pField_RhoG = fm.getFractureScalar(tags.rho_g);
             pField_LamW = fm.getFractureScalar(tags.lambda_w_mob);

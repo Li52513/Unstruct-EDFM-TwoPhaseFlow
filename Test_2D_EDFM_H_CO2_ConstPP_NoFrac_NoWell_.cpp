@@ -461,6 +461,8 @@ TestCaseSummary RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& ou
 
     const auto pEqCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
     VTKBoundaryVisualizationContext bcVizCtx;
+    bcVizCtx.water_family_policy = VTKBCWaterFamilyDerivePolicy::FollowPrimaryFluid;
+    bcVizCtx.primary_fluid_model = VTKBCPrimaryFluidModel::CO2;
     bcVizCtx.bindings.push_back(VTKBCVariableBinding{pEqCfg.pressure_field, &bcP, VTKBCTransportKind::Pressure});
 
     std::vector<double> pBlocksLatest(static_cast<std::size_t>(std::max(mgr.getTotalDOFCount(), 0)), cfg.p_init);
