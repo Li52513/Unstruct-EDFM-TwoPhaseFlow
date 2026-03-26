@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 #include "FIM_ConnectionManager.h"
 #include "MeshManager.h"
 #include "2D_FieldManager.h"
@@ -54,13 +55,18 @@ private:
             if (nI < 0 || nJ < 0) continue;
             if (nI >= static_cast<int>(cells.size()) || nJ >= static_cast<int>(cells.size())) continue;
 
-            double dist = (faces[i].midpoint - cells[nI].center).Mag()
-                + (cells[nJ].center - faces[i].midpoint).Mag();
+            const Vector dO = faces[i].midpoint - cells[nI].center;
+            const Vector dN = cells[nJ].center - faces[i].midpoint;
+            const double nx = faces[i].normal.m_x;
+            const double ny = faces[i].normal.m_y;
+            const double dist =
+                std::max(std::abs(dO.m_x * nx + dO.m_y * ny) +
+                         std::abs(dN.m_x * nx + dN.m_y * ny), 1e-12);
 
             connMgr.PushConnection(
                 nI, nJ,
                 pFlow->data[i], pHeat->data[i],
-                faces[i].vectorE.Mag(), std::max(dist, 1e-12),
+                faces[i].vectorE.Mag(), dist,
                 ConnectionType::Matrix_Matrix,
                 faces[i].vectorT  // non-orthogonal correction vector (Step 2)
             );

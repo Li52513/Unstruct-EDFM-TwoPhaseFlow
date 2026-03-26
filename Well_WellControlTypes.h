@@ -1,41 +1,60 @@
 /**
  * @file Well_WellControlTypes.h
- * @brief 井模型控制类型与调度步骤定义 (Production-Ready)
+ * @brief Well control types and schedule step definitions.
  */
 #ifndef WELL_WELLCONTROLTYPES_H
 #define WELL_WELLCONTROLTYPES_H
 
 #include <string>
+#include <vector>
 
 enum class WellControlMode {
-    BHP,    ///< 定井底流压 (Bottom Hole Pressure)
-    Rate    ///< 定流量 (Mass Rate or Volume Rate)
+    BHP,    ///< Bottom hole pressure control
+    Rate    ///< Rate control
 };
 
 enum class WellTargetDomain {
-    Matrix,     ///< 基岩网格
-    Fracture    ///< 裂缝网格
+    Matrix,     ///< Matrix domain
+    Fracture    ///< Fracture domain
 };
 
 enum class WellComponentMode {
-    Water,  ///< 仅水相
-    Gas,    ///< 仅气相 (CO2)
-    Total   ///< 总相
+    Water,  ///< Water only
+    Gas,    ///< Gas only (CO2)
+    Total   ///< Total flux
 };
 
 /**
- * @brief Rate 控制目标量纲类型。
+ * @brief Rate target type.
  */
 enum class WellRateTargetType {
-    MassRate,           ///< 目标值为质量流量 [kg/s]
-    StdVolumeRate       ///< 目标值为标准态体积流量 [m^3/s]
+    MassRate,       ///< Target in mass rate [kg/s]
+    StdVolumeRate   ///< Target in standard volume rate [m^3/s]
 };
 
 enum class WellAxis {
     X,
     Y,
     Z,
-    None    ///< 适用于 2D 或纯用户指定覆盖 (Override) 的情况
+    None    ///< For 2D cases or explicit user override
+};
+
+/**
+ * @brief Completion id semantic space.
+ */
+enum class CompletionIdSpace {
+    SolverIndex,        ///< completion_id is global solver block index
+    FractureLocalIndex, ///< completion_id is fracture-local index
+    AutoLegacy          ///< Backward-compatible legacy inference
+};
+
+/**
+ * @brief One completion specification.
+ */
+struct WellCompletionSpec {
+    int completion_id = -1;
+    CompletionIdSpace completion_id_space = CompletionIdSpace::AutoLegacy;
+    int completion_solver_index = -1;   ///< Normalized global solver block index
 };
 
 struct WellScheduleStep {
@@ -50,11 +69,18 @@ struct WellScheduleStep {
     double skin = 0.0;
     WellAxis well_axis = WellAxis::None;
 
-    // Matrix: cell local index | Fracture: solverIndex or fracture-local index
+    // Legacy single-completion fields:
+    // Matrix: cell local index | Fracture: solverIndex or fracture-local index.
     int completion_id = -1;
+    CompletionIdSpace completion_id_space = CompletionIdSpace::AutoLegacy;
+    int completion_solver_index = -1;
+
+    // Multi-completion model (single completion is completions.size()==1).
+    std::vector<WellCompletionSpec> completions;
 
     double wi_override = -1.0;
     double L_override = -1.0;
+
     // For WellComponentMode::Total:
     // - If frac_w + frac_g > 0, assembler normalizes and uses them.
     // - If both are 0, assembler falls back to mobility-weighted auto split.
@@ -67,17 +93,17 @@ struct WellScheduleStep {
     bool injection_is_co2 = false;
 
     /**
-     * @brief Rate 目标量纲类型（默认保持现有行为：质量流量）。
+     * @brief Rate target type (default keeps current mass-rate behavior).
      */
     WellRateTargetType rate_target_type = WellRateTargetType::MassRate;
 
     /**
-     * @brief 标准态参考压力 [Pa]，仅在 rate_target_type=StdVolumeRate 时生效。
+     * @brief Standard-condition reference pressure [Pa] for StdVolumeRate.
      */
     double std_pressure = 101325.0;
 
     /**
-     * @brief 标准态参考温度 [K]，仅在 rate_target_type=StdVolumeRate 时生效。
+     * @brief Standard-condition reference temperature [K] for StdVolumeRate.
      */
     double std_temperature = 288.15;
 };

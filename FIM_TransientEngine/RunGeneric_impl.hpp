@@ -25,8 +25,11 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <set>
 #include <memory>
 #include <sstream>
+#include <unordered_map>
+#include <unordered_set>
 #include <nlohmann/json.hpp>
 
 
@@ -63,6 +66,174 @@ namespace FIM_Engine {
         {
             if (!modules.on_snapshot_written) return;
             modules.on_snapshot_written(tag, step, time_s, vtk_path);
+        }
+
+        inline bool NearlyEqualRelAbs(double a, double b, double rel = 1e-10, double abs = 1e-12) {
+            return std::abs(a - b) <= std::max(abs, rel * std::max(std::abs(a), std::abs(b)));
+        }
+
+        inline const char* CompletionIdSpaceName(CompletionIdSpace s) {
+            switch (s) {
+            case CompletionIdSpace::SolverIndex: return "SolverIndex";
+            case CompletionIdSpace::FractureLocalIndex: return "FractureLocalIndex";
+            case CompletionIdSpace::AutoLegacy: return "AutoLegacy";
+            default: return "Unknown";
+            }
+        }
+
+        template<typename MeshMgrType>
+        inline int NormalizeCompletionSolverIndex(
+            const WellScheduleStep& step,
+            const WellCompletionSpec& comp,
+            const MeshMgrType& mgr,
+            bool& used_legacy_mapping)
+        {
+            const int nMat = MatrixBlockCount(mgr);
+            const int totalBlocks = mgr.getTotalDOFCount();
+            if (comp.completion_id < 0) {
+                throw std::runtime_error("[WellNormalize] completion_id < 0 for well '" + step.well_name + "'.");
+            }
+
+            int solverIdx = -1;
+            if (step.domain == WellTargetDomain::Matrix) {
+                solverIdx = comp.completion_id;
+            }
+            else {
+                if (comp.completion_id_space == CompletionIdSpace::SolverIndex) {
+                    solverIdx = comp.completion_id;
+                }
+                else if (comp.completion_id_space == CompletionIdSpace::FractureLocalIndex) {
+                    solverIdx = nMat + comp.completion_id;
+                }
+                else {
+                    used_legacy_mapping = true;
+                    solverIdx = (comp.completion_id >= nMat)
+                        ? comp.completion_id
+                        : (nMat + comp.completion_id);
+                }
+            }
+
+            if (solverIdx < 0 || solverIdx >= totalBlocks) {
+                throw std::runtime_error("[WellNormalize] normalized solver index out of range for well '" + step.well_name + "'.");
+            }
+            if (step.domain == WellTargetDomain::Matrix && solverIdx >= nMat) {
+                throw std::runtime_error("[WellNormalize] Matrix completion mapped into fracture range for well '" + step.well_name + "'.");
+            }
+            if (step.domain == WellTargetDomain::Fracture && solverIdx < nMat) {
+                throw std::runtime_error("[WellNormalize] Fracture completion mapped into matrix range for well '" + step.well_name + "'.");
+            }
+            return solverIdx;
+        }
+
+        template<typename MeshMgrType>
+        inline std::vector<WellScheduleStep> SelectActiveAndNormalizeWells(
+            const std::vector<WellScheduleStep>& wells,
+            const MeshMgrType& mgr,
+            double t_now,
+            bool filter_by_time = true)
+        {
+            struct CtrlSig {
+                WellControlMode control_mode = WellControlMode::BHP;
+                WellComponentMode component_mode = WellComponentMode::Total;
+                WellRateTargetType rate_target_type = WellRateTargetType::MassRate;
+                double target_value = 0.0;
+                double injection_temperature = -1.0;
+                bool injection_is_co2 = false;
+                bool initialized = false;
+            };
+
+            std::unordered_map<std::string, CtrlSig> ctrl_by_well;
+            std::unordered_set<std::string> warned_legacy;
+            std::unordered_set<std::string> seen_well_completion;
+            std::vector<WellScheduleStep> out;
+            out.reserve(wells.size());
+            const int nMat = MatrixBlockCount(mgr);
+            const int totalBlocks = mgr.getTotalDOFCount();
+
+            for (const auto& w : wells) {
+                const bool active = (t_now >= w.t_start && t_now < w.t_end);
+                if (filter_by_time && !active) continue;
+
+                std::vector<WellCompletionSpec> completion_specs = w.completions;
+                if (completion_specs.empty()) {
+                    WellCompletionSpec c;
+                    c.completion_id = w.completion_id;
+                    c.completion_id_space = w.completion_id_space;
+                    c.completion_solver_index = w.completion_solver_index;
+                    completion_specs.push_back(c);
+                }
+                if (completion_specs.empty()) {
+                    throw std::runtime_error("[WellNormalize] No completion found for well '" + w.well_name + "'.");
+                }
+
+                if (filter_by_time) {
+                    auto& sig = ctrl_by_well[w.well_name];
+                    if (!sig.initialized) {
+                        sig.control_mode = w.control_mode;
+                        sig.component_mode = w.component_mode;
+                        sig.rate_target_type = w.rate_target_type;
+                        sig.target_value = w.target_value;
+                        sig.injection_temperature = w.injection_temperature;
+                        sig.injection_is_co2 = w.injection_is_co2;
+                        sig.initialized = true;
+                    }
+                    else {
+                        if (sig.control_mode != w.control_mode ||
+                            sig.component_mode != w.component_mode ||
+                            sig.rate_target_type != w.rate_target_type ||
+                            sig.injection_is_co2 != w.injection_is_co2 ||
+                            !NearlyEqualRelAbs(sig.injection_temperature, w.injection_temperature) ||
+                            !NearlyEqualRelAbs(sig.target_value, w.target_value)) {
+                            throw std::runtime_error("[WellNormalize] Active same-name well has conflicting controls: '" + w.well_name + "'.");
+                        }
+                    }
+                }
+
+                for (const auto& comp : completion_specs) {
+                    bool used_legacy_mapping = false;
+                    int normalized_solver = (comp.completion_solver_index >= 0)
+                        ? comp.completion_solver_index
+                        : NormalizeCompletionSolverIndex(w, comp, mgr, used_legacy_mapping);
+
+                    if (normalized_solver < 0 || normalized_solver >= totalBlocks) {
+                        throw std::runtime_error("[WellNormalize] completion_solver_index out of range for well '" + w.well_name + "'.");
+                    }
+                    if (w.domain == WellTargetDomain::Matrix && normalized_solver >= nMat) {
+                        throw std::runtime_error("[WellNormalize] Matrix completion_solver_index out of matrix range for well '" + w.well_name + "'.");
+                    }
+                    if (w.domain == WellTargetDomain::Fracture && normalized_solver < nMat) {
+                        throw std::runtime_error("[WellNormalize] Fracture completion_solver_index out of fracture range for well '" + w.well_name + "'.");
+                    }
+
+                    if (used_legacy_mapping) {
+                        if (warned_legacy.insert(w.well_name).second) {
+                            std::cout << "[WellNormalize] well='" << w.well_name
+                                << "' completion_id_space=" << CompletionIdSpaceName(comp.completion_id_space)
+                                << "' uses AutoLegacy completion mapping; prefer explicit completion_id_space.\n";
+                        }
+                    }
+
+                    std::ostringstream key;
+                    key << w.well_name << "#" << normalized_solver;
+                    if (!seen_well_completion.insert(key.str()).second) {
+                        continue;
+                    }
+
+                    WellScheduleStep n = w;
+                    n.completions.clear();
+                    n.completion_id = comp.completion_id;
+                    n.completion_id_space = comp.completion_id_space;
+                    n.completion_solver_index = normalized_solver;
+                    WellCompletionSpec normalized_comp;
+                    normalized_comp.completion_id = comp.completion_id;
+                    normalized_comp.completion_id_space = comp.completion_id_space;
+                    normalized_comp.completion_solver_index = normalized_solver;
+                    n.completions.push_back(normalized_comp);
+                    out.push_back(n);
+                }
+            }
+
+            return out;
         }
 
         template <typename MeshMgrType, typename FieldMgrType>
@@ -875,8 +1046,11 @@ namespace FIM_Engine {
         const int totalBlocks = mgr.getTotalDOFCount();
         const int totalEq = mgr.getTotalEquationDOFs();
 
+        const std::vector<WellScheduleStep> normalized_wells_superset =
+            detail::SelectActiveAndNormalizeWells(wells, mgr, 0.0, false);
+
         WellDOFManager<N> well_mgr;
-        well_mgr.Setup(wells, totalBlocks);
+        well_mgr.Setup(normalized_wells_superset, totalBlocks);
         const int totalBlocksWithWells = well_mgr.TotalBlocksWithWells();
         const int totalEqWithWells     = totalBlocksWithWells * N;
 
@@ -956,11 +1130,14 @@ namespace FIM_Engine {
         }
 
         // 閳光偓閳光偓 Step 3: init well BHP state; set well block centers to comp_cell center 閳光偓閳光偓
-        well_mgr.InitWellState(state, ic.P_init, ic.T_init, ic.Sw_init, wells);
+        const std::vector<WellScheduleStep> initial_active_wells =
+            detail::SelectActiveAndNormalizeWells(wells, mgr, 0.0, true);
+        well_mgr.InitWellState(state, ic.P_init, ic.T_init, ic.Sw_init, initial_active_wells);
         for (int w = 0; w < well_mgr.NumWells(); ++w) {
             const auto& e = well_mgr.GetEntry(w);
-            if (e.comp_cell >= 0 && e.comp_cell < static_cast<int>(blockCenters.size())) {
-                blockCenters[e.block_idx] = blockCenters[e.comp_cell];
+            const int comp_cell = well_mgr.GetPrimaryCompletionCell(w);
+            if (comp_cell >= 0 && comp_cell < static_cast<int>(blockCenters.size())) {
+                blockCenters[e.block_idx] = blockCenters[comp_cell];
             }
         }
         well_mgr.PrintSummary();
@@ -1202,7 +1379,8 @@ namespace FIM_Engine {
                 line_search_hist.reserve(std::max(2, active_max_newton_iter + 1));
             }
 
-            std::vector<WellScheduleStep> active_wells = wells;
+            std::vector<WellScheduleStep> active_wells =
+                detail::SelectActiveAndNormalizeWells(wells, mgr, t, true);
             double control_ramp = 1.0;
             double linear_solve_ms_sum = 0.0;
             int linear_solve_calls = 0;
@@ -1222,25 +1400,15 @@ namespace FIM_Engine {
                 control_ramp = std::max(1.0e-6, std::min(1.0, control_ramp));
 
                 if (control_ramp < 1.0 - 1.0e-12) {
-                    int nMat = 0;
-                    if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                        nMat = mgr.getMatrixDOFCount();
-                    }
-                    else {
-                        nMat = mgr.fracture_network().getSolverIndexOffset();
-                    }
-
                     for (auto& w : active_wells) {
-                        int bidx = -1;
-                        if (w.domain == WellTargetDomain::Matrix) {
-                            bidx = w.completion_id;
-                        }
-                        else if (w.domain == WellTargetDomain::Fracture) {
-                            bidx = nMat + w.completion_id;
-                        }
-
-                        const double p_anchor = (bidx >= 0 && bidx < static_cast<int>(state.P.size())) ? state.P[bidx] : ic.P_init;
-                        const double t_anchor = (bidx >= 0 && bidx < static_cast<int>(state.T.size())) ? state.T[bidx] : ic.T_init;
+                        const int wbidx = well_mgr.FindWellBlockIndex(w.well_name);
+                        const int cidx = w.completion_solver_index;
+                        const double p_anchor =
+                            (wbidx >= 0 && wbidx < static_cast<int>(state.P.size())) ? state.P[wbidx] :
+                            ((cidx >= 0 && cidx < static_cast<int>(state.P.size())) ? state.P[cidx] : ic.P_init);
+                        const double t_anchor =
+                            (wbidx >= 0 && wbidx < static_cast<int>(state.T.size())) ? state.T[wbidx] :
+                            ((cidx >= 0 && cidx < static_cast<int>(state.T.size())) ? state.T[cidx] : ic.T_init);
 
                         if (w.control_mode == WellControlMode::Rate && active_control_ramp_apply_rate) {
                             w.target_value *= control_ramp;
@@ -1570,14 +1738,20 @@ namespace FIM_Engine {
                 SyncStateToFieldManager(eval_state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                std::vector<WellCompletionLinearization> w_lin;
+                const auto well_bhp_probe = well_mgr.BuildWellBhpMap(eval_state);
                 const int well_dof_w = (N == 3) ? 0 : (sp_use_co2 ? -1 : 0);
                 const int well_dof_g = (N == 3) ? 1 : (sp_use_co2 ? 0 : -1);
                 const int well_dof_e = (N == 3) ? 2 : 1;
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_2D_FullJac(
+                        mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e,
+                        w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg, &w_lin, &well_bhp_probe);
                 }
                 else {
-                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_3D_FullJac(
+                        mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e,
+                        w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg, &w_lin, &well_bhp_probe);
                 }
                 const double kWellSourceSignProbe = params.well_source_sign;
                 for (int bi = 0; bi < totalBlocks; ++bi) {
@@ -1592,8 +1766,7 @@ namespace FIM_Engine {
                 if (!well_mgr.Empty()) {
                     well_mgr.AssembleWellEquations(
                         probe_mat, eval_state, active_wells,
-                        w_res, w_jac3, mgr,
-                        kWellSourceSignProbe);
+                        w_lin, kWellSourceSignProbe);
                 }
 
                 // 4) boundary source
@@ -2118,15 +2291,21 @@ namespace FIM_Engine {
                 SyncStateToFieldManager(state, fm, mgr, sp_model, fluid_cfg, vg_cfg, rp_cfg);
                 std::vector<double> w_res(totalEq, 0.0);
                 std::vector<std::array<double, 3>> w_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                std::vector<WellCompletionLinearization> w_lin;
+                const auto well_bhp_now = well_mgr.BuildWellBhpMap(state);
                 const int well_dof_w = (N == 3) ? 0 : (sp_use_co2 ? -1 : 0);
                 const int well_dof_g = (N == 3) ? 1 : (sp_use_co2 ? 0 : -1);
                 const int well_dof_e = (N == 3) ? 2 : 1;
 
                 if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
-                    BoundaryAssembler::Assemble_Wells_2D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_2D_FullJac(
+                        mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e,
+                        w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg, &w_lin, &well_bhp_now);
                 }
                 else {
-                    BoundaryAssembler::Assemble_Wells_3D_FullJac(mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e, w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg);
+                    BoundaryAssembler::Assemble_Wells_3D_FullJac(
+                        mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e,
+                        w_res, w_jac3, fluid_cfg, vg_cfg, rp_cfg, &w_lin, &well_bhp_now);
                 }
 
                 double max_abs_well_dsw = 0.0;
@@ -2193,8 +2372,7 @@ namespace FIM_Engine {
                 if (!well_mgr.Empty()) {
                     well_mgr.AssembleWellEquations(
                         global_mat, state, active_wells,
-                        w_res, w_jac3, mgr,
-                        kWellSourceSign);
+                        w_lin, kWellSourceSign);
                 }
                 // 閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓閳光偓
 

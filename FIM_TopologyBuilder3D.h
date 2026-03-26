@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cmath>
 #include "FIM_ConnectionManager.h"
 #include "3D_MeshManager.h"
 #include "3D_FieldManager.h"
@@ -53,13 +54,20 @@ private:
             int nodeI = static_cast<int>(cellId2Idx.at(faces[i].ownerCell));
             int nodeJ = static_cast<int>(cellId2Idx.at(faces[i].neighborCell));
 
-            double dist = (faces[i].midpoint - cells[nodeI].center).Mag() +
-                (cells[nodeJ].center - faces[i].midpoint).Mag();
+            const Vector dO = faces[i].midpoint - cells[nodeI].center;
+            const Vector dN = cells[nodeJ].center - faces[i].midpoint;
+            const double nx = faces[i].normal.m_x;
+            const double ny = faces[i].normal.m_y;
+            const double nz = faces[i].normal.m_z;
+            const double dist = std::max(
+                std::abs(dO.m_x * nx + dO.m_y * ny + dO.m_z * nz) +
+                std::abs(dN.m_x * nx + dN.m_y * ny + dN.m_z * nz),
+                1e-12);
 
             connMgr.PushConnection(
                 nodeI, nodeJ,
                 pFlow->data[i], pHeat->data[i],
-                faces[i].vectorE.Mag(), std::max(dist, 1e-12),
+                faces[i].vectorE.Mag(), dist,
                 ConnectionType::Matrix_Matrix,
                 faces[i].vectorT
             );

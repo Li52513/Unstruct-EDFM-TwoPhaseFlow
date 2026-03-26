@@ -95,6 +95,72 @@ namespace {
         }
     }
 
+    inline void ResolveIndexWithSpace(
+        int input_id,
+        CompletionIdSpace id_space,
+        WellTargetDomain domain,
+        int n_matrix_dofs,
+        int& solverIdx,
+        int& localIdx)
+    {
+        if (id_space == CompletionIdSpace::SolverIndex) {
+            solverIdx = input_id;
+            localIdx = (domain == WellTargetDomain::Matrix) ? input_id : (input_id - n_matrix_dofs);
+            return;
+        }
+
+        if (id_space == CompletionIdSpace::FractureLocalIndex) {
+            if (domain == WellTargetDomain::Matrix) {
+                solverIdx = input_id;
+                localIdx = input_id;
+            }
+            else {
+                localIdx = input_id;
+                solverIdx = input_id + n_matrix_dofs;
+            }
+            return;
+        }
+
+        ResolveIndex(input_id, domain, n_matrix_dofs, solverIdx, localIdx);
+    }
+
+    inline void ResolveStepCompletionIndex(
+        const WellScheduleStep& step,
+        int n_matrix_dofs,
+        int& solverIdx,
+        int& localIdx)
+    {
+        if (step.completion_solver_index >= 0) {
+            solverIdx = step.completion_solver_index;
+            localIdx = (step.domain == WellTargetDomain::Matrix)
+                ? solverIdx
+                : (solverIdx - n_matrix_dofs);
+            return;
+        }
+
+        ResolveIndexWithSpace(
+            step.completion_id,
+            step.completion_id_space,
+            step.domain,
+            n_matrix_dofs,
+            solverIdx,
+            localIdx);
+    }
+
+    inline double ResolveWellBhpValue(
+        const WellScheduleStep& step,
+        double p_cell,
+        const std::unordered_map<std::string, double>* well_bhp_by_name)
+    {
+        if (well_bhp_by_name) {
+            auto it = well_bhp_by_name->find(step.well_name);
+            if (it != well_bhp_by_name->end() && std::isfinite(it->second)) {
+                return it->second;
+            }
+        }
+        return (step.control_mode == WellControlMode::BHP) ? step.target_value : p_cell;
+    }
+
     /**
      * @brief Create a constant AD variable with zero gradient.
      * @tparam N AD dimension.
@@ -1770,7 +1836,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D(
 
     for (const auto& step : active_steps) {
         int solverIdx = -1, localIdx = -1;
-        ResolveIndex(step.completion_id, step.domain, nMat, solverIdx, localIdx);
+        ResolveStepCompletionIndex(step, nMat, solverIdx, localIdx);
 
         std::shared_ptr<volScalarField> pField_P, pField_Kxx, pField_Kyy;
         std::shared_ptr<volScalarField> pField_MobDenW, pField_MobDenG, pField_RhoW, pField_RhoG, pField_LamW, pField_LamG;
@@ -1987,7 +2053,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D(
 
     for (const auto& step : active_steps) {
         int solverIdx = -1, localIdx = -1;
-        ResolveIndex(step.completion_id, step.domain, nMat, solverIdx, localIdx);
+        ResolveStepCompletionIndex(step, nMat, solverIdx, localIdx);
 
         std::shared_ptr<volScalarField> pField_P, pField_Kxx, pField_Kyy, pField_Kzz;
         std::shared_ptr<volScalarField> pField_MobDenW, pField_MobDenG, pField_RhoW, pField_RhoG, pField_LamW, pField_LamG;
@@ -2234,13 +2300,30 @@ namespace {
         jacobianFull[eqIdx][1] += q.grad(1);
         jacobianFull[eqIdx][2] += q.grad(2);
     }
+
+    inline void FillWellEqLinearization(
+        WellEquationLinearization& out,
+        int eq_idx,
+        int eq_dof,
+        const ADVar<3>& q,
+        double dq_dPbh)
+    {
+        out.valid = (eq_idx >= 0);
+        out.eq_index = eq_idx;
+        out.eq_dof = eq_dof;
+        out.q = q.val;
+        out.dq_dcell = { { q.grad(0), q.grad(1), q.grad(2) } };
+        out.dq_dPbh = dq_dPbh;
+    }
 }
 
 BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
     MeshManager& mgr, FieldManager_2D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
     std::vector<double>& residual, std::vector<std::array<double, 3>>& jacobianFull,
-    const FluidPropertyEvalConfig& fluid_cfg, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp)
+    const FluidPropertyEvalConfig& fluid_cfg, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp,
+    std::vector<WellCompletionLinearization>* completionLinearizations,
+    const std::unordered_map<std::string, double>* wellBhpByName)
 {
     BoundaryAssemblyStats stats;
     if (residual.size() != jacobianFull.size() || dofOffset_P < 0 || dofOffset_P >= 3) {
@@ -2256,16 +2339,20 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
     const int nMat = mgr.getMatrixDOFCount();
     const WellFieldTags tags = BuildWellFieldTags();
     const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
+    if (completionLinearizations) completionLinearizations->clear();
 
-    for (const auto& step : active_steps) {
+    for (size_t step_idx = 0; step_idx < active_steps.size(); ++step_idx) {
+        const auto& step = active_steps[step_idx];
         int solverIdx = -1, localIdx = -1;
-        ResolveIndex(step.completion_id, step.domain, nMat, solverIdx, localIdx);
+        ResolveStepCompletionIndex(step, nMat, solverIdx, localIdx);
 
         std::shared_ptr<volScalarField> pField_P, pField_T, pField_Sw;
         std::shared_ptr<volScalarField> pField_Kxx, pField_Kyy;
 
         if (step.domain == WellTargetDomain::Matrix) {
-            if (localIdx < 0 || localIdx >= static_cast<int>(mesh.getCells().size())) continue;
+            if (localIdx < 0 || localIdx >= static_cast<int>(mesh.getCells().size())) {
+                throw std::runtime_error("[Assemble_Wells_2D_FullJac] Matrix completion index out of range.");
+            }
             pField_P = fm.getMatrixScalar(tags.pressure);
             pField_T = fm.getMatrixScalar(tags.temperature);
             pField_Sw = fm.getMatrixScalar(tags.saturation);
@@ -2278,7 +2365,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
             pField_Sw = fm.getFractureScalar(tags.saturation);
         }
 
-        if (!isValidLocalIdx(localIdx, pField_P)) continue;
+        if (!isValidLocalIdx(localIdx, pField_P)) {
+            throw std::runtime_error("[Assemble_Wells_2D_FullJac] Completion points to invalid pressure field index.");
+        }
 
         double WI = step.wi_override;
         if (WI < 0.0) {
@@ -2291,10 +2380,14 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
             const double kyy = safeGetFieldValue(pField_Kyy, localIdx, 1e-13);
             const double k_eff = std::sqrt(kxx * kyy);
             const double r_eq = std::sqrt(V / 3.141592653589793);
-            if (V <= kEps || step.rw <= 0.0 || r_eq <= step.rw || k_eff <= 0.0) continue;
+            if (V <= kEps || step.rw <= 0.0 || r_eq <= step.rw || k_eff <= 0.0) {
+                throw std::runtime_error("[Assemble_Wells_2D_FullJac] Invalid geometry/properties for automatic WI evaluation.");
+            }
 
             const double denom = std::log(r_eq / step.rw) + step.skin;
-            if (denom <= kEps) continue;
+            if (denom <= kEps) {
+                throw std::runtime_error("[Assemble_Wells_2D_FullJac] Invalid WI denominator for automatic WI evaluation.");
+            }
             WI = (2.0 * 3.141592653589793 * k_eff * 1.0) / denom;
         }
 
@@ -2314,13 +2407,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
         ADVar<3> krg = MakeConstAD3(0.0);
         if (has_sw) {
             if (step.domain == WellTargetDomain::Fracture) {
-                // [DAY6-08-Well] Fracture: linear kr and Pc=0
                 if (Sw_const.val < 0.0) Sw_const = MakeConstAD3(0.0);
                 else if (Sw_const.val > 1.0) Sw_const = MakeConstAD3(1.0);
                 krw = Sw_const;
                 krg = MakeConstAD3(1.0) - Sw_const;
-                // Pc_cell remains 0.0
-            } else {
+            }
+            else {
                 Sw_const = ClampSwForConstitutiveWell<3>(Sw_cell, vg);
                 Pc_cell = CapRelPerm::pc_vG<3>(Sw_const, vg);
                 CapRelPerm::kr_Mualem_vG<3>(Sw_const, vg, rp, krw, krg);
@@ -2347,69 +2439,44 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
         ADVar<3> mob_w = (propsW.rho * krw) / propsW.mu;
         ADVar<3> mob_g = (propsG.rho * krg) / propsG.mu;
 
-        ADVar<3> q_mass_w = MakeConstAD3(0.0);
-        ADVar<3> q_mass_g = MakeConstAD3(0.0);
-
         const bool has_w_eq = (dofOffset_W >= 0);
         const bool has_g_eq = (dofOffset_G >= 0);
         const bool total_mode = has_w_eq && has_g_eq && (step.component_mode == WellComponentMode::Total);
 
-        if (step.control_mode == WellControlMode::BHP) {
-            ADVar<3> dP = P_cell - MakeConstAD3(step.target_value);
-            if (total_mode) {
-                if (dP.val < 0.0) {
-                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
-                    ADVar<3> q_total = MakeConstAD3(WI) * (mob_w + mob_g) * dP;
-                    q_mass_w = MakeConstAD3(inj_split.fw) * q_total;
-                    q_mass_g = MakeConstAD3(inj_split.fg) * q_total;
-                }
-                else {
-                    q_mass_w = MakeConstAD3(WI) * mob_w * dP;
-                    q_mass_g = MakeConstAD3(WI) * mob_g * dP;
-                }
+        const double pbh_eval = ResolveWellBhpValue(step, P_cell.val, wellBhpByName);
+        ADVar<3> dP = P_cell - MakeConstAD3(pbh_eval);
+
+        ADVar<3> q_mass_w = MakeConstAD3(0.0);
+        ADVar<3> q_mass_g = MakeConstAD3(0.0);
+        double dq_mass_w_dPbh = 0.0;
+        double dq_mass_g_dPbh = 0.0;
+
+        if (total_mode) {
+            if (dP.val < 0.0) {
+                const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                ADVar<3> q_total = MakeConstAD3(WI) * (mob_w + mob_g) * dP;
+                q_mass_w = MakeConstAD3(inj_split.fw) * q_total;
+                q_mass_g = MakeConstAD3(inj_split.fg) * q_total;
+                const double dq_total_dPbh = -WI * (mob_w.val + mob_g.val);
+                dq_mass_w_dPbh = inj_split.fw * dq_total_dPbh;
+                dq_mass_g_dPbh = inj_split.fg * dq_total_dPbh;
             }
             else {
-                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
-                if (split.fw > 0.0) {
-                    q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * dP;
-                }
-                if (split.fg > 0.0) {
-                    q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * dP;
-                }
+                q_mass_w = MakeConstAD3(WI) * mob_w * dP;
+                q_mass_g = MakeConstAD3(WI) * mob_g * dP;
+                dq_mass_w_dPbh = -WI * mob_w.val;
+                dq_mass_g_dPbh = -WI * mob_g.val;
             }
         }
-        else if (step.control_mode == WellControlMode::Rate) {
-            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step, fluid_ctx);
-            if (total_mode) {
-                PhaseSplit user_split;
-                const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
-                const bool is_injection = (step.target_value < 0.0);
-
-                if (is_injection) {
-                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
-                    q_mass_w = BuildMassRateBySplitConst<3>(step, inj_split.fw, std_dens, true);
-                    q_mass_g = BuildMassRateBySplitConst<3>(step, inj_split.fg, std_dens, false);
-                }
-                else if (has_user_split) {
-                    q_mass_w = BuildMassRateBySplitConst<3>(step, user_split.fw, std_dens, true);
-                    q_mass_g = BuildMassRateBySplitConst<3>(step, user_split.fg, std_dens, false);
-                }
-                else {
-                    const ADVar<3> denom = mob_w + mob_g + MakeConstAD3(kEps);
-                    const ADVar<3> fw_ad = mob_w / denom;
-                    const ADVar<3> fg_ad = MakeConstAD3(1.0) - fw_ad;
-                    q_mass_w = BuildMassRateBySplitAD<3>(step, fw_ad, std_dens, true);
-                    q_mass_g = BuildMassRateBySplitAD<3>(step, fg_ad, std_dens, false);
-                }
+        else {
+            const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
+            if (split.fw > 0.0) {
+                q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * dP;
+                dq_mass_w_dPbh = -WI * split.fw * mob_w.val;
             }
-            else {
-                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
-                if (split.fw > 0.0) {
-                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
-                }
-                if (split.fg > 0.0) {
-                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
-                }
+            if (split.fg > 0.0) {
+                q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * dP;
+                dq_mass_g_dPbh = -WI * split.fg * mob_g.val;
             }
         }
 
@@ -2417,8 +2484,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
         ADVar<3> h_g_well = propsG.h;
         if (step.injection_temperature > 0.0) {
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
-            const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
-            ADVar<3> P_inj_const = MakeConstAD3(p_inj);
+            ADVar<3> P_inj_const = MakeConstAD3(pbh_eval);
             if (q_mass_w.val < 0.0) {
                 h_w_well = has_sw
                     ? FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, P_inj_const, T_inj).h
@@ -2430,20 +2496,38 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_2D_FullJac(
                     : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_inj_const, T_inj).h;
             }
         }
-        ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
 
-        if (dofOffset_W >= 0) {
-            const int eqIdx_W = mgr.getEquationIndex(solverIdx, dofOffset_W);
-            AddWellEqContribution(eqIdx_W, q_mass_w, jacobianFull, residual);
+        ADVar<3> q_total = q_mass_w + q_mass_g;
+        ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
+        const double dq_total_dPbh = dq_mass_w_dPbh + dq_mass_g_dPbh;
+        const double dq_energy_dPbh = dq_mass_w_dPbh * h_w_well.val + dq_mass_g_dPbh * h_g_well.val;
+
+        const int eqIdx_W = (dofOffset_W >= 0) ? mgr.getEquationIndex(solverIdx, dofOffset_W) : -1;
+        const int eqIdx_G = (dofOffset_G >= 0) ? mgr.getEquationIndex(solverIdx, dofOffset_G) : -1;
+        const int eqIdx_E = (dofOffset_E >= 0) ? mgr.getEquationIndex(solverIdx, dofOffset_E) : -1;
+
+        if (dofOffset_W >= 0) AddWellEqContribution(eqIdx_W, q_mass_w, jacobianFull, residual);
+        if (dofOffset_G >= 0) AddWellEqContribution(eqIdx_G, q_mass_g, jacobianFull, residual);
+        if (dofOffset_E >= 0) AddWellEqContribution(eqIdx_E, q_energy, jacobianFull, residual);
+
+        if (completionLinearizations) {
+            WellCompletionLinearization rec;
+            rec.step_index = step_idx;
+            rec.well_name = step.well_name;
+            rec.completion_solver_index = (step.completion_solver_index >= 0) ? step.completion_solver_index : solverIdx;
+            rec.domain = step.domain;
+            rec.pbh_eval = pbh_eval;
+            rec.q_total = q_total.val;
+            rec.dqtotal_dcell = { { q_total.grad(0), q_total.grad(1), q_total.grad(2) } };
+            rec.dqtotal_dPbh = dq_total_dPbh;
+            FillWellEqLinearization(rec.water, eqIdx_W, dofOffset_W, q_mass_w, dq_mass_w_dPbh);
+            FillWellEqLinearization(rec.gas, eqIdx_G, dofOffset_G, q_mass_g, dq_mass_g_dPbh);
+            FillWellEqLinearization(rec.energy, eqIdx_E, dofOffset_E, q_energy, dq_energy_dPbh);
+            completionLinearizations->push_back(rec);
         }
-        if (dofOffset_G >= 0) {
-            const int eqIdx_G = mgr.getEquationIndex(solverIdx, dofOffset_G);
-            AddWellEqContribution(eqIdx_G, q_mass_g, jacobianFull, residual);
-        }
-        if (dofOffset_E >= 0) {
-            const int eqIdx_E = mgr.getEquationIndex(solverIdx, dofOffset_E);
-            AddWellEqContribution(eqIdx_E, q_energy, jacobianFull, residual);
-        }
+
+        if (step.domain == WellTargetDomain::Matrix) stats.matrixBCCount++;
+        else stats.fractureBCCount++;
     }
 
     return stats;
@@ -2452,7 +2536,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
     MeshManager_3D& mgr, FieldManager_3D& fm, const std::vector<WellScheduleStep>& active_steps,
     int dofOffset_P, int dofOffset_W, int dofOffset_G, int dofOffset_E,
     std::vector<double>& residual, std::vector<std::array<double, 3>>& jacobianFull,
-    const FluidPropertyEvalConfig& fluid_cfg, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp)
+    const FluidPropertyEvalConfig& fluid_cfg, const CapRelPerm::VGParams& vg, const CapRelPerm::RelPermParams& rp,
+    std::vector<WellCompletionLinearization>* completionLinearizations,
+    const std::unordered_map<std::string, double>* wellBhpByName)
 {
     BoundaryAssemblyStats stats;
     if (residual.size() != jacobianFull.size() || dofOffset_P < 0 || dofOffset_P >= 3) {
@@ -2468,16 +2554,20 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
     const int nMat = get3DMatrixOffset(mgr);
     const WellFieldTags tags = BuildWellFieldTags();
     const FIM_Engine::FluidPropertyEvalContext fluid_ctx = BuildFluidEvalContext(fluid_cfg);
+    if (completionLinearizations) completionLinearizations->clear();
 
-    for (const auto& step : active_steps) {
+    for (size_t step_idx = 0; step_idx < active_steps.size(); ++step_idx) {
+        const auto& step = active_steps[step_idx];
         int solverIdx = -1, localIdx = -1;
-        ResolveIndex(step.completion_id, step.domain, nMat, solverIdx, localIdx);
+        ResolveStepCompletionIndex(step, nMat, solverIdx, localIdx);
 
         std::shared_ptr<volScalarField> pField_P, pField_T, pField_Sw;
         std::shared_ptr<volScalarField> pField_Kxx, pField_Kyy, pField_Kzz;
 
         if (step.domain == WellTargetDomain::Matrix) {
-            if (localIdx < 0 || localIdx >= static_cast<int>(mesh.getCells().size())) continue;
+            if (localIdx < 0 || localIdx >= static_cast<int>(mesh.getCells().size())) {
+                throw std::runtime_error("[Assemble_Wells_3D_FullJac] Matrix completion index out of range.");
+            }
             pField_P = fm.getMatrixScalar(tags.pressure);
             pField_T = fm.getMatrixScalar(tags.temperature);
             pField_Sw = fm.getMatrixScalar(tags.saturation);
@@ -2491,7 +2581,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
             pField_Sw = fm.getFractureScalar(tags.saturation);
         }
 
-        if (!isValidLocalIdx(localIdx, pField_P)) continue;
+        if (!isValidLocalIdx(localIdx, pField_P)) {
+            throw std::runtime_error("[Assemble_Wells_3D_FullJac] Completion points to invalid pressure field index.");
+        }
 
         double WI = step.wi_override;
         if (WI < 0.0) {
@@ -2517,7 +2609,9 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
                 L = max_ax - min_ax;
             }
 
-            if (V <= kEps || step.rw <= 0.0 || L <= kEps) continue;
+            if (V <= kEps || step.rw <= 0.0 || L <= kEps) {
+                throw std::runtime_error("[Assemble_Wells_3D_FullJac] Invalid geometry/properties for automatic WI evaluation.");
+            }
 
             const double r_eq = std::sqrt(V / (3.141592653589793 * L));
             const double kxx = safeGetFieldValue(pField_Kxx, localIdx, 1e-13);
@@ -2529,10 +2623,14 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
             else if (axis == WellAxis::Y) k_plane = std::sqrt(kxx * kzz);
             else k_plane = std::sqrt(kxx * kyy);
 
-            if (r_eq <= step.rw || k_plane <= 0.0) continue;
+            if (r_eq <= step.rw || k_plane <= 0.0) {
+                throw std::runtime_error("[Assemble_Wells_3D_FullJac] Degenerated WI geometry in automatic WI evaluation.");
+            }
 
             const double denom = std::log(r_eq / step.rw) + step.skin;
-            if (denom <= kEps) continue;
+            if (denom <= kEps) {
+                throw std::runtime_error("[Assemble_Wells_3D_FullJac] Invalid WI denominator for automatic WI evaluation.");
+            }
             WI = (2.0 * 3.141592653589793 * k_plane * L) / denom;
         }
 
@@ -2552,13 +2650,12 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
         ADVar<3> krg = MakeConstAD3(0.0);
         if (has_sw) {
             if (step.domain == WellTargetDomain::Fracture) {
-                // [DAY6-08-Well] Fracture: linear kr and Pc=0
                 if (Sw_const.val < 0.0) Sw_const = MakeConstAD3(0.0);
                 else if (Sw_const.val > 1.0) Sw_const = MakeConstAD3(1.0);
                 krw = Sw_const;
                 krg = MakeConstAD3(1.0) - Sw_const;
-                // Pc_cell remains 0.0
-            } else {
+            }
+            else {
                 Sw_const = ClampSwForConstitutiveWell<3>(Sw_cell, vg);
                 Pc_cell = CapRelPerm::pc_vG<3>(Sw_const, vg);
                 CapRelPerm::kr_Mualem_vG<3>(Sw_const, vg, rp, krw, krg);
@@ -2585,69 +2682,44 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
         ADVar<3> mob_w = (propsW.rho * krw) / propsW.mu;
         ADVar<3> mob_g = (propsG.rho * krg) / propsG.mu;
 
-        ADVar<3> q_mass_w = MakeConstAD3(0.0);
-        ADVar<3> q_mass_g = MakeConstAD3(0.0);
-
         const bool has_w_eq = (dofOffset_W >= 0);
         const bool has_g_eq = (dofOffset_G >= 0);
         const bool total_mode = has_w_eq && has_g_eq && (step.component_mode == WellComponentMode::Total);
 
-        if (step.control_mode == WellControlMode::BHP) {
-            ADVar<3> dP = P_cell - MakeConstAD3(step.target_value);
-            if (total_mode) {
-                if (dP.val < 0.0) {
-                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
-                    ADVar<3> q_total = MakeConstAD3(WI) * (mob_w + mob_g) * dP;
-                    q_mass_w = MakeConstAD3(inj_split.fw) * q_total;
-                    q_mass_g = MakeConstAD3(inj_split.fg) * q_total;
-                }
-                else {
-                    q_mass_w = MakeConstAD3(WI) * mob_w * dP;
-                    q_mass_g = MakeConstAD3(WI) * mob_g * dP;
-                }
+        const double pbh_eval = ResolveWellBhpValue(step, P_cell.val, wellBhpByName);
+        ADVar<3> dP = P_cell - MakeConstAD3(pbh_eval);
+
+        ADVar<3> q_mass_w = MakeConstAD3(0.0);
+        ADVar<3> q_mass_g = MakeConstAD3(0.0);
+        double dq_mass_w_dPbh = 0.0;
+        double dq_mass_g_dPbh = 0.0;
+
+        if (total_mode) {
+            if (dP.val < 0.0) {
+                const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
+                ADVar<3> q_total = MakeConstAD3(WI) * (mob_w + mob_g) * dP;
+                q_mass_w = MakeConstAD3(inj_split.fw) * q_total;
+                q_mass_g = MakeConstAD3(inj_split.fg) * q_total;
+                const double dq_total_dPbh = -WI * (mob_w.val + mob_g.val);
+                dq_mass_w_dPbh = inj_split.fw * dq_total_dPbh;
+                dq_mass_g_dPbh = inj_split.fg * dq_total_dPbh;
             }
             else {
-                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
-                if (split.fw > 0.0) {
-                    q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * dP;
-                }
-                if (split.fg > 0.0) {
-                    q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * dP;
-                }
+                q_mass_w = MakeConstAD3(WI) * mob_w * dP;
+                q_mass_g = MakeConstAD3(WI) * mob_g * dP;
+                dq_mass_w_dPbh = -WI * mob_w.val;
+                dq_mass_g_dPbh = -WI * mob_g.val;
             }
         }
-        else if (step.control_mode == WellControlMode::Rate) {
-            const StandardConditionDensities std_dens = EvaluateStandardConditionDensities(step, fluid_ctx);
-            if (total_mode) {
-                PhaseSplit user_split;
-                const bool has_user_split = TryResolveUserSpecifiedPhaseSplit(step, user_split);
-                const bool is_injection = (step.target_value < 0.0);
-
-                if (is_injection) {
-                    const PhaseSplit inj_split = ResolveInjectionPhaseSplit(step, has_w_eq, has_g_eq);
-                    q_mass_w = BuildMassRateBySplitConst<3>(step, inj_split.fw, std_dens, true);
-                    q_mass_g = BuildMassRateBySplitConst<3>(step, inj_split.fg, std_dens, false);
-                }
-                else if (has_user_split) {
-                    q_mass_w = BuildMassRateBySplitConst<3>(step, user_split.fw, std_dens, true);
-                    q_mass_g = BuildMassRateBySplitConst<3>(step, user_split.fg, std_dens, false);
-                }
-                else {
-                    const ADVar<3> denom = mob_w + mob_g + MakeConstAD3(kEps);
-                    const ADVar<3> fw_ad = mob_w / denom;
-                    const ADVar<3> fg_ad = MakeConstAD3(1.0) - fw_ad;
-                    q_mass_w = BuildMassRateBySplitAD<3>(step, fw_ad, std_dens, true);
-                    q_mass_g = BuildMassRateBySplitAD<3>(step, fg_ad, std_dens, false);
-                }
+        else {
+            const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
+            if (split.fw > 0.0) {
+                q_mass_w = MakeConstAD3(WI * split.fw) * mob_w * dP;
+                dq_mass_w_dPbh = -WI * split.fw * mob_w.val;
             }
-            else {
-                const PhaseSplit split = ResolvePhaseSplit(step, mob_w.val, mob_g.val, has_w_eq, has_g_eq);
-                if (split.fw > 0.0) {
-                    q_mass_w = BuildMassRateBySplitConst<3>(step, split.fw, std_dens, true);
-                }
-                if (split.fg > 0.0) {
-                    q_mass_g = BuildMassRateBySplitConst<3>(step, split.fg, std_dens, false);
-                }
+            if (split.fg > 0.0) {
+                q_mass_g = MakeConstAD3(WI * split.fg) * mob_g * dP;
+                dq_mass_g_dPbh = -WI * split.fg * mob_g.val;
             }
         }
 
@@ -2655,8 +2727,7 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
         ADVar<3> h_g_well = propsG.h;
         if (step.injection_temperature > 0.0) {
             ADVar<3> T_inj = MakeConstAD3(step.injection_temperature);
-            const double p_inj = (step.control_mode == WellControlMode::BHP) ? step.target_value : P_cell.val;
-            ADVar<3> P_inj_const = MakeConstAD3(p_inj);
+            ADVar<3> P_inj_const = MakeConstAD3(pbh_eval);
             if (q_mass_w.val < 0.0) {
                 h_w_well = has_sw
                     ? FIM_Engine::EvalTwoPhaseWaterFluid<3>(fluid_ctx, P_inj_const, T_inj).h
@@ -2668,20 +2739,38 @@ BoundaryAssemblyStats BoundaryAssembler::Assemble_Wells_3D_FullJac(
                     : FIM_Engine::EvalSinglePhaseFluid<3>(fluid_ctx, P_inj_const, T_inj).h;
             }
         }
-        ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
 
-        if (dofOffset_W >= 0) {
-            const int eqIdx_W = mgr.getEquationIndex(solverIdx, dofOffset_W);
-            AddWellEqContribution(eqIdx_W, q_mass_w, jacobianFull, residual);
+        ADVar<3> q_total = q_mass_w + q_mass_g;
+        ADVar<3> q_energy = (q_mass_w * h_w_well) + (q_mass_g * h_g_well);
+        const double dq_total_dPbh = dq_mass_w_dPbh + dq_mass_g_dPbh;
+        const double dq_energy_dPbh = dq_mass_w_dPbh * h_w_well.val + dq_mass_g_dPbh * h_g_well.val;
+
+        const int eqIdx_W = (dofOffset_W >= 0) ? mgr.getEquationIndex(solverIdx, dofOffset_W) : -1;
+        const int eqIdx_G = (dofOffset_G >= 0) ? mgr.getEquationIndex(solverIdx, dofOffset_G) : -1;
+        const int eqIdx_E = (dofOffset_E >= 0) ? mgr.getEquationIndex(solverIdx, dofOffset_E) : -1;
+
+        if (dofOffset_W >= 0) AddWellEqContribution(eqIdx_W, q_mass_w, jacobianFull, residual);
+        if (dofOffset_G >= 0) AddWellEqContribution(eqIdx_G, q_mass_g, jacobianFull, residual);
+        if (dofOffset_E >= 0) AddWellEqContribution(eqIdx_E, q_energy, jacobianFull, residual);
+
+        if (completionLinearizations) {
+            WellCompletionLinearization rec;
+            rec.step_index = step_idx;
+            rec.well_name = step.well_name;
+            rec.completion_solver_index = (step.completion_solver_index >= 0) ? step.completion_solver_index : solverIdx;
+            rec.domain = step.domain;
+            rec.pbh_eval = pbh_eval;
+            rec.q_total = q_total.val;
+            rec.dqtotal_dcell = { { q_total.grad(0), q_total.grad(1), q_total.grad(2) } };
+            rec.dqtotal_dPbh = dq_total_dPbh;
+            FillWellEqLinearization(rec.water, eqIdx_W, dofOffset_W, q_mass_w, dq_mass_w_dPbh);
+            FillWellEqLinearization(rec.gas, eqIdx_G, dofOffset_G, q_mass_g, dq_mass_g_dPbh);
+            FillWellEqLinearization(rec.energy, eqIdx_E, dofOffset_E, q_energy, dq_energy_dPbh);
+            completionLinearizations->push_back(rec);
         }
-        if (dofOffset_G >= 0) {
-            const int eqIdx_G = mgr.getEquationIndex(solverIdx, dofOffset_G);
-            AddWellEqContribution(eqIdx_G, q_mass_g, jacobianFull, residual);
-        }
-        if (dofOffset_E >= 0) {
-            const int eqIdx_E = mgr.getEquationIndex(solverIdx, dofOffset_E);
-            AddWellEqContribution(eqIdx_E, q_energy, jacobianFull, residual);
-        }
+
+        if (step.domain == WellTargetDomain::Matrix) stats.matrixBCCount++;
+        else stats.fractureBCCount++;
     }
 
     return stats;

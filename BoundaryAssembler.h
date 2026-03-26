@@ -8,6 +8,7 @@
 #include <array>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "MeshManager.h"
@@ -59,6 +60,31 @@ struct FluidPropertyEvalConfig {
 
     FluidConstantProperties water = FluidConstantProperties{};
     FluidConstantProperties gas = FluidConstantProperties{ 700.0, 5.0e-5, 1200.0, 900.0, 0.08 };
+};
+
+struct WellEquationLinearization {
+    bool valid = false;
+    int eq_index = -1;         ///< global equation index in reservoir system
+    int eq_dof = -1;           ///< equation DOF within cell block
+    double q = 0.0;            ///< source contribution (outflow-positive convention)
+    std::array<double, 3> dq_dcell{ {0.0, 0.0, 0.0} }; ///< d/d(P,Sw,T) local cell state
+    double dq_dPbh = 0.0;      ///< derivative w.r.t well BHP
+};
+
+struct WellCompletionLinearization {
+    size_t step_index = 0;     ///< index in active_steps passed to assembler
+    std::string well_name;
+    int completion_solver_index = -1;
+    WellTargetDomain domain = WellTargetDomain::Matrix;
+    double pbh_eval = 0.0;
+
+    WellEquationLinearization water;
+    WellEquationLinearization gas;
+    WellEquationLinearization energy;
+
+    double q_total = 0.0;
+    std::array<double, 3> dqtotal_dcell{ {0.0, 0.0, 0.0} };
+    double dqtotal_dPbh = 0.0;
 };
 
 class BoundaryAssembler {
@@ -171,7 +197,9 @@ public:
         std::vector<std::array<double, 3>>& jacobianFull,
         const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
-        const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
+        const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams(),
+        std::vector<WellCompletionLinearization>* completionLinearizations = nullptr,
+        const std::unordered_map<std::string, double>* wellBhpByName = nullptr
     );
 
     static BoundaryAssemblyStats Assemble_Wells_3D(
@@ -198,7 +226,9 @@ public:
         std::vector<std::array<double, 3>>& jacobianFull,
         const FluidPropertyEvalConfig& fluid_cfg = FluidPropertyEvalConfig(),
         const CapRelPerm::VGParams& vg = CapRelPerm::VGParams(),
-        const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams()
+        const CapRelPerm::RelPermParams& rp = CapRelPerm::RelPermParams(),
+        std::vector<WellCompletionLinearization>* completionLinearizations = nullptr,
+        const std::unordered_map<std::string, double>* wellBhpByName = nullptr
     );
 };
 

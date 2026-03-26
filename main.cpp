@@ -27,7 +27,10 @@
 #include "Test_Day6_TransientSolver.h"
 #include "FullCaseTest.h"
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h"
+#include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_CO2_ConstPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
 #include "ADVar.hpp"
@@ -148,7 +151,10 @@ int main (int argc, char** argv) {
         {"full_n1_template_const_nowell_singlefrac", "FullCase N=1 template: 2D single-phase CO2 const-property no-well single-fracture", []() { FullCaseTest::RunN1TemplateConstNoWellSingleFrac(); return 0; }},
         {"full_n1_template_const_nowell_crossfrac", "FullCase N=1 template: 2D single-phase CO2 const-property no-well cross-fracture", []() { FullCaseTest::RunN1TemplateConstNoWellCrossFrac(); return 0; }},
         {"test_h_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property no-fracture no-well (independent template)", []() { Test_H_CO2_ConstPP::RunTestCase(); return 0; }},
+        {"test_h_t_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::RunTestCase(); return 0; }},
+        {"test_h_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property single-fracture no-well", []() { Test_H_CO2_ConstPP_SingleFrac::RunTestCase(); return 0; }},
         {"test_h_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) no-fracture no-well", []() { Test_H_CO2_VaryPP::RunTestCase(); return 0; }},
+        {"test_h_co2_varypp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) single-fracture no-well", []() { Test_H_CO2_VaryPP_SingleFrac::RunTestCase(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},

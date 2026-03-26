@@ -101,7 +101,14 @@ bool WellScheduleManager::LoadFromCsv(const std::string& filepath) {
 bool WellScheduleManager::ValidateStep(const WellScheduleStep& step, std::string& err) const {
     if (step.t_start >= step.t_end) { err = "t_start >= t_end"; return false; }
     if (step.rw <= 0.0) { err = "rw <= 0.0"; return false; }
-    if (step.completion_id < 0) { err = "completion_id < 0"; return false; }
+    if (step.completions.empty()) {
+        if (step.completion_id < 0) { err = "completion_id < 0"; return false; }
+    }
+    else {
+        for (const auto& c : step.completions) {
+            if (c.completion_id < 0) { err = "completion list contains completion_id < 0"; return false; }
+        }
+    }
 
     // [Patch 7] 物理有效性及无用参数豁免
     if (step.control_mode == WellControlMode::BHP) {
@@ -186,3 +193,4 @@ WellAxis WellScheduleManager::ParseAxis(const std::string& str) const {
     if (s == "none") return WellAxis::None;
     throw std::invalid_argument("Unknown axis: " + str);
 }
+
