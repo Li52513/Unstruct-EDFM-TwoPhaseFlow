@@ -753,13 +753,19 @@ double InterpolateLinear(const std::vector<double>& x, const std::vector<double>
     return y0 + (y1 - y0) * weight;
 }
 
-DenseProfileReference LoadProfileReference(const std::string& path) {
+DenseProfileReference LoadProfileReference(const std::string& path,
+                                           const std::vector<SpatialSamplePoint>& referenceStations) {
     const CsvTable table = ReadCsvTable(path);
     DenseProfileReference ref;
     ref.x.reserve(table.rows.size());
     ref.p_ref.reserve(table.rows.size());
     for (std::size_t i = 0; i < table.rows.size(); ++i) {
-        ref.x.push_back(CsvGetDouble(table, i, "x_m"));
+        double xRef = CsvGetDouble(table, i, "x_m");
+        const int stationId = static_cast<int>(std::llround(CsvGetDouble(table, i, "station_id")));
+        if (stationId >= 0 && stationId < static_cast<int>(referenceStations.size())) {
+            xRef = referenceStations[static_cast<std::size_t>(stationId)].target_x;
+        }
+        ref.x.push_back(xRef);
         ref.p_ref.push_back(CsvGetDouble(table, i, "p_ref_pa"));
     }
     std::vector<std::size_t> order(ref.x.size());
@@ -805,7 +811,7 @@ ProfileCompareMetrics EvaluateProfileAgainstReference(const std::vector<SpatialS
     if (writeCsv) {
         out.open(csvPath.c_str(), std::ios::out | std::ios::trunc);
         if (!out.good()) throw std::runtime_error("[Test_H_CO2_VaryPP] failed to write profile compare csv: " + csvPath);
-        out << "station_id,label,target_x_m,target_y_m,cell_id,actual_x_m,actual_y_m,target_time_s,actual_time_s,"
+        out << "station_id,label,target_x_m,target_y_m,cell_id,actual_x_m,actual_y_m,ref_query_x_m,target_time_s,actual_time_s,"
                "p_num_pa,p_ref_pa,abs_err_pa,abs_err_over_dP\n";
     }
     for (const auto& station : stations) {
@@ -813,7 +819,7 @@ ProfileCompareMetrics EvaluateProfileAgainstReference(const std::vector<SpatialS
             throw std::runtime_error("[Test_H_CO2_VaryPP] invalid station cell id during profile comparison.");
         }
         const double pNum = snapshot.p_blocks[static_cast<std::size_t>(station.cell_id)];
-        const double pRef = InterpolateLinear(reference.x, reference.p_ref, station.actual_x);
+        const double pRef = InterpolateLinear(reference.x, reference.p_ref, station.target_x);
         const double absErr = std::abs(pNum - pRef);
         sumAbs += absErr;
         sumSq += absErr * absErr;
@@ -821,7 +827,7 @@ ProfileCompareMetrics EvaluateProfileAgainstReference(const std::vector<SpatialS
         if (writeCsv) {
             out << station.id << "," << station.label << ","
                 << std::setprecision(12) << station.target_x << "," << station.target_y << ","
-                << station.cell_id << "," << station.actual_x << "," << station.actual_y << ","
+                << station.cell_id << "," << station.actual_x << "," << station.actual_y << "," << station.target_x << ","
                 << snapshot.target_time_s << "," << snapshot.actual_time_s << ","
                 << pNum << "," << pRef << "," << absErr << "," << (absErr / deltaP) << "\n";
         }
@@ -1231,7 +1237,8 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     profileReferences.reserve(fractions.size());
     for (double fraction : fractions) {
         profileReferences.push_back(LoadProfileReference(
-            summary.case_dir + "/reference/comsol/comsol_profile_" + MakeReportTag(fraction) + ".csv"));
+            summary.case_dir + "/reference/comsol/comsol_profile_" + MakeReportTag(fraction) + ".csv",
+            mainArtifacts.profile_stations));
     }
     const MonitorReferenceSeries monitorReference =
         LoadMonitorReference(summary.case_dir + "/reference/comsol/comsol_monitor_timeseries.csv",
