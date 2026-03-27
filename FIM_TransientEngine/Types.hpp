@@ -18,7 +18,146 @@ namespace FIM_Engine {
     enum class SolverRoute { FIM, IMPES };
     enum class LinearSolverType { SparseLU, BiCGSTAB, AMGCL, AMGCL_CPR };
     enum class SinglePhaseFluidModel { Water, CO2, ConstantWater, ConstantWaterNoConvection };
-    enum class PressureOnlyPropertyMode { ConstantBaseline, CO2_EOS };
+    enum class PressureOnlyPropertyMode { ConstantBaseline, PrimaryFluidEOS, CO2_EOS = PrimaryFluidEOS };
+    enum class FluidPropertyMode { EOS, Constant };
+
+    inline SinglePhaseFluidModel NormalizePrimaryFluidModel(SinglePhaseFluidModel model) {
+        return (model == SinglePhaseFluidModel::CO2) ? SinglePhaseFluidModel::CO2 : SinglePhaseFluidModel::Water;
+    }
+
+    struct UnifiedFluidModelConfig {
+        SinglePhaseFluidModel primary_fluid = SinglePhaseFluidModel::Water;
+
+        FluidPropertyMode pressure_only_mode = FluidPropertyMode::Constant;
+        double pressure_only_temperature_k = -1.0;
+        double pressure_only_baseline_rho = -1.0;
+        double pressure_only_baseline_mu = -1.0;
+
+        FluidPropertyMode single_phase_mode = FluidPropertyMode::EOS;
+        bool single_phase_no_convection = false;
+        FluidConstantProperties single_phase_constant = FluidConstantProperties{};
+
+        FluidPropertyMode two_phase_mode = FluidPropertyMode::EOS;
+        FluidConstantProperties two_phase_water = FluidConstantProperties{};
+        FluidConstantProperties two_phase_gas = FluidConstantProperties{ 700.0, 5.0e-5, 1200.0, 900.0, 0.08 };
+
+        static UnifiedFluidModelConfig MakePressureOnlyConstant(
+            SinglePhaseFluidModel fluid,
+            double temperature_k,
+            double rho,
+            double mu)
+        {
+            UnifiedFluidModelConfig cfg;
+            cfg.primary_fluid = NormalizePrimaryFluidModel(fluid);
+            cfg.pressure_only_mode = FluidPropertyMode::Constant;
+            cfg.pressure_only_temperature_k = temperature_k;
+            cfg.pressure_only_baseline_rho = rho;
+            cfg.pressure_only_baseline_mu = mu;
+            return cfg;
+        }
+
+        static UnifiedFluidModelConfig MakePressureOnlyEOS(
+            SinglePhaseFluidModel fluid,
+            double temperature_k)
+        {
+            UnifiedFluidModelConfig cfg;
+            cfg.primary_fluid = NormalizePrimaryFluidModel(fluid);
+            cfg.pressure_only_mode = FluidPropertyMode::EOS;
+            cfg.pressure_only_temperature_k = temperature_k;
+            return cfg;
+        }
+
+        static UnifiedFluidModelConfig MakeSinglePhaseConstant(
+            SinglePhaseFluidModel fluid,
+            const FluidConstantProperties& props,
+            bool no_convection = false)
+        {
+            UnifiedFluidModelConfig cfg;
+            cfg.primary_fluid = NormalizePrimaryFluidModel(fluid);
+            cfg.single_phase_mode = FluidPropertyMode::Constant;
+            cfg.single_phase_no_convection = no_convection;
+            cfg.single_phase_constant = props;
+            return cfg;
+        }
+
+        static UnifiedFluidModelConfig MakeSinglePhaseEOS(
+            SinglePhaseFluidModel fluid,
+            bool no_convection = false)
+        {
+            UnifiedFluidModelConfig cfg;
+            cfg.primary_fluid = NormalizePrimaryFluidModel(fluid);
+            cfg.single_phase_mode = FluidPropertyMode::EOS;
+            cfg.single_phase_no_convection = no_convection;
+            return cfg;
+        }
+
+        static UnifiedFluidModelConfig MakeTwoPhaseConstant(
+            const FluidConstantProperties& water_props,
+            const FluidConstantProperties& gas_props)
+        {
+            UnifiedFluidModelConfig cfg;
+            cfg.two_phase_mode = FluidPropertyMode::Constant;
+            cfg.two_phase_water = water_props;
+            cfg.two_phase_gas = gas_props;
+            return cfg;
+        }
+
+        static UnifiedFluidModelConfig MakeTwoPhaseEOS()
+        {
+            UnifiedFluidModelConfig cfg;
+            cfg.two_phase_mode = FluidPropertyMode::EOS;
+            return cfg;
+        }
+
+        static UnifiedFluidModelConfig MakePressureOnlyCO2Constant(
+            double temperature_k,
+            double rho,
+            double mu)
+        {
+            return MakePressureOnlyConstant(SinglePhaseFluidModel::CO2, temperature_k, rho, mu);
+        }
+
+        static UnifiedFluidModelConfig MakePressureOnlyCO2EOS(double temperature_k)
+        {
+            return MakePressureOnlyEOS(SinglePhaseFluidModel::CO2, temperature_k);
+        }
+
+        static UnifiedFluidModelConfig MakeSinglePhaseWaterConstant(
+            const FluidConstantProperties& props,
+            bool no_convection = false)
+        {
+            return MakeSinglePhaseConstant(SinglePhaseFluidModel::Water, props, no_convection);
+        }
+
+        static UnifiedFluidModelConfig MakeSinglePhaseWaterEOS(bool no_convection = false)
+        {
+            return MakeSinglePhaseEOS(SinglePhaseFluidModel::Water, no_convection);
+        }
+
+        static UnifiedFluidModelConfig MakeSinglePhaseCO2Constant(
+            const FluidConstantProperties& props,
+            bool no_convection = false)
+        {
+            return MakeSinglePhaseConstant(SinglePhaseFluidModel::CO2, props, no_convection);
+        }
+
+        static UnifiedFluidModelConfig MakeSinglePhaseCO2EOS(bool no_convection = false)
+        {
+            return MakeSinglePhaseEOS(SinglePhaseFluidModel::CO2, no_convection);
+        }
+
+        static UnifiedFluidModelConfig MakeTwoPhaseWaterCO2Constant(
+            const FluidConstantProperties& water_props,
+            const FluidConstantProperties& gas_props)
+        {
+            return MakeTwoPhaseConstant(water_props, gas_props);
+        }
+
+        static UnifiedFluidModelConfig MakeTwoPhaseWaterCO2EOS()
+        {
+            return MakeTwoPhaseEOS();
+        }
+    };
 
     struct InitialConditions {
         double P_init = 2.0e5;
@@ -195,6 +334,11 @@ namespace FIM_Engine {
         const BoundarySetting::BoundaryConditionManager* saturation_bc = nullptr;
         const BoundarySetting::BoundaryConditionManager* temperature_bc = nullptr;
 
+        // Preferred public fluid-control entry point.
+        // When enabled, the resolver below derives all legacy per-route controls from this config.
+        bool use_unified_fluid_model = false;
+        UnifiedFluidModelConfig fluid_model = UnifiedFluidModelConfig();
+
         // Unified fluid-property controls for N=2/N=3.
         // Default keeps EOS behavior unless explicitly enabled.
         FluidPropertyEvalConfig fluid_property_eval = FluidPropertyEvalConfig();
@@ -236,6 +380,51 @@ namespace FIM_Engine {
 
         // Keep legacy default exports unless explicitly disabled by caller.
         bool disable_default_vtk_output = false;
+
+        void SetFluidModelConfig(const UnifiedFluidModelConfig& cfg) {
+            fluid_model = cfg;
+            use_unified_fluid_model = true;
+        }
     };
+
+    template <typename MeshMgrType, typename FieldMgrType>
+    inline TransientOptionalModules<MeshMgrType, FieldMgrType>
+    ResolveTransientFluidModelConfig(
+        const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules_in)
+    {
+        auto modules = modules_in;
+        if (!modules.use_unified_fluid_model) {
+            return modules;
+        }
+
+        const auto& cfg = modules.fluid_model;
+        const SinglePhaseFluidModel primary_fluid = NormalizePrimaryFluidModel(cfg.primary_fluid);
+
+        FluidPropertyEvalConfig resolved_fluid_cfg = FluidPropertyEvalConfig();
+        resolved_fluid_cfg.enable_two_phase_constant = (cfg.two_phase_mode == FluidPropertyMode::Constant);
+        resolved_fluid_cfg.water = cfg.two_phase_water;
+        resolved_fluid_cfg.gas = cfg.two_phase_gas;
+        resolved_fluid_cfg.enable_single_phase_constant = (cfg.single_phase_mode == FluidPropertyMode::Constant);
+        resolved_fluid_cfg.single_phase_is_co2 = (primary_fluid == SinglePhaseFluidModel::CO2);
+        resolved_fluid_cfg.single_phase_no_convection = cfg.single_phase_no_convection;
+        if (resolved_fluid_cfg.enable_single_phase_constant) {
+            if (resolved_fluid_cfg.single_phase_is_co2) {
+                resolved_fluid_cfg.gas = cfg.single_phase_constant;
+            }
+            else {
+                resolved_fluid_cfg.water = cfg.single_phase_constant;
+            }
+        }
+
+        modules.single_phase_fluid = primary_fluid;
+        modules.fluid_property_eval = resolved_fluid_cfg;
+        modules.pressure_only_property_mode = (cfg.pressure_only_mode == FluidPropertyMode::EOS)
+            ? PressureOnlyPropertyMode::PrimaryFluidEOS
+            : PressureOnlyPropertyMode::ConstantBaseline;
+        modules.pressure_only_temperature_k = cfg.pressure_only_temperature_k;
+        modules.pressure_only_baseline_rho = cfg.pressure_only_baseline_rho;
+        modules.pressure_only_baseline_mu = cfg.pressure_only_baseline_mu;
+        return modules;
+    }
 
 } // namespace FIM_Engine

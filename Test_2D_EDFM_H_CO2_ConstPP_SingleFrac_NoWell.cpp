@@ -370,11 +370,10 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
 
     FIM_Engine::TransientOptionalModules<MeshManager, FieldManager_2D> modules;
     modules.pressure_bc = &bcP;
-    modules.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
-    modules.pressure_only_property_mode = FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline;
-    modules.pressure_only_temperature_k = cfg.t_init;
-    modules.pressure_only_baseline_rho = cfg.rho_const;
-    modules.pressure_only_baseline_mu = cfg.mu_const;
+    modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakePressureOnlyCO2Constant(
+        cfg.t_init,
+        cfg.rho_const,
+        cfg.mu_const));
     modules.disable_default_vtk_output = true;
 
     modules.property_initializer = [&cfg](MeshManager&, FieldManager_2D& fld) {

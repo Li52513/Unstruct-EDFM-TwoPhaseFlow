@@ -374,9 +374,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
 
     FIM_Engine::TransientOptionalModules<MeshManager, FieldManager_2D> modules;
     modules.pressure_bc = &bcP;
-    modules.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
-    modules.pressure_only_property_mode = FIM_Engine::PressureOnlyPropertyMode::CO2_EOS;
-    modules.pressure_only_temperature_k = cfg.t_init;
+    modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakePressureOnlyCO2EOS(cfg.t_init));
     modules.disable_default_vtk_output = true;
 
     modules.property_initializer = [&cfg](MeshManager&, FieldManager_2D& fld) {

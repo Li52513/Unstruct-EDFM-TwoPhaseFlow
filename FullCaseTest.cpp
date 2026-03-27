@@ -470,14 +470,14 @@ N1CaseSummary RunN1Common(const N1CaseSpec& cfg) {
 
     FIM_Engine::TransientOptionalModules<MeshManager, FieldManager_2D> modules;
     modules.pressure_bc = &bcP;
-    modules.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
-    modules.pressure_only_property_mode = cfg.use_co2_eos
-        ? FIM_Engine::PressureOnlyPropertyMode::CO2_EOS
-        : FIM_Engine::PressureOnlyPropertyMode::ConstantBaseline;
-    modules.pressure_only_temperature_k = cfg.t_init;
-    if (!cfg.use_co2_eos) {
-        modules.pressure_only_baseline_rho = cfg.rho_const;
-        modules.pressure_only_baseline_mu = cfg.mu_const;
+    if (cfg.use_co2_eos) {
+        modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakePressureOnlyCO2EOS(cfg.t_init));
+    }
+    else {
+        modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakePressureOnlyCO2Constant(
+            cfg.t_init,
+            cfg.rho_const,
+            cfg.mu_const));
     }
     modules.disable_default_vtk_output = true;
 
@@ -889,25 +889,25 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 
 // Fluid (water)
-constexpr double kMu_w   = 1.0e-3;    // Pa路s
-constexpr double kRho_w  = 1000.0;    // kg/m鲁
-constexpr double kCp_w   = 4200.0;    // J/(kg路K)
-constexpr double kCt_w   = 4.5e-10;   // Pa鈦宦?(fluid compressibility)
-constexpr double kLam_w  = 0.6;       // W/(m路K)
+constexpr double kMu_w   = 1.0e-3;    // Pa*s
+constexpr double kRho_w  = 1000.0;    // kg/m^3
+constexpr double kCp_w   = 4200.0;    // J/(kg*K)
+constexpr double kCt_w   = 4.5e-10;   // Pa^-1 (fluid compressibility)
+constexpr double kLam_w  = 0.6;       // W/(m*K)
 
 // Rock
-constexpr double kRho_r  = 2650.0;    // kg/m鲁
-constexpr double kCp_r   = 920.0;     // J/(kg路K)
-constexpr double kLam_r  = 3.0;       // W/(m路K)
+constexpr double kRho_r  = 2650.0;    // kg/m^3
+constexpr double kCp_r   = 920.0;     // J/(kg*K)
+constexpr double kLam_r  = 3.0;       // W/(m*K)
 
-// Two-phase (CO鈧?water Corey params for analytical BL)
+// Two-phase (CO2-water Corey params for analytical BL)
 constexpr double kKrw_max = 0.5;
 constexpr double kKro_max = 0.8;
 constexpr double kNw      = 2.0;
 constexpr double kNo      = 2.0;
 constexpr double kSwi     = 0.2;
 constexpr double kSor     = 0.2;
-constexpr double kMu_o    = 5.0e-5;   // CO鈧?viscosity [Pa路s]
+constexpr double kMu_o    = 5.0e-5;   // CO2 viscosity [Pa*s]
 
 // ============================================================
 // Directory helper
@@ -975,11 +975,11 @@ static double TheisW(double u) {
     if (u >= 60.0) return 0.0;
 
     // Use series expansion for all u (converges well for u<10)
-    // W(u) = -Ei(-u) = 鈭玙u^鈭?exp(-t)/t dt
+    // W(u) = -Ei(-u) = integral_u^inf exp(-t)/t dt
     // For u<1: power series is accurate
     // For u>=1: use asymptotic series (careful)
     if (u < 10.0) {
-        // Series: W(u) = -纬 - ln(u) + u - u虏/(2路2!) + u鲁/(3路3!) - ...
+        // Series: W(u) = -EulerGamma - ln(u) + u - u^2/(2*2!) + u^3/(3*3!) - ...
         const double gamma = 0.5772156649015328606;
         double sum = 0.0;
         double term = 1.0;
@@ -989,7 +989,7 @@ static double TheisW(double u) {
             sum += sign * term / static_cast<double>(k);
             sign = -sign;
         }
-        // Actually simpler formula: W(u) = -纬 - ln(u) - 危_{k=1}^鈭?(-u)^k / (k路k!)
+        // Equivalent form: W(u) = -EulerGamma - ln(u) - sum_{k=1}^inf (-u)^k / (k*k!)
         // Re-implement cleanly:
         double s2 = 0.0;
         double uk = u;
@@ -1004,7 +1004,7 @@ static double TheisW(double u) {
         return -gamma - std::log(u) - s2;
     }
     else {
-        // Asymptotic series: W(u) 鈮?exp(-u)/u * (1 - 1/u + 2/u虏 - 6/u鲁 + ...)
+        // Asymptotic series: W(u) ~ exp(-u)/u * (1 - 1/u + 2/u^2 - 6/u^3 + ...)
         // Only first few terms are useful for moderate u
         double emu = std::exp(-u);
         if (emu < 1e-30) return 0.0;
@@ -1167,20 +1167,29 @@ static FIM_CaseKit::PropertyPreset2D BuildPreset_SP(
     p.frac.rho_f = rho_r;
     p.frac.cp_f  = cp_r;
     p.frac.k_f   = k_r;
-    if (fc == FluidConfig::PressureOnly)
+    p.use_unified_fluid_model = true;
+    FluidConstantProperties water_props;
+    if (fc == FluidConfig::PressureOnly) {
+        p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseWaterConstant(water_props, true);
         p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::ConstantWaterNoConvection;
-    else if (fc == FluidConfig::ConstantWater)
+    }
+    else if (fc == FluidConfig::ConstantWater) {
+        p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseWaterConstant(water_props, false);
         p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::ConstantWater;
-    else
+    }
+    else {
+        p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseWaterEOS();
         p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
+    }
     return p;
 }
 
 static FIM_CaseKit::PropertyPreset2D BuildPreset_TP(
     double phi, double k, double c_r,
-    double rho_r, double cp_r, double k_r)
+    double rho_r, double cp_r, double k_r,
+    FIM_Engine::FluidPropertyMode tp_mode = FIM_Engine::FluidPropertyMode::EOS)
 {
-    // Two-phase: always Water+CO2 EOS for N=3
+    // Two-phase public switch: Water+CO2 EOS or Water+CO2 constant properties.
     auto p = FIM_CaseKit::MakeDefaultPropertyPreset2D();
     p.enable_rock_region = false;
     p.rock_bg.phi_r  = phi;
@@ -1198,6 +1207,16 @@ static FIM_CaseKit::PropertyPreset2D BuildPreset_TP(
     p.frac.rho_f = rho_r;
     p.frac.cp_f  = cp_r;
     p.frac.k_f   = k_r;
+    p.use_unified_fluid_model = true;
+    if (tp_mode == FIM_Engine::FluidPropertyMode::Constant) {
+        p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeTwoPhaseWaterCO2Constant(
+            FluidConstantProperties{},
+            FluidConstantProperties{ 700.0, 5.0e-5, 1200.0, 900.0, 0.08 });
+    }
+    else {
+        p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeTwoPhaseWaterCO2EOS();
+    }
+
     // vG params: Swr=0.2, Sgr=0.2 matching Swi/Sor
     p.vg.Swr    = kSwi;
     p.vg.Sgr    = kSor;
@@ -1739,11 +1758,11 @@ static void RunT5(const T5Config& cfg) {
     const double Q_mass  = 0.1;   // kg/s production rate
 
     // Theis parameters
-    // T_darcy = k * h / mu  [m虏/(Pa路s)]
+    // T_darcy = k * h / mu  [m^2/(Pa*s)]
     const double T_darcy = k * h / kMu_w;
     // S = phi * ct * h  (storativity, dimensionless)
     const double S = phi * kCt_w * h;
-    const double Q_vol  = Q_mass / kRho_w;  // m鲁/s
+    const double Q_vol  = Q_mass / kRho_w;  // m^3/s
 
     MeshManager mgr(Lx, Ly, 0.0, nx, ny, 0, true, false);
     mgr.BuildSolidMatrixGrid_2D();
@@ -1843,8 +1862,8 @@ static void RunT5(const T5Config& cfg) {
             double r_actual = std::hypot(cells[best_i].center.m_x - wx, cells[best_i].center.m_y - wy);
             double u  = r_actual * r_actual * S / (4.0 * T_darcy * t_final);
             // Drawdown: s(r,t) = Q_vol/(4*pi*T_darcy) * W(u)
-            // Note: Q_vol in [m鲁/s], T_darcy in [m虏/(Pa路s)], so:
-            // s = Q_vol/(4*pi*T_darcy) * W(u) has units [m鲁/s * Pa路s/m虏] = Pa
+            // Note: Q_vol in [m^3/s], T_darcy in [m^2/(Pa*s)], so:
+            // s = Q_vol/(4*pi*T_darcy) * W(u) has units [m^3/s * Pa*s/m^2] = Pa
             double s_ana = Q_vol / (4.0 * kPi * T_darcy) * TheisW(u);
             double P_ana = P0 - s_ana;
             double dP_max = Q_vol / (4.0 * kPi * T_darcy) * TheisW(r_vals[0] * r_vals[0] * S / (4.0 * T_darcy * t_final));

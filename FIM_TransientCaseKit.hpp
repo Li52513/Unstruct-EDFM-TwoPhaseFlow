@@ -31,6 +31,8 @@ struct PropertyPreset2D {
 
     SolidProperties_Frac frac{};
 
+    bool use_unified_fluid_model = false;
+    FIM_Engine::UnifiedFluidModelConfig fluid_model = FIM_Engine::UnifiedFluidModelConfig();
     FIM_Engine::SinglePhaseFluidModel single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
     CapRelPerm::VGParams vg{};
     CapRelPerm::RelPermParams rp{};
@@ -44,6 +46,8 @@ struct PropertyPreset3D {
 
     FractureGlobalParams frac{};
 
+    bool use_unified_fluid_model = false;
+    FIM_Engine::UnifiedFluidModelConfig fluid_model = FIM_Engine::UnifiedFluidModelConfig();
     FIM_Engine::SinglePhaseFluidModel single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
     CapRelPerm::VGParams vg{};
     CapRelPerm::RelPermParams rp{};
@@ -74,6 +78,8 @@ inline PropertyPreset2D MakeDefaultPropertyPreset2D() {
     p.frac.cp_f = 900.0;
     p.frac.k_f = 2.0;
 
+    p.use_unified_fluid_model = false;
+    p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseWaterEOS();
     p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
     p.vg.alpha = 1.0e-5;
     p.vg.n = 2.0;
@@ -95,6 +101,8 @@ inline PropertyPreset3D MakeDefaultPropertyPreset3D() {
 
     p.frac = FractureGlobalParams(0.7, 2400.0, 900.0, 2.0, 0.1);
 
+    p.use_unified_fluid_model = false;
+    p.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseWaterEOS();
     p.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::Water;
     p.vg.alpha = 1.0e-5;
     p.vg.n = 2.0;
@@ -413,7 +421,12 @@ BuildModules2D(const PropertyPreset2D& preset,
     modules.pressure_bc = pBC;
     modules.temperature_bc = tBC;
     modules.saturation_bc = sBC;
-    modules.single_phase_fluid = preset.single_phase_fluid;
+    if (preset.use_unified_fluid_model) {
+        modules.SetFluidModelConfig(preset.fluid_model);
+    }
+    else {
+        modules.single_phase_fluid = preset.single_phase_fluid;
+    }
     modules.vg_params = preset.vg;
     modules.rp_params = preset.rp;
     return modules;
@@ -451,7 +464,12 @@ BuildModules3D(const PropertyPreset3D& preset,
     modules.pressure_bc = pBC;
     modules.temperature_bc = tBC;
     modules.saturation_bc = sBC;
-    modules.single_phase_fluid = preset.single_phase_fluid;
+    if (preset.use_unified_fluid_model) {
+        modules.SetFluidModelConfig(preset.fluid_model);
+    }
+    else {
+        modules.single_phase_fluid = preset.single_phase_fluid;
+    }
     modules.vg_params = preset.vg;
     modules.rp_params = preset.rp;
     return modules;

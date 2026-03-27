@@ -577,8 +577,10 @@ namespace FIM_Engine {
             const InitialConditions& ic,
             const std::vector<WellScheduleStep>& wells,
             const TransientSolverParams& params,
-            const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules)
+            const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules_in)
         {
+            const auto modules = ResolveTransientFluidModelConfig(modules_in);
+
             if (!wells.empty()) {
                 throw std::runtime_error("[N=1] unsupported: wells are not enabled in pressure-only AD route.");
             }
@@ -687,25 +689,21 @@ namespace FIM_Engine {
             const double t_eval = (modules.pressure_only_temperature_k > 0.0)
                 ? modules.pressure_only_temperature_k
                 : ic.T_init;
-            const bool use_eos = (modules.pressure_only_property_mode == PressureOnlyPropertyMode::CO2_EOS);
+            const bool use_eos = (modules.pressure_only_property_mode == PressureOnlyPropertyMode::PrimaryFluidEOS ||
+                                  modules.pressure_only_property_mode == PressureOnlyPropertyMode::CO2_EOS);
             double baseline_rho = modules.pressure_only_baseline_rho;
             double baseline_mu = modules.pressure_only_baseline_mu;
             if (!(baseline_rho > 0.0) || !(baseline_mu > 0.0)) {
                 ADVar<1> p0(ic.P_init), t0(t_eval);
                 AD_Fluid::ADFluidProperties<1> base_props;
-                if (modules.single_phase_fluid == SinglePhaseFluidModel::CO2 || use_eos) {
-                    base_props = AD_Fluid::Evaluator::evaluateCO2<1>(p0, t0);
-                }
-                else {
-                    base_props = EvalPrimaryFluid<1>(modules.single_phase_fluid, modules.fluid_property_eval, p0, t0);
-                }
+                base_props = EvalPrimaryFluid<1>(modules.single_phase_fluid, modules.fluid_property_eval, p0, t0);
                 if (!(baseline_rho > 0.0)) baseline_rho = std::max(base_props.rho.val, 1.0e-8);
                 if (!(baseline_mu > 0.0)) baseline_mu = std::max(base_props.mu.val, 1.0e-12);
             }
 
             auto eval_pressure_props = [&](const ADVar<1>& P) {
                 if (use_eos) {
-                    return AD_Fluid::Evaluator::evaluateCO2<1>(P, ADVar<1>(t_eval));
+                    return EvalPrimaryFluid<1>(modules.single_phase_fluid, modules.fluid_property_eval, P, ADVar<1>(t_eval));
                 }
                 AD_Fluid::ADFluidProperties<1> props;
                 props.rho = ADVar<1>(baseline_rho);
@@ -1324,11 +1322,12 @@ namespace FIM_Engine {
         const std::vector<WellScheduleStep>& wells,
         const TransientSolverParams& params,
         SolverRoute route,
-        const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules)
+        const TransientOptionalModules<MeshMgrType, FieldMgrType>& modules_in)
     {
+        const auto modules = ResolveTransientFluidModelConfig(modules_in);
 
         if (route == SolverRoute::IMPES) {
-            throw std::runtime_error("[TODO] IMPES explicit route is reserved but currently bypassed.");
+            throw std::runtime_error("[Route] SolverRoute::IMPES is reserved as a public entry point but is not implemented yet.");
         }
 
         if constexpr (N == 1) {

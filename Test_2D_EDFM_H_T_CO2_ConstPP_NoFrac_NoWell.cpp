@@ -386,17 +386,15 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     FIM_Engine::TransientOptionalModules<MeshManager, FieldManager_2D> modules;
     modules.pressure_bc = &bcP;
     modules.temperature_bc = &bcT;
-    modules.single_phase_fluid = FIM_Engine::SinglePhaseFluidModel::CO2;
     modules.disable_default_vtk_output = true;
 
-    modules.fluid_property_eval.enable_single_phase_constant = true;
-    modules.fluid_property_eval.single_phase_is_co2 = true;
-    modules.fluid_property_eval.single_phase_no_convection = false;
-    modules.fluid_property_eval.gas.rho = cfg.co2_rho_const;
-    modules.fluid_property_eval.gas.mu = cfg.co2_mu_const;
-    modules.fluid_property_eval.gas.cp = cfg.co2_cp_const;
-    modules.fluid_property_eval.gas.cv = cfg.co2_cv_const;
-    modules.fluid_property_eval.gas.k = cfg.co2_k_const;
+    FluidConstantProperties co2_props;
+    co2_props.rho = cfg.co2_rho_const;
+    co2_props.mu = cfg.co2_mu_const;
+    co2_props.cp = cfg.co2_cp_const;
+    co2_props.cv = cfg.co2_cv_const;
+    co2_props.k = cfg.co2_k_const;
+    modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2Constant(co2_props));
 
     modules.property_initializer = [&cfg](MeshManager&, FieldManager_2D& fld) {
         const auto rock = PhysicalProperties_string_op::Rock();
