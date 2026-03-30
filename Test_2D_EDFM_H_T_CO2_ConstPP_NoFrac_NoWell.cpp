@@ -15,9 +15,11 @@
 #include "Well_WellControlTypes.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -27,12 +29,14 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #ifdef _WIN32
 #include <direct.h>
+#include <windows.h>
 #define TEST_MKDIR(path) _mkdir(path)
 #else
 #include <sys/stat.h>
@@ -48,7 +52,9 @@ constexpr double kGridTimeMonotoneAbsTol = 5.0e-3;
 constexpr const char* kFamilyMatrixHorizontal = "matrix_horizontal";
 constexpr const char* kFamilyMatrixVerticalMidline = "matrix_vertical_midline";
 constexpr const char* kLocationMatrix = "matrix";
-constexpr const char* kComsolRepresentationMatrixOnly = "matrix_only_coupled_pdes";
+constexpr const char* kComsolRepresentationNonisothermal = "matrix_builtin_nonisothermal_flow_in_porous_media";
+constexpr const char* kComsolRepresentationDlHtManual = "matrix_builtin_dl_ht_manual_coupling";
+constexpr const char* kComsolRepresentationPdeFallback = "matrix_only_coupled_pdes_fallback";
 
 struct SpatialSamplePoint {
     int id = -1;
@@ -192,6 +198,7 @@ struct TestCaseSpec {
     std::string case_name = "h_t_co2_constpp_nofrac_nowell";
     std::string output_base_dir = "Test/Transient/FullCaseTest";
     std::string sub_dir = "H_T_CO2_ConstPP";
+    std::string comsol_reference_case_name;
     double lx = 400.0;
     double ly = 40.0;
     int nx = 48;
@@ -213,13 +220,13 @@ struct TestCaseSpec {
     double t_init = 380.0;
     double t_left = 440.0;
     double t_right = 320.0;
-    double dt_init = 120.0;
-    double dt_min = 1.0;
-    double dt_max = 5000.0;
-    double target_end_time_s = 1.0e5;
-    int max_steps = 12000;
+    double dt_init = 2.0e4;
+    double dt_min = 100.0;
+    double dt_max = 2.0e5;
+    double target_end_time_s = 2.0e7;
+    int max_steps = 5000;
     int max_newton_iter = 14;
-    FIM_Engine::LinearSolverType lin_solver = FIM_Engine::LinearSolverType::AMGCL;
+    FIM_Engine::LinearSolverType lin_solver = FIM_Engine::LinearSolverType::SparseLU;
     bool amgcl_use_fallback_sparselu = true;
     double amgcl_tol = 1.0e-6;
     int amgcl_maxiter = 500;
@@ -229,10 +236,10 @@ struct TestCaseSpec {
     double rel_res_tol = 1.0e-6;
     double rel_update_tol = 1.0e-8;
     double max_dP = 2.0e7;
-    double max_dT = 10.0;
+    double max_dT = 25.0;
     bool enable_armijo_line_search = false;
     double rollback_shrink_factor = 0.7;
-    double dt_relres_grow_factor = 1.08;
+    double dt_relres_grow_factor = 1.15;
     Vector gravity_vector = Vector(0.0, 0.0, 0.0);
     FIM_Engine::DiagLevel diag_level = FIM_Engine::DiagLevel::Off;
     int analytical_terms = 200;
@@ -244,7 +251,7 @@ struct TestCaseSpec {
         std::make_pair(48, 6),
         std::make_pair(96, 12)
     };
-    std::vector<double> time_step_sweep = {480.0, 120.0, 30.0};
+    std::vector<double> time_step_sweep = {8.0e4, 2.0e4, 5.0e3};
     double pressure_l2_threshold = 5.0e-2;
     double pressure_linf_threshold = 1.5e-1;
     double temperature_l2_threshold = 8.0e-2;
@@ -279,6 +286,7 @@ struct TestCaseSummary {
     std::string reference_spec_path;
     std::string analytical_note_path;
     std::string comsol_reference_spec_path;
+    std::string matlab_script_path;
     std::string property_table_path;
     std::string comsol_property_table_path;
     std::string profile_station_definitions_path;
@@ -365,6 +373,125 @@ void EnsureDirRecursive(const std::string& rawPath) {
         current += token;
         TEST_MKDIR(current.c_str());
     }
+}
+
+std::string PathToGenericString(const std::filesystem::path& path) {
+    return path.generic_string();
+}
+
+std::string BuildOutputOpenDiagnostics(const std::filesystem::path& targetPath) {
+    std::error_code ec;
+    std::ostringstream oss;
+    oss << "target=" << PathToGenericString(targetPath);
+    if (!targetPath.parent_path().empty()) {
+        oss << ", parent=" << PathToGenericString(targetPath.parent_path())
+            << ", parent_exists=" << BoolString(std::filesystem::exists(targetPath.parent_path(), ec));
+        ec.clear();
+    }
+    oss << ", target_exists=" << BoolString(std::filesystem::exists(targetPath, ec));
+    ec.clear();
+    const std::filesystem::path cwd = std::filesystem::current_path(ec);
+    if (!ec) oss << ", cwd=" << PathToGenericString(cwd);
+    return oss.str();
+}
+
+std::filesystem::path BuildShortAsciiStagingPath(const std::string& targetPath) {
+    std::error_code ec;
+    std::filesystem::path stagingRoot = std::filesystem::temp_directory_path(ec);
+    if (ec || stagingRoot.empty()) stagingRoot = std::filesystem::path(".");
+    stagingRoot /= "codex_nofrac_io";
+    std::filesystem::create_directories(stagingRoot, ec);
+
+    const std::size_t hashValue = std::hash<std::string>{}(targetPath);
+    std::ostringstream oss;
+    oss << std::hex << hashValue << "_" << std::filesystem::path(targetPath).filename().generic_string() << ".tmp";
+    return stagingRoot / oss.str();
+}
+
+std::ofstream OpenAsciiStagingStream(const std::string& targetPath,
+                                     const char* context,
+                                     std::filesystem::path& stagingPath) {
+    stagingPath = BuildShortAsciiStagingPath(targetPath);
+    std::ofstream out;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        std::error_code ec;
+        std::filesystem::remove(stagingPath, ec);
+        out = std::ofstream(stagingPath, std::ios::out | std::ios::trunc);
+        if (out.good()) return out;
+        out.clear();
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+    throw std::runtime_error(
+        std::string(context) + ": failed to open ASCII staging file for " + targetPath +
+        " | staging=" + PathToGenericString(stagingPath) +
+        " | " + BuildOutputOpenDiagnostics(std::filesystem::path(targetPath)));
+}
+
+void CommitAsciiStagingFile(std::ofstream& out,
+                            const std::filesystem::path& stagingPath,
+                            const std::string& targetPath,
+                            const char* context) {
+    out.flush();
+    if (!out.good()) {
+        out.close();
+        std::error_code ec;
+        std::filesystem::remove(stagingPath, ec);
+        throw std::runtime_error(
+            std::string(context) + ": failed while flushing staging file for " + targetPath +
+            " | staging=" + PathToGenericString(stagingPath));
+    }
+    out.close();
+
+    std::error_code ec;
+    std::filesystem::path target(targetPath);
+    std::filesystem::path absoluteTarget = std::filesystem::absolute(target, ec);
+    if (ec) {
+        ec.clear();
+        absoluteTarget = std::filesystem::current_path(ec) / target;
+    }
+    if (!absoluteTarget.parent_path().empty()) {
+        std::filesystem::create_directories(absoluteTarget.parent_path(), ec);
+        ec.clear();
+    }
+
+    bool copied = false;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        std::error_code removeEc;
+        if (std::filesystem::exists(absoluteTarget, removeEc)) {
+            std::filesystem::remove(absoluteTarget, removeEc);
+        }
+        std::error_code copyEc;
+        std::filesystem::copy_file(stagingPath, absoluteTarget, std::filesystem::copy_options::none, copyEc);
+        if (!copyEc) {
+            copied = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+#ifdef _WIN32
+    if (!copied) {
+        const std::wstring stagingW = stagingPath.native();
+        const std::wstring targetW = absoluteTarget.native();
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            DeleteFileW(targetW.c_str());
+            if (CopyFileW(stagingW.c_str(), targetW.c_str(), FALSE) != 0) {
+                copied = true;
+                break;
+            }
+            Sleep(40);
+        }
+    }
+#endif
+    if (!copied) {
+        std::error_code cleanupEc;
+        std::filesystem::remove(stagingPath, cleanupEc);
+        throw std::runtime_error(
+            std::string(context) + ": failed to commit staging file to " + targetPath +
+            " | staging=" + PathToGenericString(stagingPath) +
+            " | abs_target=" + PathToGenericString(absoluteTarget) +
+            " | " + BuildOutputOpenDiagnostics(absoluteTarget));
+    }
+    std::filesystem::remove(stagingPath, ec);
 }
 
 void ApplyUniformScalarField(const std::shared_ptr<volScalarField>& field, double value) {
@@ -563,15 +690,23 @@ ReconstructedFieldValue SampleFieldAtTarget(const MeshManager& mgr,
     out.value = blocks[static_cast<std::size_t>(carrierCell)];
     out.sample_mode = usedContaining ? "containing_cell_center" : "nearest_cell_center";
 
-    if (usedContaining && gradient && carrierCell < static_cast<int>(gradient->data.size())) {
+    if (gradient && carrierCell < static_cast<int>(gradient->data.size())) {
         const Vector delta(
             point.target_x - out.carrier_x,
             point.target_y - out.carrier_y,
             0.0);
         out.value += gradient->data[static_cast<std::size_t>(carrierCell)] * delta;
-        out.sample_mode = "containing_ls";
+        out.sample_mode = usedContaining ? "containing_ls" : "nearest_ls";
     }
     return out;
+}
+
+bool IsLeftDirichletTarget(const SpatialSamplePoint& point, const TestCaseSpec& cfg) {
+    return std::abs(point.target_x) <= 1.0e-8 && point.target_y >= -1.0e-8 && point.target_y <= cfg.ly + 1.0e-8;
+}
+
+bool IsRightDirichletTarget(const SpatialSamplePoint& point, const TestCaseSpec& cfg) {
+    return std::abs(point.target_x - cfg.lx) <= 1.0e-8 && point.target_y >= -1.0e-8 && point.target_y <= cfg.ly + 1.0e-8;
 }
 
 std::vector<ReconstructedSpatialPointSample> BuildReconstructedSamples(const MeshManager& mgr,
@@ -610,6 +745,17 @@ std::vector<ReconstructedSpatialPointSample> BuildReconstructedSamples(const Mes
         row.actual_time_s = actualTimeS;
         row.pressure = SampleFieldAtTarget(mgr, point, pBlocks, pGrad);
         row.temperature = SampleFieldAtTarget(mgr, point, tBlocks, tGrad);
+        if (IsLeftDirichletTarget(point, cfg)) {
+            row.pressure.value = cfg.p_left;
+            row.pressure.sample_mode = "boundary_dirichlet_left";
+            row.temperature.value = cfg.t_left;
+            row.temperature.sample_mode = "boundary_dirichlet_left";
+        } else if (IsRightDirichletTarget(point, cfg)) {
+            row.pressure.value = cfg.p_right;
+            row.pressure.sample_mode = "boundary_dirichlet_right";
+            row.temperature.value = cfg.t_right;
+            row.temperature.sample_mode = "boundary_dirichlet_right";
+        }
         rows.push_back(row);
     }
     return rows;
@@ -1048,9 +1194,12 @@ PressureCellMetrics EvaluatePressureCellMetrics(const MeshManager& mgr,
     double maxAbs = 0.0;
     int maxErrCell = -1;
     std::ofstream out;
+    std::filesystem::path stagingPath;
     if (writeCsv) {
-        out.open(csvPath.c_str(), std::ios::out | std::ios::trunc);
-        if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical cell csv: " + csvPath);
+        out = OpenAsciiStagingStream(
+            csvPath,
+            "[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical cell csv",
+            stagingPath);
         out << "cell_id,x_m,y_m,target_time_s,actual_time_s,p_num_pa,p_ref_pa,p_abs_err_pa,p_abs_err_over_dp\n";
     }
     for (std::size_t i = 0; i < nUse; ++i) {
@@ -1074,6 +1223,13 @@ PressureCellMetrics EvaluatePressureCellMetrics(const MeshManager& mgr,
                 << (pAbsErr / scale) << "\n";
         }
     }
+    if (writeCsv) {
+        CommitAsciiStagingFile(
+            out,
+            stagingPath,
+            csvPath,
+            "[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical cell csv");
+    }
     PressureCellMetrics metrics;
     metrics.tag = snapshot.tag;
     metrics.requested_fraction = snapshot.requested_fraction;
@@ -1090,7 +1246,7 @@ void WriteAnalyticalProfileReferenceCsv(const std::vector<SpatialSamplePoint>& s
                                         const TestCaseSpec& cfg,
                                         const std::string& family,
                                         const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    std::ofstream out(std::filesystem::path(path), std::ios::out | std::ios::trunc);
     if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical profile reference: " + path);
     out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,target_time_s,p_ref_pa\n";
     for (const auto& station : stations) {
@@ -1106,7 +1262,7 @@ void WriteAnalyticalMonitorReferenceCsv(const std::vector<SpatialSamplePoint>& p
                                         const std::vector<MonitorScheduleState>& schedule,
                                         const TestCaseSpec& cfg,
                                         const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    std::ofstream out(std::filesystem::path(path), std::ios::out | std::ios::trunc);
     if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical monitor reference: " + path);
     out << "sample_id,target_time_s";
     for (const auto& point : points) out << ",p_ref_" << point.label;
@@ -1294,8 +1450,10 @@ void WriteComsolReferenceSpec(const TestCaseSpec& cfg, const std::string& caseDi
     out << "- Pressure window: `" << cfg.p_left / 1.0e6 << " MPa` -> `" << cfg.p_right / 1.0e6 << " MPa`\n";
     out << "- Temperature window: `" << cfg.t_left << " K` -> `" << cfg.t_right << " K`\n";
     out << "- Gravity: disabled\n";
-    out << "- Requested route: built-in Darcy + Heat Transfer in Porous Media if practical, otherwise PDE fallback\n";
-    out << "- Implemented v1 route: `" << kComsolRepresentationMatrixOnly << "`\n\n";
+    out << "- Requested route priority: `Nonisothermal Flow in Porous Media -> dl+ht manual coupling -> PDE fallback`\n";
+    out << "- Formal built-in target: `" << kComsolRepresentationNonisothermal << "`\n";
+    out << "- Manual built-in fallback: `" << kComsolRepresentationDlHtManual << "`\n";
+    out << "- Last-resort fallback: `" << kComsolRepresentationPdeFallback << "`\n\n";
     out << "## Expected Outputs\n";
     out << "- `reference/comsol/comsol_profile_matrix_horizontal_*.csv`\n";
     out << "- `reference/comsol/comsol_profile_matrix_vertical_midline_*.csv`\n";
@@ -1634,10 +1792,19 @@ bool ReferenceFilesReady(TestCaseSummary& summary, const std::vector<SnapshotSta
     return summary.reference_ready;
 }
 
+std::string ResolveComsolCaseDir(const TestCaseSummary& summary) {
+    const std::filesystem::path comsolDir(summary.comsol_output_dir);
+    const std::filesystem::path caseDir = comsolDir.parent_path().parent_path();
+    if (caseDir.empty()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid COMSOL case dir derived from: " + summary.comsol_output_dir);
+    }
+    return caseDir.generic_string();
+}
+
 void InvokeComsolReferenceGeneration(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
     std::ostringstream cmd;
     cmd << "\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -ExecutionPolicy Bypass -File \"" << cfg.comsol_wrapper_relpath
-        << "\" -Mode All -CaseDir \"" << summary.case_dir << "\"";
+        << "\" -Mode All -CaseDir \"" << ResolveComsolCaseDir(summary) << "\"";
     const int code = std::system(cmd.str().c_str());
     if (code != 0) {
         throw std::runtime_error(
@@ -1697,7 +1864,7 @@ void WriteValidationSummaryCsv(const TestCaseSpec& cfg, const TestCaseSummary& s
         << summary.grid_temperature_order_min << "," << summary.time_pressure_order_min << ","
         << summary.time_temperature_order_min << "," << summary.comsol_representation << ","
         << "pressure_abs_cell__temperature_fixed_target_abs_profile_interior_only" << ","
-        << "fixed_target_self_against_dt30s" << "\n";
+        << "fixed_target_self_against_finest_dt" << "\n";
 }
 
 void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
@@ -1739,7 +1906,7 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     out << "## Convergence Semantics\n";
     out << "- Baseline absolute validation: pressure uses analytical reference at cell centers / fixed target points; temperature uses COMSOL fixed-target reference.\n";
     out << "- Grid order: pressure uses absolute cell `L2`; temperature uses final-time horizontal fixed-target profile `L2` on interior stations only, excluding two profile intervals adjacent to each Dirichlet boundary.\n";
-    out << "- Time order: pressure and temperature use fixed-target self-convergence against `dt_30s`; absolute reference errors remain diagnostic only.\n\n";
+    out << "- Time order: pressure and temperature use fixed-target self-convergence against the finest configured `dt_init`; absolute reference errors remain diagnostic only.\n\n";
 
     out << "## Outputs\n";
     out << "- Engineering dir: `" << summary.engineering_dir << "`\n";
@@ -1749,6 +1916,7 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     out << "- Reference spec: `" << summary.reference_spec_path << "`\n";
     out << "- Analytical note: `" << summary.analytical_note_path << "`\n";
     out << "- COMSOL spec: `" << summary.comsol_reference_spec_path << "`\n";
+    out << "- MATLAB script: `" << summary.matlab_script_path << "`\n";
     out << "- Property table: `" << summary.property_table_path << "`\n";
     out << "- COMSOL property table: `" << summary.comsol_property_table_path << "`\n";
     if (!summary.grid_convergence_csv_path.empty()) out << "- Grid convergence csv: `" << summary.grid_convergence_csv_path << "`\n";
@@ -1779,6 +1947,177 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
         out << "\n## Missing Reference Files\n";
         for (const auto& path : summary.missing_reference_files) out << "- `" << path << "`\n";
     }
+}
+
+void WriteMatlabPlotScript(const TestCaseSummary& summary) {
+    std::ofstream out(summary.matlab_script_path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write MATLAB plot script: " + summary.matlab_script_path);
+    out <<
+"rootDir = fileparts(mfilename('fullpath'));\n"
+"if isempty(rootDir)\n"
+"    rootDir = pwd;\n"
+"end\n"
+"figDir = fullfile(rootDir, 'figures');\n"
+"if ~exist(figDir, 'dir')\n"
+"    mkdir(figDir);\n"
+"end\n"
+"\n"
+"families = {'matrix_horizontal', 'matrix_vertical_midline'};\n"
+"finalTag = 't100pct';\n"
+"\n"
+"for iFam = 1:numel(families)\n"
+"    fam = families{iFam};\n"
+"    cmpFile = fullfile(rootDir, ['compare_profile_' fam '_' finalTag '.csv']);\n"
+"    if ~isfile(cmpFile)\n"
+"        warning('Skipping final profile plot because file is missing: %s', cmpFile);\n"
+"        continue;\n"
+"    end\n"
+"    tbl = readtable(cmpFile);\n"
+"    f = figure('Color', 'w', 'Position', [100 100 1200 420]);\n"
+"    subplot(1,2,1);\n"
+"    plot(tbl.target_axis_m, tbl.p_num_pa, 'LineWidth', 1.6); hold on;\n"
+"    plot(tbl.target_axis_m, tbl.p_ref_pa, '--', 'LineWidth', 1.6);\n"
+"    xlabel('Target Axis (m)'); ylabel('Pressure (Pa)');\n"
+"    title(['Pressure Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
+"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
+"    subplot(1,2,2);\n"
+"    plot(tbl.target_axis_m, tbl.t_num_k, 'LineWidth', 1.6); hold on;\n"
+"    plot(tbl.target_axis_m, tbl.t_ref_k, '--', 'LineWidth', 1.6);\n"
+"    xlabel('Target Axis (m)'); ylabel('Temperature (K)');\n"
+"    title(['Temperature Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
+"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.pdf']), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.png']), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n"
+"\n"
+"monitorFile = fullfile(rootDir, 'compare_monitor_timeseries.csv');\n"
+"if isfile(monitorFile)\n"
+"    mon = readtable(monitorFile);\n"
+"    labelsP = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 'p_num_'));\n"
+"    labelsT = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 't_num_'));\n"
+"    f = figure('Color', 'w', 'Position', [120 120 1200 460]);\n"
+"    subplot(1,2,1); hold on;\n"
+"    for i = 1:numel(labelsP)\n"
+"        refName = strrep(labelsP{i}, 'p_num_', 'p_ref_');\n"
+"        plot(mon.target_time_s, mon.(labelsP{i}), 'LineWidth', 1.2);\n"
+"        if ismember(refName, mon.Properties.VariableNames)\n"
+"            plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
+"        end\n"
+"    end\n"
+"    xlabel('Time (s)'); ylabel('Pressure (Pa)'); title('Monitor Compare: Pressure'); grid on; box on;\n"
+"    subplot(1,2,2); hold on;\n"
+"    for i = 1:numel(labelsT)\n"
+"        refName = strrep(labelsT{i}, 't_num_', 't_ref_');\n"
+"        plot(mon.target_time_s, mon.(labelsT{i}), 'LineWidth', 1.2);\n"
+"        if ismember(refName, mon.Properties.VariableNames)\n"
+"            plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
+"        end\n"
+"    end\n"
+"    xlabel('Time (s)'); ylabel('Temperature (K)'); title('Monitor Compare: Temperature'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, 'monitor_compare.pdf'), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, 'monitor_compare.png'), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n"
+"\n"
+"gridFile = fullfile(rootDir, 'grid_convergence.csv');\n"
+"if isfile(gridFile)\n"
+"    gridTbl = sortrows(readtable(gridFile), 'h_char', 'descend');\n"
+"    f = figure('Color', 'w', 'Position', [140 140 1000 420]);\n"
+"    subplot(1,2,1);\n"
+"    plot(gridTbl.h_char, gridTbl.pressure_cell_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
+"    plot(gridTbl.h_char, gridTbl.temperature_horizontal_l2_norm, '-s', 'LineWidth', 1.6);\n"
+"    set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Normalized L2');\n"
+"    title('Grid Convergence: Pressure Cell / Temperature Horizontal');\n"
+"    legend({'Pressure cell', 'Temperature profile'}, 'Location', 'best'); grid on; box on;\n"
+"    subplot(1,2,2);\n"
+"    plot(gridTbl.h_char, gridTbl.pressure_order, '-o', 'LineWidth', 1.6); hold on;\n"
+"    plot(gridTbl.h_char, gridTbl.temperature_order, '-s', 'LineWidth', 1.6);\n"
+"    set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Observed Order');\n"
+"    title('Grid Convergence: Observed Order');\n"
+"    legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, 'grid_convergence.pdf'), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, 'grid_convergence.png'), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n"
+"\n"
+"timeFile = fullfile(rootDir, 'time_sensitivity.csv');\n"
+"if isfile(timeFile)\n"
+"    timeTbl = sortrows(readtable(timeFile), 'dt_init', 'descend');\n"
+"    pTimeCol = 'pressure_time_self_l2_norm';\n"
+"    tTimeCol = 'temperature_time_self_l2_norm';\n"
+"    if ~ismember(pTimeCol, timeTbl.Properties.VariableNames)\n"
+"        pTimeCol = 'pressure_horizontal_l2_norm';\n"
+"    end\n"
+"    if ~ismember(tTimeCol, timeTbl.Properties.VariableNames)\n"
+"        tTimeCol = 'temperature_horizontal_l2_norm';\n"
+"    end\n"
+"    f = figure('Color', 'w', 'Position', [160 160 1000 420]);\n"
+"    subplot(1,2,1);\n"
+"    plot(timeTbl.dt_init, timeTbl.(pTimeCol), '-o', 'LineWidth', 1.6); hold on;\n"
+"    plot(timeTbl.dt_init, timeTbl.(tTimeCol), '-s', 'LineWidth', 1.6);\n"
+"    set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Normalized L2');\n"
+"    title('Time Sensitivity: Self Convergence');\n"
+"    legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"    subplot(1,2,2);\n"
+"    plot(timeTbl.dt_init, timeTbl.pressure_order, '-o', 'LineWidth', 1.6); hold on;\n"
+"    plot(timeTbl.dt_init, timeTbl.temperature_order, '-s', 'LineWidth', 1.6);\n"
+"    set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Observed Order');\n"
+"    title('Time Sensitivity: Observed Order');\n"
+"    legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, 'time_sensitivity.pdf'), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, 'time_sensitivity.png'), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n"
+"\n"
+"summaryFile = fullfile(rootDir, 'validation_summary.csv');\n"
+"if isfile(summaryFile)\n"
+"    sumTbl = readtable(summaryFile);\n"
+"    f = figure('Color', 'w', 'Position', [180 180 960 420]);\n"
+"    vals = [sumTbl.final_pressure_cell_l2_norm(1), sumTbl.final_temperature_horizontal_l2_norm(1), ...\n"
+"        sumTbl.final_monitor_temperature_l2_norm(1), sumTbl.final_pressure_vertical_uniformity_norm_std(1), ...\n"
+"        sumTbl.final_temperature_vertical_uniformity_norm_std(1)];\n"
+"    bar(categorical({'p cell L2', 'T profile L2', 'T monitor L2', 'p vertical std', 'T vertical std'}), vals);\n"
+"    ylabel('Metric Value'); title('Validation Summary Metrics'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, 'validation_summary_metrics.pdf'), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, 'validation_summary_metrics.png'), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n"
+"\n"
+"pNum = []; pRef = []; tNum = []; tRef = []; pErr = []; tErr = [];\n"
+"for iFam = 1:numel(families)\n"
+"    cmpFile = fullfile(rootDir, ['compare_profile_' families{iFam} '_' finalTag '.csv']);\n"
+"    if ~isfile(cmpFile)\n"
+"        continue;\n"
+"    end\n"
+"    tbl = readtable(cmpFile);\n"
+"    pNum = [pNum; tbl.p_num_pa]; %#ok<AGROW>\n"
+"    pRef = [pRef; tbl.p_ref_pa]; %#ok<AGROW>\n"
+"    tNum = [tNum; tbl.t_num_k]; %#ok<AGROW>\n"
+"    tRef = [tRef; tbl.t_ref_k]; %#ok<AGROW>\n"
+"    pErr = [pErr; tbl.p_abs_err_over_dp]; %#ok<AGROW>\n"
+"    tErr = [tErr; tbl.t_abs_err_over_dt]; %#ok<AGROW>\n"
+"end\n"
+"if ~isempty(pRef) && ~isempty(tRef)\n"
+"    f = figure('Color', 'w', 'Position', [200 200 1000 420]);\n"
+"    subplot(1,2,1);\n"
+"    scatter(pRef, pNum, 18, 'filled'); hold on;\n"
+"    plot([min(pRef) max(pRef)], [min(pRef) max(pRef)], 'k--', 'LineWidth', 1.2);\n"
+"    xlabel('Reference Pressure (Pa)'); ylabel('Engineering Pressure (Pa)'); title('Parity Plot: Pressure'); grid on; box on;\n"
+"    subplot(1,2,2);\n"
+"    scatter(tRef, tNum, 18, 'filled'); hold on;\n"
+"    plot([min(tRef) max(tRef)], [min(tRef) max(tRef)], 'k--', 'LineWidth', 1.2);\n"
+"    xlabel('Reference Temperature (K)'); ylabel('Engineering Temperature (K)'); title('Parity Plot: Temperature'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, 'parity.pdf'), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, 'parity.png'), 'Resolution', 300);\n"
+"    close(f);\n"
+"    f = figure('Color', 'w', 'Position', [220 220 1000 420]);\n"
+"    subplot(1,2,1); histogram(pErr, 20); xlabel('Normalized Pressure Error'); ylabel('Count'); title('Error Histogram: Pressure'); grid on; box on;\n"
+"    subplot(1,2,2); histogram(tErr, 20); xlabel('Normalized Temperature Error'); ylabel('Count'); title('Error Histogram: Temperature'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, 'error_histogram.pdf'), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, 'error_histogram.png'), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n";
 }
 
 bool FinalMetricsWithinThreshold(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
@@ -1831,6 +2170,10 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     artifacts.summary.analytic_dir = artifacts.summary.reference_dir + "/analytic";
     artifacts.summary.comsol_input_dir = artifacts.summary.reference_dir + "/comsol_input";
     artifacts.summary.comsol_output_dir = artifacts.summary.reference_dir + "/comsol";
+    if (!cfg.comsol_reference_case_name.empty()) {
+        artifacts.summary.comsol_output_dir =
+            cfg.output_base_dir + "/" + cfg.sub_dir + "/" + cfg.comsol_reference_case_name + "/reference/comsol";
+    }
     artifacts.summary.report_dir = artifacts.summary.case_dir + "/report";
     EnsureDirRecursive(artifacts.summary.case_dir);
     EnsureDirRecursive(artifacts.summary.engineering_dir);
@@ -1848,6 +2191,7 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     artifacts.summary.reference_spec_path = artifacts.summary.engineering_dir + "/reference_spec.md";
     artifacts.summary.analytical_note_path = artifacts.summary.analytic_dir + "/pressure_analytical_note.md";
     artifacts.summary.comsol_reference_spec_path = artifacts.summary.reference_dir + "/comsol_reference_spec.md";
+    artifacts.summary.matlab_script_path = artifacts.summary.case_dir + "/plot_validation_results.m";
     artifacts.summary.property_table_path = artifacts.summary.engineering_dir + "/property_table.csv";
     artifacts.summary.comsol_property_table_path = artifacts.summary.comsol_input_dir + "/property_table.csv";
     artifacts.summary.profile_station_definitions_path = artifacts.summary.engineering_dir + "/profile_station_definitions.csv";
@@ -2191,7 +2535,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     }
 
     summary.comsol_representation = ExtractComsolRepresentation(summary.comsol_output_dir + "/comsol_run_summary.md");
-    if (summary.comsol_representation.empty()) summary.comsol_representation = kComsolRepresentationMatrixOnly;
+    if (summary.comsol_representation.empty()) summary.comsol_representation = kComsolRepresentationDlHtManual;
     summary.comsol_fine_check_skipped =
         ComsolFineCheckWasSkipped(summary.comsol_output_dir + "/comsol_reference_mesh_check.txt");
 
@@ -2412,6 +2756,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     WriteValidationSummary(cfg, summary);
     WriteValidationSummaryCsv(cfg, summary);
     WriteMetricsCsv(cfg, summary);
+    WriteMatlabPlotScript(summary);
 
     if (!summary.validation_passed) {
         std::ostringstream oss;
@@ -2444,6 +2789,21 @@ TestCasePlan BuildGridPlan() {
     return plan;
 }
 
+TestCasePlan BuildFastPlan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_fast";
+    plan.spec.case_name = "ht_nofrac_fast";
+    plan.spec.target_end_time_s = 1.0e7;
+    return plan;
+}
+
+TestCasePlan BuildFastGridPlan() {
+    TestCasePlan plan = BuildFastPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_fast_grid";
+    plan.spec.enable_grid_convergence_study = true;
+    return plan;
+}
+
 TestCasePlan BuildDtPlan() {
     TestCasePlan plan = BuildDefaultPlan();
     plan.plan_key = "h_t_co2_constpp_nofrac_nowell_dt";
@@ -2459,14 +2819,40 @@ TestCasePlan BuildAllPlan() {
     return plan;
 }
 
+TestCasePlan BuildDebug96x12Plan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_debug_96x12";
+    plan.spec.case_name = "ht_nofrac_dbg_96x12";
+    plan.spec.comsol_reference_case_name = "h_t_co2_constpp_nofrac_nowell";
+    plan.spec.nx = 96;
+    plan.spec.ny = 12;
+    return plan;
+}
+
+TestCasePlan BuildProbe96x12Dt5000Plan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_probe_96x12_dt5000";
+    plan.spec.case_name = "ht_nf_p96_d5000";
+    plan.spec.comsol_reference_case_name = "h_t_co2_constpp_nofrac_nowell";
+    plan.spec.nx = 96;
+    plan.spec.ny = 12;
+    plan.spec.dt_init = 5.0e3;
+    plan.spec.export_vtk = true;
+    return plan;
+}
+
 using BuilderFn = TestCasePlan(*)();
 
 const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
     static const std::unordered_map<std::string, BuilderFn> registry = {
         {"h_t_co2_constpp_nofrac_nowell", &BuildDefaultPlan},
+        {"h_t_co2_constpp_nofrac_nowell_fast", &BuildFastPlan},
+        {"h_t_co2_constpp_nofrac_nowell_fast_grid", &BuildFastGridPlan},
         {"h_t_co2_constpp_nofrac_nowell_grid", &BuildGridPlan},
         {"h_t_co2_constpp_nofrac_nowell_dt", &BuildDtPlan},
-        {"h_t_co2_constpp_nofrac_nowell_all", &BuildAllPlan}
+        {"h_t_co2_constpp_nofrac_nowell_all", &BuildAllPlan},
+        {"h_t_co2_constpp_nofrac_nowell_debug_96x12", &BuildDebug96x12Plan},
+        {"h_t_co2_constpp_nofrac_nowell_probe_96x12_dt5000", &BuildProbe96x12Dt5000Plan}
     };
     return registry;
 }

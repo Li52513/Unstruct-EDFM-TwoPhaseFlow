@@ -11,6 +11,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Normalize-ProcessPathVariable {
+    $pathValue = [Environment]::GetEnvironmentVariable('Path', 'Process')
+    if ([string]::IsNullOrWhiteSpace($pathValue)) {
+        $pathValue = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+    }
+    [Environment]::SetEnvironmentVariable('Path', $pathValue, 'Process')
+    [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+}
+
+Normalize-ProcessPathVariable
+
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $scriptDir))
 $javaSource = Join-Path $scriptDir 'ComsolHTCO2ConstPPNoFracNoWell.java'
@@ -118,16 +129,15 @@ function Invoke-LoggedDirectJava {
 }
 
 function Ensure-ComsolUserFolders {
-    $userHome = [Environment]::GetFolderPath('UserProfile')
-    if ([string]::IsNullOrWhiteSpace($userHome)) {
-        throw 'Failed to resolve Windows user profile path for COMSOL runtime.'
-    }
+    param(
+        [Parameter(Mandatory = $true)][string]$RecoveryDir,
+        [Parameter(Mandatory = $true)][string]$PrefsDir
+    )
 
-    $recoveries = Join-Path $userHome '.comsol\v63\comsol.recoveries'
-    $configArea = Join-Path $userHome '.comsol\v63\configuration\comsol'
-    $workspaceArea = Join-Path $userHome '.comsol\v63\workspace\comsol'
+    $configArea = Join-Path $PrefsDir 'configuration\comsol'
+    $workspaceArea = Join-Path $PrefsDir 'workspace\comsol'
 
-    New-Item -ItemType Directory -Force -Path $recoveries | Out-Null
+    New-Item -ItemType Directory -Force -Path $RecoveryDir | Out-Null
     New-Item -ItemType Directory -Force -Path $configArea | Out-Null
     New-Item -ItemType Directory -Force -Path $workspaceArea | Out-Null
 }
@@ -168,7 +178,7 @@ try {
         New-Item -ItemType Directory -Force -Path $prefsDir | Out-Null
 
         if ($Runtime -eq 'DirectJava') {
-            Ensure-ComsolUserFolders
+            Ensure-ComsolUserFolders -RecoveryDir $recoveryDir -PrefsDir $prefsDir
             $stdoutLog = Join-Path $referenceDir 'comsol_java_stdout.log'
             $stderrLog = Join-Path $referenceDir 'comsol_java_stderr.log'
             $classpath = Get-ComsolClasspath

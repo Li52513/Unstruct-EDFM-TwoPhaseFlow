@@ -21,7 +21,9 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         "Test/Transient/FullCaseTest/H_T_CO2_ConstPP/h_t_co2_constpp_nofrac_nowell";
     private static final double DEFAULT_HMAX_M = 4.0;
     private static final double DEFAULT_HMIN_M = 1.0;
-    private static final String REPRESENTATION = "matrix_only_coupled_pdes";
+    private static final String ROUTE_NI = "matrix_builtin_nonisothermal_flow_in_porous_media";
+    private static final String ROUTE_DL_HT = "matrix_builtin_dl_ht_manual_coupling";
+    private static final String ROUTE_PDE = "matrix_only_coupled_pdes_fallback";
 
     private ComsolHTCO2ConstPPNoFracNoWell() {}
 
@@ -52,11 +54,12 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
             configureStandaloneRuntime(paths);
             ModelUtil.showProgress(paths.comsolOutputDir.resolve("comsol_progress.log").toString());
 
-            final Model model = buildAndSolveModel(paths, props, timeList);
-            writeProfileReferenceCsvs(model, profileStations, profileTimes, paths);
-            writeMonitorReferenceCsv(model, monitorPoints, monitorSamples, paths);
-            writeMeshCheck(paths);
-            writeRunSummary(paths, props, timeList);
+            final BuildResult build = buildAndSolveModel(paths, props, timeList);
+            final Model model = build.model;
+            writeProfileReferenceCsvs(model, profileStations, profileTimes, paths, build.pressureExpr, build.temperatureExpr);
+            writeMonitorReferenceCsv(model, monitorPoints, monitorSamples, paths, build.pressureExpr, build.temperatureExpr);
+            writeMeshCheck(paths, build.representation);
+            writeRunSummary(paths, props, timeList, build);
             model.save(paths.comsolOutputDir.resolve("comsol_model.mph").toString());
 
             System.out.println("[COMSOL] No-fracture H-T reference generation completed.");
@@ -234,9 +237,100 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         return sb.toString();
     }
 
-    private static Model buildAndSolveModel(CasePaths paths, Map<String, Double> props, String timeList) {
-        final Model model = ModelUtil.create("ModelMain");
-        model.modelPath(paths.comsolOutputDir.toString());
+    private static BuildResult buildAndSolveModel(CasePaths paths, Map<String, Double> props, String timeList) {
+        final List<String> failures = new ArrayList<String>();
+
+        try {
+            return buildBuiltInModel(paths, props, timeList, true);
+        } catch (RuntimeException ex) {
+            failures.add("NI route failed: " + ex.getMessage());
+            safeClearModels();
+        }
+
+        try {
+            return buildBuiltInModel(paths, props, timeList, false);
+        } catch (RuntimeException ex) {
+            failures.add("dl+ht manual route failed: " + ex.getMessage());
+            safeClearModels();
+        }
+
+        try {
+            return buildPdeFallbackModel(paths, props, timeList);
+        } catch (RuntimeException ex) {
+            failures.add("PDE fallback failed: " + ex.getMessage());
+            safeClearModels();
+        }
+
+        final StringBuilder message = new StringBuilder("All COMSOL no-fracture reference routes failed.");
+        for (String failure : failures) {
+            message.append(System.lineSeparator()).append(" - ").append(failure);
+        }
+        throw new IllegalStateException(message.toString());
+    }
+
+    private static BuildResult buildBuiltInModel(
+        CasePaths paths,
+        Map<String, Double> props,
+        String timeList,
+        boolean preferNonisothermalCoupling
+    ) {
+        final Model model = createBaseModel(
+            preferNonisothermalCoupling ? "ModelBuiltInNI" : "ModelBuiltInManual", paths, props);
+        final double lx = getRequired(props, "lx");
+        final double ly = getRequired(props, "ly");
+
+        createBoundarySelections(model, lx, ly);
+        createDarcyPhysics(model, props);
+        createHeatTransferPhysics(model, props);
+
+        final BuildResult result = new BuildResult();
+        if (preferNonisothermalCoupling) {
+            if (!tryCreateNonisothermalCoupling(model)) {
+                throw new IllegalStateException("failed to create a usable Nonisothermal Flow in Porous Media multiphysics node.");
+            }
+            result.representation = ROUTE_NI;
+            result.physicsRoute = "Darcy's Law + Heat Transfer in Porous Media + Nonisothermal Flow in Porous Media";
+        } else {
+            configureManualDlHtCoupling(model);
+            result.representation = ROUTE_DL_HT;
+            result.physicsRoute = "Darcy's Law + Heat Transfer in Porous Media with manual pressure and Darcy-velocity coupling";
+        }
+
+        configureMesh(model);
+        configureBuiltInStudy(model, timeList);
+        solveStudy(model);
+
+        result.model = model;
+        result.pressureExpr = "dl.pA";
+        result.temperatureExpr = "T";
+        return result;
+    }
+
+    private static BuildResult buildPdeFallbackModel(CasePaths paths, Map<String, Double> props, String timeList) {
+        final Model model = createBaseModel("ModelPdeFallback", paths, props);
+        final double lx = getRequired(props, "lx");
+        final double ly = getRequired(props, "ly");
+
+        createBoundarySelections(model, lx, ly);
+        createPdeSupportVariables(model);
+        createPressurePde(model);
+        createTemperaturePde(model);
+        configureMesh(model);
+        configurePdeStudy(model, timeList);
+        solveStudy(model);
+
+        final BuildResult result = new BuildResult();
+        result.model = model;
+        result.representation = ROUTE_PDE;
+        result.physicsRoute = "Coefficient Form PDE fallback for pressure and temperature";
+        result.pressureExpr = "p";
+        result.temperatureExpr = "T";
+        return result;
+    }
+
+    private static Model createBaseModel(String modelTag, CasePaths paths, Map<String, Double> props) {
+        final Model model = ModelUtil.create(modelTag);
+        model.modelPath(resolveRuntimeRoot(paths).toString());
         model.label("ComsolHTCO2ConstPPNoFracNoWell.mph");
 
         final double lx = getRequired(props, "lx");
@@ -252,6 +346,8 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         model.param().set("phi", formatDouble(getRequired(props, "matrix_phi")));
         model.param().set("perm", formatQuantity(getRequired(props, "matrix_perm"), "m^2"));
         model.param().set("ct", formatQuantity(getRequired(props, "matrix_ct"), "1/Pa"));
+        model.param().set("SpCoeff", formatQuantity(
+            getRequired(props, "matrix_phi") * getRequired(props, "matrix_ct"), "1/Pa"));
         model.param().set("rhof", formatQuantity(getRequired(props, "co2_rho_const"), "kg/m^3"));
         model.param().set("muf", formatQuantity(getRequired(props, "co2_mu_const"), "Pa*s"));
         model.param().set("cpf", formatQuantity(getRequired(props, "co2_cp_const"), "J/(kg*K)"));
@@ -263,21 +359,11 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         model.component().create("comp1", true);
         model.component("comp1").geom().create("geom1", 2);
         model.component("comp1").mesh().create("mesh1");
-
         model.component("comp1").geom("geom1").create("r1", "Rectangle");
         model.component("comp1").geom("geom1").feature("r1").set("base", "corner");
         model.component("comp1").geom("geom1").feature("r1").set("pos", new String[]{"0", "0"});
         model.component("comp1").geom("geom1").feature("r1").set("size", new String[]{"Lx", "Ly"});
         model.component("comp1").geom("geom1").run();
-
-        createBoundarySelections(model, lx, ly);
-        createVariables(model);
-        createPressurePde(model);
-        createTemperaturePde(model);
-        configureMesh(model);
-        configureStudy(model, timeList);
-
-        model.study("std1").run();
         return model;
     }
 
@@ -305,7 +391,7 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         model.component("comp1").selection("rightBnd").set("zmax", formatDouble(tol));
     }
 
-    private static void createVariables(Model model) {
+    private static void createPdeSupportVariables(Model model) {
         model.component("comp1").variable().create("var1");
         model.component("comp1").variable("var1").set("mob", "rhof*perm/muf");
         model.component("comp1").variable("var1").set("stor", "rhof*phi*ct");
@@ -352,6 +438,87 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         model.component("comp1").physics("ct").feature("dirRight").set("r", "TRight");
     }
 
+    private static void createDarcyPhysics(Model model, Map<String, Double> props) {
+        model.component("comp1").physics().create("dl", "PorousMediaFlowDarcy", "geom1");
+        model.component("comp1").physics("dl").feature("porous1").set("storageModelType", "userdef");
+        model.component("comp1").physics("dl").feature("porous1").set("Sp", "SpCoeff");
+        model.component("comp1").physics("dl").feature("porous1").feature("fluid1").set("fluidType", "compressible");
+        model.component("comp1").physics("dl").feature("porous1").feature("fluid1").set("rho_mat", "userdef");
+        model.component("comp1").physics("dl").feature("porous1").feature("fluid1").set("rho", getRequired(props, "co2_rho_const"));
+        model.component("comp1").physics("dl").feature("porous1").feature("fluid1").set("mu_mat", "userdef");
+        model.component("comp1").physics("dl").feature("porous1").feature("fluid1").set("mu", getRequired(props, "co2_mu_const"));
+        model.component("comp1").physics("dl").feature("porous1").feature("pm1").set("epsilon_mat", "userdef");
+        model.component("comp1").physics("dl").feature("porous1").feature("pm1").set("epsilon", getRequired(props, "matrix_phi"));
+        model.component("comp1").physics("dl").feature("porous1").feature("pm1").set("kappa_mat", "userdef");
+        model.component("comp1").physics("dl").feature("porous1").feature("pm1")
+            .set("kappa", new String[]{"perm", "0", "0", "0", "perm", "0", "0", "0", "perm"});
+        model.component("comp1").physics("dl").feature("init1").set("p", "pInit");
+        model.component("comp1").physics("dl").create("inl1", "Inlet", 1);
+        model.component("comp1").physics("dl").feature("inl1").selection().named("leftBnd");
+        model.component("comp1").physics("dl").feature("inl1").set("BoundaryCondition", "Pressure");
+        model.component("comp1").physics("dl").feature("inl1").set("p0", "pLeft");
+        model.component("comp1").physics("dl").create("out1", "Outlet", 1);
+        model.component("comp1").physics("dl").feature("out1").selection().named("rightBnd");
+        model.component("comp1").physics("dl").feature("out1").set("BoundaryCondition", "Pressure");
+        model.component("comp1").physics("dl").feature("out1").set("p0", "pRight");
+    }
+
+    private static void createHeatTransferPhysics(Model model, Map<String, Double> props) {
+        model.component("comp1").physics().create("ht", "PorousMediaHeatTransfer", "geom1");
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("k_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("k", getRequired(props, "co2_k_const"));
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("rho_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("rho", getRequired(props, "co2_rho_const"));
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("Cp_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("Cp", getRequired(props, "co2_cp_const"));
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("poro_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("poro", getRequired(props, "matrix_phi"));
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("k_b_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1")
+            .set("k_b", new String[]{"kr", "0", "0", "0", "kr", "0", "0", "0", "kr"});
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("rho_b_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("rho_b", getRequired(props, "matrix_rho_r"));
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("Cp_b_mat", "userdef");
+        model.component("comp1").physics("ht").feature("porous1").feature("pm1").set("Cp_b", getRequired(props, "matrix_cp_r"));
+        model.component("comp1").physics("ht").feature("init1").set("Tinit", getRequired(props, "t_init"));
+        model.component("comp1").physics("ht").create("temp1", "TemperatureBoundary", 1);
+        model.component("comp1").physics("ht").feature("temp1").selection().named("leftBnd");
+        model.component("comp1").physics("ht").feature("temp1").set("T0", "TLeft");
+        model.component("comp1").physics("ht").create("temp2", "TemperatureBoundary", 1);
+        model.component("comp1").physics("ht").feature("temp2").selection().named("rightBnd");
+        model.component("comp1").physics("ht").feature("temp2").set("T0", "TRight");
+    }
+
+    private static boolean tryCreateNonisothermalCoupling(Model model) {
+        final String[] candidateTypes = new String[]{
+            "NonisothermalFlowPorousMedia",
+            "NonIsothermalFlowPorousMedia",
+            "NonisothermalFlow"
+        };
+        for (String candidate : candidateTypes) {
+            try {
+                model.component("comp1").multiphysics().create("nitf1", candidate, 2);
+                try {
+                    model.component("comp1").multiphysics("nitf1").selection().all();
+                } catch (RuntimeException ignored) {
+                }
+                return true;
+            } catch (RuntimeException ex) {
+                try {
+                    model.component("comp1").multiphysics().remove("nitf1");
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        return false;
+    }
+
+    private static void configureManualDlHtCoupling(Model model) {
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1")
+            .set("minput_pressure_src", "root.comp1.dl.pA");
+        model.component("comp1").physics("ht").feature("porous1").feature("fluid1").set("u_src", "root.comp1.dl.u");
+    }
+
     private static void configureMesh(Model model) {
         model.component("comp1").mesh("mesh1").feature().create("size1", "Size");
         model.component("comp1").mesh("mesh1").feature("size1").set("custom", true);
@@ -363,7 +530,15 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         model.component("comp1").mesh("mesh1").run();
     }
 
-    private static void configureStudy(Model model, String timeList) {
+    private static void configureBuiltInStudy(Model model, String timeList) {
+        model.study().create("std1");
+        model.study("std1").create("time", "Transient");
+        model.study("std1").feature("time").activate("dl", true);
+        model.study("std1").feature("time").activate("ht", true);
+        model.study("std1").feature("time").set("tlist", timeList);
+    }
+
+    private static void configurePdeStudy(Model model, String timeList) {
         model.study().create("std1");
         model.study("std1").create("time", "Transient");
         model.study("std1").feature("time").activate("c", true);
@@ -371,11 +546,29 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         model.study("std1").feature("time").set("tlist", timeList);
     }
 
+    private static void solveStudy(Model model) {
+        try {
+            model.study("std1").createAutoSequences("all");
+            model.sol("sol1").runAll();
+        } catch (RuntimeException ex) {
+            model.study("std1").run();
+        }
+    }
+
+    private static void safeClearModels() {
+        try {
+            ModelUtil.clear();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
     private static void writeProfileReferenceCsvs(
         Model model,
         List<SamplePoint> profileStations,
         List<TimeRequest> profileTimes,
-        CasePaths paths
+        CasePaths paths,
+        String pressureExpr,
+        String temperatureExpr
     ) throws IOException {
         final double[][] coords = buildCoordinateMatrix(profileStations);
         final double[] times = new double[profileTimes.size()];
@@ -383,8 +576,8 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
             times[i] = profileTimes.get(i).timeS;
         }
 
-        final double[][] pValues = evaluateAtPoints(model, "interpProfileP", "p", "Pa", coords, times);
-        final double[][] tValues = evaluateAtPoints(model, "interpProfileT", "T", "K", coords, times);
+        final double[][] pValues = evaluateAtPoints(model, "interpProfileP", pressureExpr, "Pa", coords, times);
+        final double[][] tValues = evaluateAtPoints(model, "interpProfileT", temperatureExpr, "K", coords, times);
         final String[] families = {"matrix_horizontal", "matrix_vertical_midline"};
 
         for (String family : families) {
@@ -415,15 +608,17 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         Model model,
         List<SamplePoint> monitorPoints,
         List<MonitorSample> monitorSamples,
-        CasePaths paths
+        CasePaths paths,
+        String pressureExpr,
+        String temperatureExpr
     ) throws IOException {
         final double[][] coords = buildCoordinateMatrix(monitorPoints);
         final double[] times = new double[monitorSamples.size()];
         for (int i = 0; i < monitorSamples.size(); ++i) {
             times[i] = monitorSamples.get(i).timeS;
         }
-        final double[][] pValues = evaluateAtPoints(model, "interpMonitorP", "p", "Pa", coords, times);
-        final double[][] tValues = evaluateAtPoints(model, "interpMonitorT", "T", "K", coords, times);
+        final double[][] pValues = evaluateAtPoints(model, "interpMonitorP", pressureExpr, "Pa", coords, times);
+        final double[][] tValues = evaluateAtPoints(model, "interpMonitorT", temperatureExpr, "K", coords, times);
         final Path csvPath = paths.comsolOutputDir.resolve("comsol_monitor_timeseries.csv");
         try (BufferedWriter out = Files.newBufferedWriter(csvPath, StandardCharsets.UTF_8)) {
             out.write("sample_id,target_time_s");
@@ -443,10 +638,12 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         }
     }
 
-    private static void writeMeshCheck(CasePaths paths) throws IOException {
+    private static void writeMeshCheck(CasePaths paths, String representation) throws IOException {
         final Path reportPath = paths.comsolOutputDir.resolve("comsol_reference_mesh_check.txt");
         final boolean skipFineCheck = shouldSkipFineCheck();
         try (BufferedWriter out = Files.newBufferedWriter(reportPath, StandardCharsets.UTF_8)) {
+            out.write("representation=" + representation);
+            out.newLine();
             out.write("fine_check_skipped=" + (skipFineCheck ? "true" : "false"));
             out.newLine();
             out.write("reference_acceptable=true");
@@ -458,17 +655,26 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         }
     }
 
-    private static void writeRunSummary(CasePaths paths, Map<String, Double> props, String timeList) throws IOException {
+    private static void writeRunSummary(
+        CasePaths paths,
+        Map<String, Double> props,
+        String timeList,
+        BuildResult build
+    ) throws IOException {
         final Path summaryPath = paths.comsolOutputDir.resolve("comsol_run_summary.md");
         try (BufferedWriter out = Files.newBufferedWriter(summaryPath, StandardCharsets.UTF_8)) {
             out.write("# COMSOL Run Summary");
             out.newLine();
             out.newLine();
-            out.write("- Representation: `" + REPRESENTATION + "`");
+            out.write("- Representation: `" + build.representation + "`");
             out.newLine();
-            out.write("- Physics route: `matrix-only coefficient form PDEs for p and T`");
+            out.write("- Physics route: `" + build.physicsRoute + "`");
             out.newLine();
             out.write("- Gravity: `off`");
+            out.newLine();
+            out.write("- Pressure expression: `" + build.pressureExpr + "`");
+            out.newLine();
+            out.write("- Temperature expression: `" + build.temperatureExpr + "`");
             out.newLine();
             out.write("- Time list: `" + timeList + "`");
             out.newLine();
@@ -585,8 +791,8 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
     private static double[][] buildCoordinateMatrix(List<SamplePoint> points) {
         final double[][] coords = new double[2][points.size()];
         for (int i = 0; i < points.size(); ++i) {
-            coords[0][i] = points.get(i).x;
-            coords[1][i] = points.get(i).y;
+            coords[0][i] = points.get(i).targetX;
+            coords[1][i] = points.get(i).targetY;
         }
         return coords;
     }
@@ -715,6 +921,14 @@ public final class ComsolHTCO2ConstPPNoFracNoWell {
         double targetY;
         double x;
         double y;
+    }
+
+    private static final class BuildResult {
+        Model model;
+        String representation;
+        String physicsRoute;
+        String pressureExpr;
+        String temperatureExpr;
     }
 
     private static final class TimeRequest {

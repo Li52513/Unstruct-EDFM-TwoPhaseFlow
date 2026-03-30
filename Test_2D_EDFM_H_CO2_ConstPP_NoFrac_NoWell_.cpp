@@ -1,6 +1,6 @@
 /**
  * @file  Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.cpp
- * @brief 独立测试文件�?D 单相 CO2 常物性、无裂缝、无井的压力扩散解析验证
+ * @brief 
  */
 
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h"

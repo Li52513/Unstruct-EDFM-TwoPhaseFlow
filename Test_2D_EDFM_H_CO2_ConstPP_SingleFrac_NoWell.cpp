@@ -321,8 +321,8 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
     mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
 
-    mgr.addFracture(Vector(0.5 * cfg.lx, 0.1 * cfg.ly, 0.0),
-                    Vector(0.5 * cfg.lx, 0.9 * cfg.ly, 0.0));
+    mgr.addFracture(Vector(0.2 * cfg.lx, 0.1 * cfg.ly, 0.0),
+                    Vector(0.8 * cfg.lx, 0.9 * cfg.ly, 0.0));
     mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
 
     mgr.BuildGlobalSystemIndexing();
