@@ -265,7 +265,7 @@ struct TestCaseSpec {
     bool enable_time_sensitivity_study = false;
     bool export_vtk = true;
     bool emit_detailed_outputs = true;
-    bool allow_full_workflow_comsol_autorun = true;
+    bool allow_full_workflow_comsol_autorun = false;
     std::string comsol_wrapper_relpath =
         "tools/COMSOL/H_T_CO2_ConstPP_NoFrac_NoWell/run_comsol_reference.ps1";
 };
@@ -2892,6 +2892,36 @@ void RunTestCase() {
 
 void ExecutePlanByKey(const std::string& key) {
     ExecutePlanByKeyImpl(key);
+}
+
+void RunSolveOnly() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.spec.enable_grid_convergence_study = false;
+    plan.spec.enable_time_sensitivity_study = false;
+    plan.spec.allow_full_workflow_comsol_autorun = false;
+    RunSingleCaseCore(plan.spec, "");
+}
+
+void RunPrepareReference() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.spec.enable_grid_convergence_study = false;
+    plan.spec.enable_time_sensitivity_study = false;
+    plan.spec.allow_full_workflow_comsol_autorun = false;
+    RunSingleCaseCore(plan.spec, "");
+}
+
+void RunValidateOnly() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.spec.enable_grid_convergence_study = false;
+    plan.spec.enable_time_sensitivity_study = false;
+    plan.spec.allow_full_workflow_comsol_autorun = false;
+    RunCase(plan.spec);
+}
+
+void RunFullWorkflow() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.spec.allow_full_workflow_comsol_autorun = false;
+    RunCase(plan.spec);
 }
 
 } // namespace Test_H_T_CO2_ConstPP_NoFrac

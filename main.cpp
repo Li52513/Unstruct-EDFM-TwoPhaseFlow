@@ -24,7 +24,12 @@
 #include "Test_FVM_Ops_AD.h"
 #include "Test_Day3_BoundaryFixes.h"
 #include "Test_Day5_GlobalAssembly_Jacobian.h"
+#if __has_include("Test_Day6_TransientSolver.h")
 #include "Test_Day6_TransientSolver.h"
+#define CODEX_HAS_DAY6_TRANSIENT_SOLVER 1
+#else
+#define CODEX_HAS_DAY6_TRANSIENT_SOLVER 0
+#endif
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.h"
@@ -33,6 +38,7 @@
 #include "Test_2D_EDFM_H_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
+#include "CaseCommon_Catalog.h"
 #include "ADVar.hpp"
 #include "test_MartixAssemble.h"
 
@@ -94,11 +100,24 @@ void PrintUsage(const char* exeName) {
     std::cout << "  " << exeName << " --list\n";
     std::cout << "  " << exeName << " --case=<case_name>\n";
     std::cout << "  " << exeName << " --case <case_name>\n";
+    std::cout << "  " << exeName << " --case <case_name> --stage <solve_only|prepare_reference|validate_only|full_workflow>\n";
     std::cout << "  " << exeName << " --help\n";
 }
 
+void PrintCatalogCases() {
+    CaseCommon::ValidateCaseCatalogOrThrow();
+    std::cout << "A1-F12 catalog cases:\n";
+    for (const auto& entry : CaseCommon::GetCaseCatalog()) {
+        std::cout << "  - " << entry.metadata.case_code
+                  << " [" << entry.metadata.implementation_status << "]"
+                  << " : " << entry.metadata.dispatcher_key
+                  << " : " << entry.metadata.description
+                  << " : ref=" << entry.metadata.reference_mode << '\n';
+    }
+}
+
 void PrintCases(const std::vector<CaseEntry>& cases) {
-    std::cout << "Available cases:\n";
+    std::cout << "Legacy/auxiliary cases:\n";
     for (const auto& entry : cases) {
         std::cout << "  - " << entry.name << " : " << entry.desc << '\n';
     }
@@ -120,6 +139,7 @@ int main (int argc, char** argv) {
         {"issue12_linear_solver", "Issue#12: Linear solver memory (cache A_work) & CPR-AMG solvability", []() { Test_Issue12::Run_All(); return 0; }},
         { "day5_global_jac_2d","Day5 core gate: 2D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_2D(); return 0; }},
         { "day5_global_jac_3d","Day5 core gate: 3D FD vs AD Jacobian Assembly Verification",[]() { Test_Day5::Run_Day5_GlobalAssembly_Jacobian_3D(); return 0; }},
+#if CODEX_HAS_DAY6_TRANSIENT_SOLVER
         {"day6_transient_2d_sp_injprod", "Day6: 2D single-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_SP_InjProd(); return 0; }},
         {"day6_transient_2d_tp_injprod", "Day6: 2D two-phase transient stability + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_TP_InjProd(); return 0; }},
         {"day6_transient_2d_tp_multiwell", "Day6: 2D multi-well interference transient + VTK export", []() { Test_Day6::Run_Day6_Transient_2D_TP_Multiwell(); return 0; }},
@@ -134,8 +154,9 @@ int main (int argc, char** argv) {
         {"day6_t01_f1", "Day6 T01 immediate split gate: F1 single-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F1(); return 0; }},
         {"day6_t01_f2", "Day6 T01 immediate split gate: F2 crossing-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F2(); return 0; }},
         {"day6_t1_2d_sp_nowell_analytical", "Day6 T1 baseline: 2D no-well single-phase diffusion with Fourier analytical validation", []() { Test_Day6::Run_Day6_T1_2D_SP_NoWell_Analytical(); return 0; }},
-        {"test_h_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property no-fracture no-well (independent template)", []() { Test_H_CO2_ConstPP::RunTestCase(); return 0; }},
-        {"test_h_t_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::RunTestCase(); return 0; }},
+#endif
+        {"test_h_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property no-fracture no-well (independent template)", []() { Test_H_CO2_ConstPP::RunFullWorkflow(); return 0; }},
+        {"test_h_t_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_fast", "Standalone fast-screen test: 2D single-phase CO2 const-property P-T coupled no-fracture no-well with t_end=1.0e7 s", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_fast"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_fast_grid", "Standalone fast-screen grid study: 2D single-phase CO2 const-property P-T coupled no-fracture no-well with t_end=1.0e7 s", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_fast_grid"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_grid", "Standalone validation-chain grid study: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_grid"); return 0; }},
@@ -143,13 +164,13 @@ int main (int argc, char** argv) {
         {"test_h_t_co2_constpp_nofrac_nowell_all", "Standalone validation-chain full study: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_all"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_debug_96x12", "Standalone debug case: 96x12 fine-grid detailed-output run for the no-fracture P-T coupled validation case", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_debug_96x12"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_probe_96x12_dt5000", "Standalone long-time probe: 96x12, dt_init=5000 s no-fracture P-T coupled validation case", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_probe_96x12_dt5000"); return 0; }},
-        {"test_h_t_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled single-fracture no-well", []() { Test_H_T_CO2_ConstPP_SingleFrac::RunTestCase(); return 0; }},
+        {"test_h_t_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled single-fracture no-well", []() { Test_H_T_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_prepare_reference", "Standalone validation-chain prepare phase: export engineering reference inputs for the N=2 single-fracture CO2 P-T case", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_prepare_reference"); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_validate_reference", "Standalone validation-chain validate phase: compare the N=2 single-fracture CO2 P-T case against prepared reference data", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_validate_reference"); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_full_comsol", "Standalone validation-chain full COMSOL mode: auto-prepare and validate the N=2 single-fracture CO2 P-T case", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_full_comsol"); return 0; }},
-        {"test_h_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property single-fracture no-well", []() { Test_H_CO2_ConstPP_SingleFrac::RunTestCase(); return 0; }},
-        {"test_h_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) no-fracture no-well", []() { Test_H_CO2_VaryPP::RunTestCase(); return 0; }},
-        {"test_h_co2_varypp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) single-fracture no-well", []() { Test_H_CO2_VaryPP_SingleFrac::RunTestCase(); return 0; }},
+        {"test_h_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property single-fracture no-well", []() { Test_H_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) no-fracture no-well", []() { Test_H_CO2_VaryPP::RunFullWorkflow(); return 0; }},
+        {"test_h_co2_varypp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) single-fracture no-well", []() { Test_H_CO2_VaryPP_SingleFrac::RunFullWorkflow(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},
@@ -178,6 +199,8 @@ int main (int argc, char** argv) {
     bool showHelp = false;
     bool showList = false;
     std::string caseName;
+    CaseCommon::CaseStage caseStage = CaseCommon::CaseStage::FullWorkflow;
+    bool stageWasSet = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -201,6 +224,26 @@ int main (int argc, char** argv) {
             caseName = arg.substr(7);
             continue;
         }
+        if (arg == "--stage") {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: --stage requires a value.\n";
+                return 2;
+            }
+            if (!CaseCommon::ParseCaseStage(argv[++i], &caseStage)) {
+                std::cerr << "Error: unsupported stage value.\n";
+                return 2;
+            }
+            stageWasSet = true;
+            continue;
+        }
+        if (arg.rfind("--stage=", 0) == 0) {
+            if (!CaseCommon::ParseCaseStage(arg.substr(8), &caseStage)) {
+                std::cerr << "Error: unsupported stage value.\n";
+                return 2;
+            }
+            stageWasSet = true;
+            continue;
+        }
 
         std::cerr << "Unknown argument: " << arg << '\n';
         PrintUsage(argv[0]);
@@ -210,11 +253,15 @@ int main (int argc, char** argv) {
     if (showHelp) {
         PrintUsage(argv[0]);
         std::cout << '\n';
+        PrintCatalogCases();
+        std::cout << '\n';
         PrintCases(cases);
         return 0;
     }
 
     if (showList) {
+        PrintCatalogCases();
+        std::cout << '\n';
         PrintCases(cases);
         return 0;
     }
@@ -222,6 +269,25 @@ int main (int argc, char** argv) {
     if (caseName.empty()) {
         caseName = "day2_fvm_ad";
         std::cout << "[Info] no --case provided. Using default: " << caseName << '\n';
+    }
+
+    try {
+        CaseCommon::ValidateCaseCatalogOrThrow();
+        if (const CaseCommon::CaseCatalogEntry* catalogEntry = CaseCommon::FindCaseCatalogEntry(caseName)) {
+            std::cout << "[Catalog Case] " << catalogEntry->metadata.case_code
+                      << " - " << catalogEntry->metadata.dispatcher_key
+                      << " - stage=" << CaseCommon::ToString(caseStage) << "\n";
+            return CaseCommon::RunCatalogCase(*catalogEntry, caseStage);
+        }
+    }
+    catch (const std::exception& e) {
+        std::cerr << "[Catalog Error] " << e.what() << '\n';
+        return 1;
+    }
+
+    if (stageWasSet) {
+        std::cerr << "Error: --stage is only supported for A1-F12 catalog cases.\n";
+        return 2;
     }
 
     for (const auto& entry : cases) {
@@ -242,6 +308,8 @@ int main (int argc, char** argv) {
     }
 
     std::cerr << "Unknown case: " << caseName << "\n\n";
+    PrintCatalogCases();
+    std::cout << '\n';
     PrintCases(cases);
     return 2;
 }

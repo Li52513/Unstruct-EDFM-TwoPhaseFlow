@@ -268,7 +268,7 @@ struct TestCaseSpec {
     bool enable_time_sensitivity_study = true;
     bool export_vtk = true;
     bool emit_detailed_outputs = true;
-    bool allow_full_workflow_comsol_autorun = true;
+    bool allow_full_workflow_comsol_autorun = false;
     std::string comsol_wrapper_relpath =
         "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1";
 };
@@ -2448,6 +2448,22 @@ void RunTestCase() {
 
 void ExecutePlanByKey(const std::string& key) {
     ExecutePlanByKeyImpl(key);
+}
+
+void RunSolveOnly() {
+    ExecutePlanByKeyImpl("h_t_co2_constpp_singlefrac_nowell_prepare_reference");
+}
+
+void RunPrepareReference() {
+    ExecutePlanByKeyImpl("h_t_co2_constpp_singlefrac_nowell_prepare_reference");
+}
+
+void RunValidateOnly() {
+    ExecutePlanByKeyImpl("h_t_co2_constpp_singlefrac_nowell_validate_reference");
+}
+
+void RunFullWorkflow() {
+    ExecutePlanByKeyImpl("h_t_co2_constpp_singlefrac_nowell_full_comsol");
 }
 
 } // namespace Test_H_T_CO2_ConstPP_SingleFrac

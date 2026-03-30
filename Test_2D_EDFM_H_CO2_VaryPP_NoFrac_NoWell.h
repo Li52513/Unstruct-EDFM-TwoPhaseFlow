@@ -1,4 +1,6 @@
-﻿#pragma once
+#pragma once
+
+#include <string>
 
 /**
  * @file Test_2D_EDFM_H_CO2_VaryPP_NoFrac_NoWell.h
@@ -8,5 +10,10 @@
 namespace Test_H_CO2_VaryPP {
 
 void RunTestCase();
+void ExecutePlanByKey(const std::string& key);
+void RunSolveOnly();
+void RunPrepareReference();
+void RunValidateOnly();
+void RunFullWorkflow();
 
 } // namespace Test_H_CO2_VaryPP

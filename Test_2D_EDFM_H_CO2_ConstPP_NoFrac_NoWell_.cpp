@@ -699,7 +699,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     return summary;
 }
 
-void ExecutePlanByKey(const std::string& key) {
+void ExecutePlanByKeyImpl(const std::string& key) {
     const auto& registry = GetRegistry();
     const auto it = registry.find(key);
     if (it == registry.end()) throw std::runtime_error("[Test_H_CO2] unknown registry key: " + key);
@@ -732,7 +732,27 @@ void ExecutePlanByKey(const std::string& key) {
 } // namespace
 
 void RunTestCase() {
-    ExecutePlanByKey("h_co2_constpp_nofrac_nowell");
+    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+}
+
+void ExecutePlanByKey(const std::string& key) {
+    ExecutePlanByKeyImpl(key);
+}
+
+void RunSolveOnly() {
+    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+}
+
+void RunPrepareReference() {
+    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+}
+
+void RunValidateOnly() {
+    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+}
+
+void RunFullWorkflow() {
+    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
 }
 
 } // namespace Test_H_CO2_ConstPP

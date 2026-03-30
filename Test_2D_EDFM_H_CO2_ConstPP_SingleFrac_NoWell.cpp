@@ -493,7 +493,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     return summary;
 }
 
-void ExecutePlanByKey(const std::string& key) {
+void ExecutePlanByKeyImpl(const std::string& key) {
     const auto& registry = GetRegistry();
     auto it = registry.find(key);
     if (it == registry.end()) {
@@ -523,7 +523,27 @@ void ExecutePlanByKey(const std::string& key) {
 } // namespace
 
 void RunTestCase() {
-    ExecutePlanByKey("h_co2_constpp_singlefrac_nowell");
+    ExecutePlanByKeyImpl("h_co2_constpp_singlefrac_nowell");
+}
+
+void ExecutePlanByKey(const std::string& key) {
+    ExecutePlanByKeyImpl(key);
+}
+
+void RunSolveOnly() {
+    ExecutePlanByKeyImpl("h_co2_constpp_singlefrac_nowell");
+}
+
+void RunPrepareReference() {
+    ExecutePlanByKeyImpl("h_co2_constpp_singlefrac_nowell");
+}
+
+void RunValidateOnly() {
+    ExecutePlanByKeyImpl("h_co2_constpp_singlefrac_nowell");
+}
+
+void RunFullWorkflow() {
+    ExecutePlanByKeyImpl("h_co2_constpp_singlefrac_nowell");
 }
 
 } // namespace Test_H_CO2_ConstPP_SingleFrac
