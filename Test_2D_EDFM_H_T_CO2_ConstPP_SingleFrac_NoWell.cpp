@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.cpp
  * @brief Standalone validation chain: 2D single-phase CO2 constant-property P-T coupled, single-fracture, no-well.
  */
@@ -43,14 +43,19 @@ namespace Test_H_T_CO2_ConstPP_SingleFrac {
 namespace {
 
 constexpr double kPendingTimeTolerance = 1.0e-9;
-constexpr double kMonitorSampleDtS = 500.0;
+constexpr double kMonitorSampleDtS = 1.0e5;
 constexpr double kGridTimeMonotoneAbsTol = 5.0e-3;
 constexpr double kComsolThinBandWidthM = 1.0e-3;
+constexpr double kFractureApertureM = 1.0e-3;
+constexpr double kFinalTemperatureSpanThresholdK = 10.0;
+constexpr double kBoundaryAdjacentDeltaTThresholdK = 20.0;
+constexpr double kBoundaryPrescribedTolerance = 1.0e-8;
 constexpr const char* kFamilyMatrixHorizontal = "matrix_horizontal";
 constexpr const char* kFamilyFractureTangent = "fracture_tangent";
 constexpr const char* kFamilyCrossNormal = "cross_normal";
 constexpr const char* kLocationMatrix = "matrix";
 constexpr const char* kLocationFracture = "fracture";
+constexpr const char* kComsolRepresentationExplicit = "explicit_lower_dimensional_fracture";
 constexpr const char* kComsolRepresentationThinBand = "thin_band_fallback";
 
 enum class ReferenceMode { Auto, Analytical, Comsol };
@@ -96,6 +101,23 @@ struct FieldErrorMetrics {
     double l1_norm = 0.0;
     double l2_norm = 0.0;
     double linf_norm = 0.0;
+};
+
+struct ScalarStats {
+    int count = 0;
+    double min_value = std::numeric_limits<double>::quiet_NaN();
+    double max_value = std::numeric_limits<double>::quiet_NaN();
+    double avg_value = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct BoundaryDiagnosticsRow {
+    std::string snapshot_tag;
+    double time_s = 0.0;
+    ScalarStats left_prescribed_t;
+    ScalarStats right_prescribed_t;
+    ScalarStats left_adjacent_t;
+    ScalarStats right_adjacent_t;
+    ScalarStats domain_t;
 };
 
 struct ProfileCompareMetrics {
@@ -182,15 +204,15 @@ struct TestCaseSpec {
     double matrix_perm = 1.0e-13;
     double matrix_ct = 5.0e-9;
     double matrix_rho_r = 2600.0;
-    double matrix_cp_r = 1000.0;
-    double matrix_lambda_r = 2.0;
+    double matrix_cp_r = 800.0;
+    double matrix_lambda_r = 3.0;
     double fracture_phi = 0.15;
     double fracture_kt = 5.0e-12;
     double fracture_kn = 5.0e-13;
     double fracture_ct = 5.0e-9;
     double fracture_rho_r = 2600.0;
-    double fracture_cp_r = 1000.0;
-    double fracture_lambda_r = 4.0;
+    double fracture_cp_r = 800.0;
+    double fracture_lambda_r = 6.0;
     double co2_rho_const = 700.0;
     double co2_mu_const = 6.0e-5;
     double co2_cp_const = 1100.0;
@@ -200,15 +222,15 @@ struct TestCaseSpec {
     double p_left = 12.0e6;
     double p_right = 8.0e6;
     double t_init = 380.0;
-    double t_left = 400.0;
-    double t_right = 360.0;
-    double dt_init = 120.0;
-    double dt_min = 1.0;
-    double dt_max = 5000.0;
-    double target_end_time_s = 1.0e5;
-    int max_steps = 12000;
+    double t_left = 440.0;
+    double t_right = 320.0;
+    double dt_init = 2.0e4;
+    double dt_min = 100.0;
+    double dt_max = 2.0e5;
+    double target_end_time_s = 2.0e7;
+    int max_steps = 5000;
     int max_newton_iter = 14;
-    FIM_Engine::LinearSolverType lin_solver = FIM_Engine::LinearSolverType::AMGCL;
+    FIM_Engine::LinearSolverType lin_solver = FIM_Engine::LinearSolverType::SparseLU;
     bool amgcl_use_fallback_sparselu = true;
     double amgcl_tol = 1.0e-6;
     int amgcl_maxiter = 500;
@@ -218,10 +240,10 @@ struct TestCaseSpec {
     double rel_res_tol = 1.0e-6;
     double rel_update_tol = 1.0e-8;
     double max_dP = 2.0e7;
-    double max_dT = 10.0;
+    double max_dT = 25.0;
     bool enable_armijo_line_search = false;
     double rollback_shrink_factor = 0.7;
-    double dt_relres_grow_factor = 1.08;
+    double dt_relres_grow_factor = 1.15;
     Vector gravity_vector = Vector(0.0, 0.0, 0.0);
     FIM_Engine::DiagLevel diag_level = FIM_Engine::DiagLevel::Off;
     ReferenceMode reference_mode = ReferenceMode::Auto;
@@ -232,7 +254,7 @@ struct TestCaseSpec {
         std::make_pair(48, 6),
         std::make_pair(96, 12)
     };
-    std::vector<double> time_step_sweep = {480.0, 120.0, 30.0};
+    std::vector<double> time_step_sweep = {8.0e4, 2.0e4, 5.0e3};
     int matrix_horizontal_station_count = 81;
     int fracture_tangent_station_count = 81;
     int cross_normal_station_count = 61;
@@ -266,6 +288,7 @@ struct TestCaseSummary {
     std::string reference_spec_path;
     std::string property_table_path;
     std::string comsol_property_table_path;
+    std::string boundary_diagnostics_path;
     std::string profile_station_definitions_path;
     std::string monitor_point_definitions_path;
     std::string profile_schedule_path;
@@ -286,7 +309,9 @@ struct TestCaseSummary {
     int max_iters = 0;
     double t_end = 0.0;
     std::string resolved_reference_mode = "Auto";
-    std::string comsol_representation = kComsolRepresentationThinBand;
+    std::string comsol_representation = kComsolRepresentationExplicit;
+    bool reference_is_explicit_lower_dimensional = false;
+    bool comsol_fine_check_skipped = false;
     bool analytical_closed_form_available = false;
     std::string validation_status = "not_run";
     bool reference_ready = false;
@@ -303,7 +328,11 @@ struct TestCaseSummary {
     double final_monitor_p_linf_norm = 0.0;
     double final_monitor_t_l2_norm = 0.0;
     double final_monitor_t_linf_norm = 0.0;
+    double final_temperature_span_k = 0.0;
+    double final_boundary_adjacent_delta_t_k = 0.0;
+    bool final_boundary_prescribed_t_ok = false;
     std::vector<ProfileCompareMetrics> report_metrics;
+    std::vector<BoundaryDiagnosticsRow> boundary_diagnostics_rows;
 };
 
 struct CaseRunArtifacts {
@@ -428,6 +457,31 @@ std::vector<double> BuildSortedFractions(const std::vector<double>& rawFractions
     std::sort(fractions.begin(), fractions.end());
     return fractions;
 }
+
+struct RunningStatsAccumulator {
+    int count = 0;
+    double sum = 0.0;
+    double min_value = std::numeric_limits<double>::infinity();
+    double max_value = -std::numeric_limits<double>::infinity();
+
+    void add(double value) {
+        if (!std::isfinite(value)) return;
+        ++count;
+        sum += value;
+        min_value = std::min(min_value, value);
+        max_value = std::max(max_value, value);
+    }
+
+    ScalarStats finalize() const {
+        ScalarStats stats;
+        stats.count = count;
+        if (count <= 0) return stats;
+        stats.min_value = min_value;
+        stats.max_value = max_value;
+        stats.avg_value = sum / static_cast<double>(count);
+        return stats;
+    }
+};
 
 void ApplyUniformScalarField(const std::shared_ptr<volScalarField>& field, double value) {
     if (!field) return;
@@ -919,6 +973,7 @@ void WritePropertyTables(const TestCaseSpec& cfg,
         out << "gravity_x," << cfg.gravity_vector.m_x << ",m/s^2\n";
         out << "gravity_y," << cfg.gravity_vector.m_y << ",m/s^2\n";
         out << "gravity_z," << cfg.gravity_vector.m_z << ",m/s^2\n";
+        out << "fracture_aperture_m," << kFractureApertureM << ",m\n";
         out << "comsol_thin_band_width," << kComsolThinBandWidthM << ",m\n";
     };
     writeOne(engineeringPath);
@@ -936,8 +991,8 @@ void WriteComsolReferenceSpec(const TestCaseSpec& cfg, const std::string& caseDi
     out << "- Geometry: `" << cfg.lx << " m x " << cfg.ly << " m`\n";
     out << "- Gravity: disabled\n";
     out << "- Non-orthogonal correction: enabled on engineering side\n";
-    out << "- Requested fracture route: low-dimensional fracture\n";
-    out << "- Implemented COMSOL route: `" << kComsolRepresentationThinBand << "` with band width `" << kComsolThinBandWidthM << " m`\n\n";
+    out << "- Requested fracture route: explicit lower-dimensional fracture\n";
+    out << "- Implemented COMSOL route: `" << kComsolRepresentationExplicit << "` with aperture `" << kFractureApertureM << " m`\n\n";
     out << "## Required Inputs\n";
     out << "- `engineering/profile_station_definitions.csv`\n";
     out << "- `engineering/profile_report_schedule.csv`\n";
@@ -1207,6 +1262,8 @@ std::vector<std::string> RequiredReferenceFiles(const TestCaseSummary& summary, 
         }
     }
     files.push_back(summary.comsol_output_dir + "/comsol_monitor_timeseries.csv");
+    files.push_back(summary.comsol_output_dir + "/comsol_run_summary.md");
+    files.push_back(summary.comsol_output_dir + "/comsol_reference_mesh_check.txt");
     return files;
 }
 
@@ -1229,6 +1286,8 @@ void WriteMetricsCsv(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
                "reference_ready,validation_performed,validation_passed,grid_convergence_ok,time_sensitivity_ok,"
                "final_profile_p_l2_norm,final_profile_p_linf_norm,final_profile_t_l2_norm,final_profile_t_linf_norm,"
                "final_monitor_p_l2_norm,final_monitor_p_linf_norm,final_monitor_t_l2_norm,final_monitor_t_linf_norm,"
+               "comsol_representation,reference_is_explicit_lower_dimensional,comsol_fine_check_skipped,"
+               "final_temperature_span_k,final_boundary_adjacent_delta_t_k,final_boundary_prescribed_t_ok,"
                "profile_l2_threshold,profile_linf_threshold,monitor_l2_threshold,monitor_linf_threshold\n";
     metrics << cfg.case_name << "," << cfg.nx << "," << cfg.ny << "," << summary.n_cells << ","
             << std::setprecision(12) << summary.h_char << "," << summary.t_end << ","
@@ -1244,6 +1303,10 @@ void WriteMetricsCsv(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
             << summary.final_profile_t_l2_norm << "," << summary.final_profile_t_linf_norm << ","
             << summary.final_monitor_p_l2_norm << "," << summary.final_monitor_p_linf_norm << ","
             << summary.final_monitor_t_l2_norm << "," << summary.final_monitor_t_linf_norm << ","
+            << summary.comsol_representation << "," << BoolString(summary.reference_is_explicit_lower_dimensional) << ","
+            << BoolString(summary.comsol_fine_check_skipped) << ","
+            << summary.final_temperature_span_k << "," << summary.final_boundary_adjacent_delta_t_k << ","
+            << BoolString(summary.final_boundary_prescribed_t_ok) << ","
             << cfg.profile_l2_threshold << "," << cfg.profile_linf_threshold << ","
             << cfg.monitor_l2_threshold << "," << cfg.monitor_linf_threshold << "\n";
 }
@@ -1271,6 +1334,7 @@ void WriteReferenceSpec(const TestCaseSpec& cfg, const TestCaseSummary& summary)
     out << "- Monitor sample period: `" << cfg.monitor_dt_s << " s`.\n";
     out << "- Engineering directory: `" << summary.engineering_dir << "`.\n";
     out << "- Reference directory: `" << summary.reference_dir << "`.\n";
+    out << "- Boundary diagnostics: `" << summary.boundary_diagnostics_path << "`.\n";
 }
 
 void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
@@ -1294,6 +1358,8 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     out << "- Gravity vector: `(" << cfg.gravity_vector.m_x << ", " << cfg.gravity_vector.m_y << ", " << cfg.gravity_vector.m_z << ")`\n";
     out << "- Non-orthogonal correction: `" << BoolString(cfg.enable_non_orthogonal_correction) << "`\n";
     out << "- COMSOL representation: `" << summary.comsol_representation << "`\n";
+    out << "- Reference uses explicit lower-dimensional fracture: `" << BoolString(summary.reference_is_explicit_lower_dimensional) << "`\n";
+    out << "- COMSOL fine mesh check skipped: `" << BoolString(summary.comsol_fine_check_skipped) << "`\n";
     out << "- Analytical closed form available: `" << BoolString(summary.analytical_closed_form_available) << "`\n\n";
 
     out << "## Final Acceptance Metrics\n";
@@ -1305,6 +1371,9 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     out << "- Final monitor pressure `Linf_norm`: `" << summary.final_monitor_p_linf_norm << "`\n";
     out << "- Final monitor temperature `L2_norm`: `" << summary.final_monitor_t_l2_norm << "`\n";
     out << "- Final monitor temperature `Linf_norm`: `" << summary.final_monitor_t_linf_norm << "`\n";
+    out << "- Final temperature span `Tmax-Tmin`: `" << summary.final_temperature_span_k << " K`\n";
+    out << "- Final left/right adjacent-cell average temperature difference: `" << summary.final_boundary_adjacent_delta_t_k << " K`\n";
+    out << "- Prescribed boundary temperature consistency: `" << BoolString(summary.final_boundary_prescribed_t_ok) << "`\n";
     out << "- Profile thresholds: `L2 <= " << cfg.profile_l2_threshold << "`, `Linf <= " << cfg.profile_linf_threshold << "`\n";
     out << "- Monitor thresholds: `L2 <= " << cfg.monitor_l2_threshold << "`, `Linf <= " << cfg.monitor_linf_threshold << "`\n\n";
 
@@ -1317,6 +1386,7 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     out << "- Analytical feasibility note: `" << summary.analytical_feasibility_path << "`\n";
     out << "- COMSOL reference spec: `" << summary.comsol_reference_spec_path << "`\n";
     out << "- MATLAB script: `" << summary.matlab_script_path << "`\n";
+    out << "- Boundary diagnostics csv: `" << summary.boundary_diagnostics_path << "`\n";
     if (!summary.grid_convergence_csv_path.empty()) out << "- Grid convergence csv: `" << summary.grid_convergence_csv_path << "`\n";
     if (!summary.time_sensitivity_csv_path.empty()) out << "- Time sensitivity csv: `" << summary.time_sensitivity_csv_path << "`\n";
 
@@ -1338,13 +1408,138 @@ void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     }
 }
 
+ScalarStats ComputeFieldStats(const std::shared_ptr<volScalarField>& field) {
+    RunningStatsAccumulator acc;
+    if (!field) return acc.finalize();
+    for (double value : field->data) acc.add(value);
+    return acc.finalize();
+}
+
+ScalarStats ComputeBoundaryPrescribedStats(const MeshManager& mgr,
+                                           const BoundarySetting::BoundaryConditionManager& bcMgr,
+                                           int boundaryTag) {
+    RunningStatsAccumulator acc;
+    const auto& faces = mgr.mesh().getFaces();
+    for (const auto& face : faces) {
+        if (!face.isBoundary() || face.physicalGroupId != boundaryTag) continue;
+        if (!bcMgr.HasBC(boundaryTag)) continue;
+        const BoundarySetting::BCCoefficients bc = bcMgr.GetBCCoefficients(boundaryTag, face.midpoint);
+        if (bc.type != BoundarySetting::BoundaryType::Dirichlet) continue;
+        acc.add(bc.c);
+    }
+    return acc.finalize();
+}
+
+ScalarStats ComputeBoundaryAdjacentCellStats(const MeshManager& mgr,
+                                             const std::shared_ptr<volScalarField>& field,
+                                             int boundaryTag) {
+    RunningStatsAccumulator acc;
+    if (!field) return acc.finalize();
+    const auto& faces = mgr.mesh().getFaces();
+    for (const auto& face : faces) {
+        if (!face.isBoundary() || face.physicalGroupId != boundaryTag) continue;
+        const int owner = face.ownerCell_index;
+        if (owner < 0 || owner >= static_cast<int>(field->data.size())) continue;
+        acc.add(field->data[static_cast<std::size_t>(owner)]);
+    }
+    return acc.finalize();
+}
+
+BoundaryDiagnosticsRow BuildBoundaryDiagnosticsRow(const MeshManager& mgr,
+                                                   const FieldManager_2D& fm,
+                                                   const BoundarySetting::BoundaryConditionManager& bcT,
+                                                   const std::string& snapshotTag,
+                                                   double timeS) {
+    BoundaryDiagnosticsRow row;
+    row.snapshot_tag = snapshotTag;
+    row.time_s = timeS;
+    const auto tField = fm.getMatrixScalar("T");
+    row.left_prescribed_t = ComputeBoundaryPrescribedStats(mgr, bcT, MeshTags::LEFT);
+    row.right_prescribed_t = ComputeBoundaryPrescribedStats(mgr, bcT, MeshTags::RIGHT);
+    row.left_adjacent_t = ComputeBoundaryAdjacentCellStats(mgr, tField, MeshTags::LEFT);
+    row.right_adjacent_t = ComputeBoundaryAdjacentCellStats(mgr, tField, MeshTags::RIGHT);
+    row.domain_t = ComputeFieldStats(tField);
+    return row;
+}
+
+void WriteBoundaryDiagnosticsCsv(const std::vector<BoundaryDiagnosticsRow>& rows, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write boundary diagnostics csv: " + path);
+    }
+    out << "snapshot_tag,time_s,"
+           "left_prescribed_t_count,left_prescribed_t_min_k,left_prescribed_t_max_k,left_prescribed_t_avg_k,"
+           "right_prescribed_t_count,right_prescribed_t_min_k,right_prescribed_t_max_k,right_prescribed_t_avg_k,"
+           "left_adjacent_t_count,left_adjacent_t_min_k,left_adjacent_t_max_k,left_adjacent_t_avg_k,"
+           "right_adjacent_t_count,right_adjacent_t_min_k,right_adjacent_t_max_k,right_adjacent_t_avg_k,"
+           "domain_t_count,domain_t_min_k,domain_t_max_k,domain_t_avg_k,domain_t_span_k\n";
+    for (const auto& row : rows) {
+        const double span =
+            (row.domain_t.count > 0 && std::isfinite(row.domain_t.max_value) && std::isfinite(row.domain_t.min_value))
+            ? (row.domain_t.max_value - row.domain_t.min_value)
+            : std::numeric_limits<double>::quiet_NaN();
+        out << row.snapshot_tag << "," << std::setprecision(12) << row.time_s << ","
+            << row.left_prescribed_t.count << "," << row.left_prescribed_t.min_value << "," << row.left_prescribed_t.max_value
+            << "," << row.left_prescribed_t.avg_value << ","
+            << row.right_prescribed_t.count << "," << row.right_prescribed_t.min_value << "," << row.right_prescribed_t.max_value
+            << "," << row.right_prescribed_t.avg_value << ","
+            << row.left_adjacent_t.count << "," << row.left_adjacent_t.min_value << "," << row.left_adjacent_t.max_value
+            << "," << row.left_adjacent_t.avg_value << ","
+            << row.right_adjacent_t.count << "," << row.right_adjacent_t.min_value << "," << row.right_adjacent_t.max_value
+            << "," << row.right_adjacent_t.avg_value << ","
+            << row.domain_t.count << "," << row.domain_t.min_value << "," << row.domain_t.max_value << ","
+            << row.domain_t.avg_value << "," << span << "\n";
+    }
+}
+
+std::string ReadTextFile(const std::string& path) {
+    std::ifstream in(path.c_str(), std::ios::in);
+    if (!in.good()) return "";
+    std::ostringstream oss;
+    oss << in.rdbuf();
+    return oss.str();
+}
+
+std::string ExtractComsolRepresentation(const std::string& runSummaryPath) {
+    std::ifstream in(runSummaryPath.c_str(), std::ios::in);
+    if (!in.good()) return "";
+    std::string line;
+    const std::string token = "Fracture representation:";
+    while (std::getline(in, line)) {
+        const std::size_t pos = line.find(token);
+        if (pos == std::string::npos) continue;
+        std::string value = Trim(line.substr(pos + token.size()));
+        if (!value.empty() && value.front() == '`') value.erase(value.begin());
+        while (!value.empty() && (value.back() == '`' || value.back() == '.' || value.back() == '\r')) value.pop_back();
+        return Trim(value);
+    }
+    return "";
+}
+
+bool ComsolFineCheckWasSkipped(const std::string& meshCheckPath) {
+    const std::string text = ReadTextFile(meshCheckPath);
+    return text.find("fine_check_skipped=true") != std::string::npos;
+}
+
+bool StatsWithinTolerance(const ScalarStats& stats, double expected, double tol) {
+    return stats.count > 0 &&
+           std::isfinite(stats.min_value) &&
+           std::isfinite(stats.max_value) &&
+           std::isfinite(stats.avg_value) &&
+           std::abs(stats.min_value - expected) <= tol &&
+           std::abs(stats.max_value - expected) <= tol &&
+           std::abs(stats.avg_value - expected) <= tol;
+}
+
 void WriteValidationSummaryCsv(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
     std::ofstream out(summary.validation_summary_csv_path.c_str(), std::ios::out | std::ios::trunc);
     if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write validation summary csv: " + summary.validation_summary_csv_path);
     out << "case_name,reference_mode_requested,reference_mode_resolved,workflow_mode,validation_status,"
            "reference_ready,validation_performed,validation_passed,grid_convergence_ok,time_sensitivity_ok,"
            "final_profile_p_l2_norm,final_profile_p_linf_norm,final_profile_t_l2_norm,final_profile_t_linf_norm,"
-           "final_monitor_p_l2_norm,final_monitor_p_linf_norm,final_monitor_t_l2_norm,final_monitor_t_linf_norm\n";
+           "final_monitor_p_l2_norm,final_monitor_p_linf_norm,final_monitor_t_l2_norm,final_monitor_t_linf_norm,"
+           "comsol_representation,reference_is_explicit_lower_dimensional,comsol_fine_check_skipped,"
+           "final_temperature_span_k,final_boundary_adjacent_delta_t_k,final_boundary_prescribed_t_ok\n";
     out << cfg.case_name << "," << ReferenceModeString(cfg.reference_mode) << "," << summary.resolved_reference_mode << ","
         << WorkflowModeString(cfg.workflow_mode) << "," << summary.validation_status << ","
         << BoolString(summary.reference_ready) << "," << BoolString(summary.validation_performed) << ","
@@ -1353,7 +1548,11 @@ void WriteValidationSummaryCsv(const TestCaseSpec& cfg, const TestCaseSummary& s
         << summary.final_profile_p_l2_norm << "," << summary.final_profile_p_linf_norm << ","
         << summary.final_profile_t_l2_norm << "," << summary.final_profile_t_linf_norm << ","
         << summary.final_monitor_p_l2_norm << "," << summary.final_monitor_p_linf_norm << ","
-        << summary.final_monitor_t_l2_norm << "," << summary.final_monitor_t_linf_norm << "\n";
+        << summary.final_monitor_t_l2_norm << "," << summary.final_monitor_t_linf_norm << ","
+        << summary.comsol_representation << "," << BoolString(summary.reference_is_explicit_lower_dimensional) << ","
+        << BoolString(summary.comsol_fine_check_skipped) << ","
+        << summary.final_temperature_span_k << "," << summary.final_boundary_adjacent_delta_t_k << ","
+        << BoolString(summary.final_boundary_prescribed_t_ok) << "\n";
 }
 
 void WriteMatlabPlotScript(const TestCaseSummary& summary) {
@@ -1374,6 +1573,7 @@ void WriteMatlabPlotScript(const TestCaseSummary& summary) {
 "    fullfile(rootDir, 'grid_convergence.csv')\n"
 "    fullfile(rootDir, 'time_sensitivity.csv')\n"
 "    fullfile(rootDir, 'compare_monitor_timeseries.csv')\n"
+"    fullfile(rootDir, 'boundary_diagnostics.csv')\n"
 "};\n"
 "for i = 1:numel(requiredRoot)\n"
 "    if ~isfile(requiredRoot{i})\n"
@@ -1469,6 +1669,23 @@ void WriteMatlabPlotScript(const TestCaseSummary& summary) {
 "exportgraphics(f, fullfile(figDir, 'time_sensitivity.png'), 'Resolution', 300);\n"
 "close(f);\n"
 "\n"
+"diagTbl = readtable(fullfile(rootDir, 'boundary_diagnostics.csv'));\n"
+"f = figure('Color', 'w', 'Position', [170 170 1100 420]);\n"
+"subplot(1,2,1);\n"
+"plot(diagTbl.time_s, diagTbl.left_prescribed_t_avg_k, '-o', 'LineWidth', 1.4); hold on;\n"
+"plot(diagTbl.time_s, diagTbl.right_prescribed_t_avg_k, '-s', 'LineWidth', 1.4);\n"
+"plot(diagTbl.time_s, diagTbl.left_adjacent_t_avg_k, '--o', 'LineWidth', 1.2);\n"
+"plot(diagTbl.time_s, diagTbl.right_adjacent_t_avg_k, '--s', 'LineWidth', 1.2);\n"
+"xlabel('Time (s)'); ylabel('Temperature (K)'); title('Boundary Temperature Diagnostics');\n"
+"legend({'Left prescribed','Right prescribed','Left adjacent cells','Right adjacent cells'}, 'Location', 'best'); grid on; box on;\n"
+"subplot(1,2,2);\n"
+"plot(diagTbl.time_s, diagTbl.domain_t_span_k, '-d', 'LineWidth', 1.6); hold on;\n"
+"yline(10.0, 'k--', 'Threshold');\n"
+"xlabel('Time (s)'); ylabel('Temperature Span (K)'); title('Domain Temperature Span'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'boundary_temperature_diagnostics.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'boundary_temperature_diagnostics.png'), 'Resolution', 300);\n"
+"close(f);\n"
+"\n"
 "finalProfiles = cellfun(@(fam) readtable(fullfile(rootDir, ['compare_profile_' fam '_t100pct.csv'])), families, 'UniformOutput', false);\n"
 "pNum = []; pRef = []; tNum = []; tRef = []; pErr = []; tErr = [];\n"
 "for i = 1:numel(finalProfiles)\n"
@@ -1552,6 +1769,7 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     artifacts.summary.reference_spec_path = artifacts.summary.engineering_dir + "/reference_spec.md";
     artifacts.summary.property_table_path = artifacts.summary.engineering_dir + "/property_table.csv";
     artifacts.summary.comsol_property_table_path = artifacts.summary.comsol_input_dir + "/property_table.csv";
+    artifacts.summary.boundary_diagnostics_path = artifacts.summary.case_dir + "/boundary_diagnostics.csv";
     artifacts.summary.profile_station_definitions_path = artifacts.summary.engineering_dir + "/profile_station_definitions.csv";
     artifacts.summary.monitor_point_definitions_path = artifacts.summary.engineering_dir + "/monitor_point_definitions.csv";
     artifacts.summary.profile_schedule_path = artifacts.summary.engineering_dir + "/profile_report_schedule.csv";
@@ -1628,11 +1846,17 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     bcVizCtx.bindings.push_back(VTKBCVariableBinding{pEqCfg.pressure_field, &bcP, VTKBCTransportKind::Pressure});
     bcVizCtx.bindings.push_back(VTKBCVariableBinding{tEqCfg.temperatue_field, &bcT, VTKBCTransportKind::Temperature});
 
+    const auto exportSnapshotArtifacts = [&](const std::string& snapshotTag, const std::string& vtkName, double timeS) {
+        artifacts.summary.boundary_diagnostics_rows.push_back(
+            BuildBoundaryDiagnosticsRow(mgr, fm, bcT, snapshotTag, timeS));
+        PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/" + vtkName, timeS);
+    };
+
     std::vector<double> pBlocksLatest(static_cast<std::size_t>(std::max(totalBlocks, 0)), cfg.p_init);
     std::vector<double> tBlocksLatest(static_cast<std::size_t>(std::max(totalBlocks, 0)), cfg.t_init);
     SyncPTFieldsToFM(mgr, fm, pBlocksLatest, tBlocksLatest, cfg.p_init, cfg.t_init);
     if (cfg.export_vtk) {
-        PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/initial.vtk", 0.0);
+        exportSnapshotArtifacts("initial", "initial.vtk", 0.0);
     }
 
     bool midExported = false;
@@ -1734,7 +1958,7 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
             prevAcceptedTBlocks = tBlocksLatest;
 
             if (cfg.export_vtk && !midExported && timeS >= 0.5 * cfg.target_end_time_s - 1.0e-12) {
-                PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/mid.vtk", timeS);
+                exportSnapshotArtifacts("mid", "mid.vtk", timeS);
                 midExported = true;
             }
         };
@@ -1744,8 +1968,8 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
 
     SyncPTFieldsToFM(mgr, fm, pBlocksLatest, tBlocksLatest, cfg.p_init, cfg.t_init);
     if (cfg.export_vtk) {
-        if (!midExported) PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/mid.vtk", artifacts.summary.t_end);
-        PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/final.vtk", artifacts.summary.t_end);
+        if (!midExported) exportSnapshotArtifacts("mid", "mid.vtk", artifacts.summary.t_end);
+        exportSnapshotArtifacts("final", "final.vtk", artifacts.summary.t_end);
     }
 
     FinalizeMissingSnapshots(artifacts.summary.t_end, pBlocksLatest, tBlocksLatest, artifacts.snapshots);
@@ -1776,6 +2000,7 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
         }
         WriteEngineeringMonitorCsv(artifacts.monitor_points, artifacts.monitor_schedule, artifacts.summary.eng_monitor_timeseries_path);
         WritePropertyTables(cfg, artifacts.summary.property_table_path, artifacts.summary.comsol_property_table_path);
+        WriteBoundaryDiagnosticsCsv(artifacts.summary.boundary_diagnostics_rows, artifacts.summary.boundary_diagnostics_path);
         WriteReferenceSpec(cfg, artifacts.summary);
         WriteAnalyticalFeasibility(cfg, artifacts.summary.analytical_feasibility_path);
         WriteComsolReferenceSpec(cfg, artifacts.summary.case_dir, artifacts.summary.comsol_reference_spec_path);
@@ -1785,7 +2010,8 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
 }
 ReferenceMode ResolveReferenceMode(const TestCaseSpec& cfg, TestCaseSummary& summary) {
     summary.analytical_closed_form_available = false;
-    summary.comsol_representation = kComsolRepresentationThinBand;
+    summary.comsol_representation = kComsolRepresentationExplicit;
+    summary.reference_is_explicit_lower_dimensional = false;
     if (cfg.reference_mode == ReferenceMode::Analytical) {
         summary.resolved_reference_mode = "Analytical";
         throw std::runtime_error(
@@ -1814,7 +2040,11 @@ bool FinalMetricsWithinThreshold(const TestCaseSpec& cfg, const TestCaseSummary&
            summary.final_monitor_p_l2_norm <= cfg.monitor_l2_threshold &&
            summary.final_monitor_p_linf_norm <= cfg.monitor_linf_threshold &&
            summary.final_monitor_t_l2_norm <= cfg.monitor_l2_threshold &&
-           summary.final_monitor_t_linf_norm <= cfg.monitor_linf_threshold;
+           summary.final_monitor_t_linf_norm <= cfg.monitor_linf_threshold &&
+           summary.reference_is_explicit_lower_dimensional &&
+           summary.final_boundary_prescribed_t_ok &&
+           summary.final_temperature_span_k >= kFinalTemperatureSpanThresholdK &&
+           summary.final_boundary_adjacent_delta_t_k >= kBoundaryAdjacentDeltaTThresholdK;
 }
 
 TestCaseSummary RunCase(const TestCaseSpec& cfg) {
@@ -1855,6 +2085,23 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
         WriteValidationSummaryCsv(cfg, summary);
         WriteMetricsCsv(cfg, summary);
         throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] reference files are not ready for validation.");
+    }
+
+    summary.comsol_representation = ExtractComsolRepresentation(summary.comsol_output_dir + "/comsol_run_summary.md");
+    summary.reference_is_explicit_lower_dimensional =
+        (summary.comsol_representation == kComsolRepresentationExplicit);
+    summary.comsol_fine_check_skipped =
+        ComsolFineCheckWasSkipped(summary.comsol_output_dir + "/comsol_reference_mesh_check.txt");
+    if (!summary.reference_is_explicit_lower_dimensional) {
+        summary.validation_status = "reference_not_acceptable";
+        summary.validation_performed = false;
+        summary.validation_passed = false;
+        WriteMatlabPlotScript(summary);
+        WriteValidationSummary(cfg, summary);
+        WriteValidationSummaryCsv(cfg, summary);
+        WriteMetricsCsv(cfg, summary);
+        throw std::runtime_error(
+            "[Test_H_T_CO2_ConstPP_SingleFrac] COMSOL reference is not explicit lower-dimensional fracture.");
     }
 
     summary.report_metrics.clear();
@@ -1907,6 +2154,21 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     summary.final_monitor_p_linf_norm = finalMonitorPMetrics.linf_norm;
     summary.final_monitor_t_l2_norm = finalMonitorTMetrics.l2_norm;
     summary.final_monitor_t_linf_norm = finalMonitorTMetrics.linf_norm;
+    if (!summary.boundary_diagnostics_rows.empty()) {
+        const BoundaryDiagnosticsRow& finalDiag = summary.boundary_diagnostics_rows.back();
+        if (finalDiag.domain_t.count > 0 &&
+            std::isfinite(finalDiag.domain_t.max_value) &&
+            std::isfinite(finalDiag.domain_t.min_value)) {
+            summary.final_temperature_span_k = finalDiag.domain_t.max_value - finalDiag.domain_t.min_value;
+        }
+        if (std::isfinite(finalDiag.left_adjacent_t.avg_value) && std::isfinite(finalDiag.right_adjacent_t.avg_value)) {
+            summary.final_boundary_adjacent_delta_t_k =
+                std::abs(finalDiag.left_adjacent_t.avg_value - finalDiag.right_adjacent_t.avg_value);
+        }
+        summary.final_boundary_prescribed_t_ok =
+            StatsWithinTolerance(finalDiag.left_prescribed_t, cfg.t_left, kBoundaryPrescribedTolerance) &&
+            StatsWithinTolerance(finalDiag.right_prescribed_t, cfg.t_right, kBoundaryPrescribedTolerance);
+    }
 
     std::vector<SweepStudyRow> gridRows;
     std::vector<SweepStudyRow> timeRows;
@@ -2096,6 +2358,10 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
             << ", profile_t_l2=" << summary.final_profile_t_l2_norm
             << ", monitor_p_l2=" << summary.final_monitor_p_l2_norm
             << ", monitor_t_l2=" << summary.final_monitor_t_l2_norm
+            << ", comsol_representation=" << summary.comsol_representation
+            << ", t_span=" << summary.final_temperature_span_k
+            << ", boundary_delta_t=" << summary.final_boundary_adjacent_delta_t_k
+            << ", prescribed_t_ok=" << BoolString(summary.final_boundary_prescribed_t_ok)
             << ", grid_ok=" << BoolString(summary.grid_convergence_ok)
             << ", time_ok=" << BoolString(summary.time_sensitivity_ok);
         throw std::runtime_error(oss.str());

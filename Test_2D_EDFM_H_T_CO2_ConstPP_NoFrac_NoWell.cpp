@@ -1,12 +1,13 @@
 /**
  * @file Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.cpp
- * @brief Standalone test: 2D single-phase CO2 constant-property coupled pressure-temperature, no-fracture, no-well.
+ * @brief Standalone validation chain: 2D single-phase CO2 constant-property P-T coupled, no-fracture, no-well.
  */
 
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
 
 #include "2D_PostProcess.h"
 #include "BoundaryConditionManager.h"
+#include "FVM_Grad.h"
 #include "FIM_TransientCaseKit.hpp"
 #include "MeshDefinitions.h"
 #include "MeshManager.h"
@@ -16,15 +17,18 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -37,6 +41,313 @@
 
 namespace Test_H_T_CO2_ConstPP_NoFrac {
 namespace {
+
+constexpr double kPi = 3.1415926535897932384626433832795;
+constexpr double kPendingTimeTolerance = 1.0e-9;
+constexpr double kGridTimeMonotoneAbsTol = 5.0e-3;
+constexpr const char* kFamilyMatrixHorizontal = "matrix_horizontal";
+constexpr const char* kFamilyMatrixVerticalMidline = "matrix_vertical_midline";
+constexpr const char* kLocationMatrix = "matrix";
+constexpr const char* kComsolRepresentationMatrixOnly = "matrix_only_coupled_pdes";
+
+struct SpatialSamplePoint {
+    int id = -1;
+    std::string label;
+    std::string family;
+    std::string location;
+    double target_axis_m = 0.0;
+    double target_x = 0.0;
+    double target_y = 0.0;
+    int block_id = -1;
+    double actual_x = 0.0;
+    double actual_y = 0.0;
+};
+
+struct SnapshotState {
+    std::string tag;
+    double requested_fraction = 0.0;
+    double target_time_s = 0.0;
+    double actual_time_s = 0.0;
+    bool captured = false;
+    std::vector<double> p_blocks;
+    std::vector<double> t_blocks;
+};
+
+struct MonitorScheduleState {
+    int sample_id = -1;
+    double target_time_s = 0.0;
+    double actual_time_s = 0.0;
+    bool captured = false;
+    std::vector<double> p_blocks;
+    std::vector<double> t_blocks;
+};
+
+struct FieldErrorMetrics {
+    int sample_count = 0;
+    double l1_abs = 0.0;
+    double l2_abs = 0.0;
+    double linf_abs = 0.0;
+    double l1_norm = 0.0;
+    double l2_norm = 0.0;
+    double linf_norm = 0.0;
+};
+
+struct PressureCellMetrics {
+    std::string tag;
+    double requested_fraction = 0.0;
+    double target_time_s = 0.0;
+    double actual_time_s = 0.0;
+    FieldErrorMetrics pressure;
+    int max_err_cell = -1;
+    std::string compare_csv_path;
+};
+
+struct ProfileCompareMetrics {
+    std::string family;
+    std::string tag;
+    double target_time_s = 0.0;
+    double actual_time_s = 0.0;
+    FieldErrorMetrics pressure;
+    FieldErrorMetrics temperature;
+    double pressure_uniformity_norm_std = 0.0;
+    double temperature_uniformity_norm_std = 0.0;
+    std::string compare_csv_path;
+};
+
+struct ReconstructedFieldValue {
+    double value = 0.0;
+    int carrier_cell_id = -1;
+    double carrier_x = 0.0;
+    double carrier_y = 0.0;
+    std::string sample_mode;
+};
+
+struct ReconstructedSpatialPointSample {
+    int point_id = -1;
+    int sample_id = -1;
+    std::string time_tag;
+    std::string label;
+    std::string family;
+    std::string location;
+    double target_axis_m = 0.0;
+    double target_x = 0.0;
+    double target_y = 0.0;
+    int block_id = -1;
+    double actual_x = 0.0;
+    double actual_y = 0.0;
+    double target_time_s = 0.0;
+    double actual_time_s = 0.0;
+    ReconstructedFieldValue pressure;
+    ReconstructedFieldValue temperature;
+};
+
+struct ProfileReferenceRow {
+    int station_id = -1;
+    double target_axis_m = 0.0;
+    double target_x = 0.0;
+    double target_y = 0.0;
+    double target_time_s = 0.0;
+    double p_ref = 0.0;
+    double t_ref = 0.0;
+};
+
+struct ProfileReferenceTable {
+    std::unordered_map<int, ProfileReferenceRow> rows_by_station_id;
+};
+
+struct MonitorReferenceRow {
+    int sample_id = -1;
+    double target_time_s = 0.0;
+    std::unordered_map<std::string, double> p_ref_by_label;
+    std::unordered_map<std::string, double> t_ref_by_label;
+};
+
+struct MonitorReferenceSeries {
+    std::vector<MonitorReferenceRow> rows;
+    std::unordered_map<int, std::size_t> sample_id_to_row;
+};
+
+struct SweepStudyRow {
+    std::string label;
+    std::string case_dir;
+    int nx = 0;
+    int ny = 0;
+    int steps = 0;
+    double dt_init = 0.0;
+    double h_char = 0.0;
+    double t_end = 0.0;
+    double pressure_cell_l2_norm = 0.0;
+    double pressure_horizontal_l2_norm = 0.0;
+    double temperature_horizontal_l2_norm = 0.0;
+    double pressure_vertical_uniformity_norm_std = 0.0;
+    double temperature_vertical_uniformity_norm_std = 0.0;
+    double pressure_time_self_l2_norm = std::numeric_limits<double>::quiet_NaN();
+    double temperature_time_self_l2_norm = std::numeric_limits<double>::quiet_NaN();
+    double pressure_order = std::numeric_limits<double>::quiet_NaN();
+    double temperature_order = std::numeric_limits<double>::quiet_NaN();
+    std::vector<ReconstructedSpatialPointSample> profile_samples;
+};
+
+struct TestCaseSpec {
+    std::string case_name = "h_t_co2_constpp_nofrac_nowell";
+    std::string output_base_dir = "Test/Transient/FullCaseTest";
+    std::string sub_dir = "H_T_CO2_ConstPP";
+    double lx = 400.0;
+    double ly = 40.0;
+    int nx = 48;
+    int ny = 6;
+    double matrix_phi = 0.10;
+    double matrix_perm = 1.0e-13;
+    double matrix_ct = 5.0e-9;
+    double matrix_rho_r = 2600.0;
+    double matrix_cp_r = 800.0;
+    double matrix_lambda_r = 3.0;
+    double co2_rho_const = 700.0;
+    double co2_mu_const = 6.0e-5;
+    double co2_cp_const = 1100.0;
+    double co2_cv_const = 850.0;
+    double co2_k_const = 0.03;
+    double p_init = 10.0e6;
+    double p_left = 12.0e6;
+    double p_right = 8.0e6;
+    double t_init = 380.0;
+    double t_left = 440.0;
+    double t_right = 320.0;
+    double dt_init = 120.0;
+    double dt_min = 1.0;
+    double dt_max = 5000.0;
+    double target_end_time_s = 1.0e5;
+    int max_steps = 12000;
+    int max_newton_iter = 14;
+    FIM_Engine::LinearSolverType lin_solver = FIM_Engine::LinearSolverType::AMGCL;
+    bool amgcl_use_fallback_sparselu = true;
+    double amgcl_tol = 1.0e-6;
+    int amgcl_maxiter = 500;
+    bool enable_non_orthogonal_correction = true;
+    bool enable_row_scaling = true;
+    double abs_res_tol = 1.0e-8;
+    double rel_res_tol = 1.0e-6;
+    double rel_update_tol = 1.0e-8;
+    double max_dP = 2.0e7;
+    double max_dT = 10.0;
+    bool enable_armijo_line_search = false;
+    double rollback_shrink_factor = 0.7;
+    double dt_relres_grow_factor = 1.08;
+    Vector gravity_vector = Vector(0.0, 0.0, 0.0);
+    FIM_Engine::DiagLevel diag_level = FIM_Engine::DiagLevel::Off;
+    int analytical_terms = 200;
+    std::vector<double> report_time_fractions = {0.1, 0.5, 1.0};
+    int matrix_horizontal_station_count = 81;
+    int matrix_vertical_station_count = 25;
+    std::vector<std::pair<int, int> > grid_sweep_cases = {
+        std::make_pair(24, 3),
+        std::make_pair(48, 6),
+        std::make_pair(96, 12)
+    };
+    std::vector<double> time_step_sweep = {480.0, 120.0, 30.0};
+    double pressure_l2_threshold = 5.0e-2;
+    double pressure_linf_threshold = 1.5e-1;
+    double temperature_l2_threshold = 8.0e-2;
+    double temperature_linf_threshold = 2.0e-1;
+    double vertical_uniformity_threshold = 2.0e-2;
+    double grid_pressure_order_threshold = 0.9;
+    double grid_temperature_order_threshold = 0.7;
+    double time_pressure_order_threshold = 0.7;
+    double time_temperature_order_threshold = 0.5;
+    bool enable_grid_convergence_study = false;
+    bool enable_time_sensitivity_study = false;
+    bool export_vtk = true;
+    bool emit_detailed_outputs = true;
+    bool allow_full_workflow_comsol_autorun = true;
+    std::string comsol_wrapper_relpath =
+        "tools/COMSOL/H_T_CO2_ConstPP_NoFrac_NoWell/run_comsol_reference.ps1";
+};
+
+struct TestCaseSummary {
+    std::string case_dir;
+    std::string engineering_dir;
+    std::string reference_dir;
+    std::string analytic_dir;
+    std::string comsol_input_dir;
+    std::string comsol_output_dir;
+    std::string report_dir;
+    std::string convergence_log_path;
+    std::string run_log_path;
+    std::string metrics_csv_path;
+    std::string validation_summary_path;
+    std::string validation_summary_csv_path;
+    std::string reference_spec_path;
+    std::string analytical_note_path;
+    std::string comsol_reference_spec_path;
+    std::string property_table_path;
+    std::string comsol_property_table_path;
+    std::string profile_station_definitions_path;
+    std::string monitor_point_definitions_path;
+    std::string profile_schedule_path;
+    std::string monitor_schedule_path;
+    std::string eng_monitor_timeseries_path;
+    std::string grid_convergence_csv_path;
+    std::string time_sensitivity_csv_path;
+    int nx = 0;
+    int ny = 0;
+    int n_cells = 0;
+    double h_char = 0.0;
+    int steps = 0;
+    int total_rollbacks = 0;
+    double avg_iters = 0.0;
+    int max_iters = 0;
+    double t_end = 0.0;
+    std::string resolved_reference_mode = "pressure_analytical_plus_temperature_comsol";
+    std::string comsol_representation = "";
+    bool comsol_fine_check_skipped = false;
+    bool reference_ready = false;
+    bool validation_performed = false;
+    bool validation_passed = false;
+    bool grid_convergence_ok = true;
+    bool time_sensitivity_ok = true;
+    std::string validation_status = "not_run";
+    double final_pressure_cell_l1_norm = 0.0;
+    double final_pressure_cell_l2_norm = 0.0;
+    double final_pressure_cell_linf_norm = 0.0;
+    double final_pressure_horizontal_l2_norm = 0.0;
+    double final_pressure_horizontal_linf_norm = 0.0;
+    double final_temperature_horizontal_l2_norm = std::numeric_limits<double>::quiet_NaN();
+    double final_temperature_horizontal_linf_norm = std::numeric_limits<double>::quiet_NaN();
+    double final_monitor_pressure_l2_norm = 0.0;
+    double final_monitor_pressure_linf_norm = 0.0;
+    double final_monitor_temperature_l2_norm = std::numeric_limits<double>::quiet_NaN();
+    double final_monitor_temperature_linf_norm = std::numeric_limits<double>::quiet_NaN();
+    double final_pressure_vertical_uniformity_norm_std = 0.0;
+    double final_temperature_vertical_uniformity_norm_std = std::numeric_limits<double>::quiet_NaN();
+    double grid_pressure_order_min = std::numeric_limits<double>::quiet_NaN();
+    double grid_temperature_order_min = std::numeric_limits<double>::quiet_NaN();
+    double time_pressure_order_min = std::numeric_limits<double>::quiet_NaN();
+    double time_temperature_order_min = std::numeric_limits<double>::quiet_NaN();
+    std::vector<PressureCellMetrics> pressure_cell_metrics;
+    std::vector<ProfileCompareMetrics> report_metrics;
+    std::vector<std::string> missing_reference_files;
+};
+
+struct CaseRunArtifacts {
+    TestCaseSummary summary;
+    std::vector<SpatialSamplePoint> profile_stations;
+    std::vector<SpatialSamplePoint> monitor_points;
+    std::vector<SnapshotState> snapshots;
+    std::vector<MonitorScheduleState> monitor_schedule;
+    std::vector<ReconstructedSpatialPointSample> sampled_profile_points;
+    std::vector<ReconstructedSpatialPointSample> sampled_monitor_points;
+};
+
+struct TestCasePlan {
+    std::string plan_key;
+    TestCaseSpec spec;
+};
+
+double PressureScale(const TestCaseSpec& cfg);
+double TemperatureScale(const TestCaseSpec& cfg);
+FieldErrorMetrics BuildErrorMetrics(double sumAbs, double sumSq, double maxAbs, int count, double scale);
+
+std::string BoolString(bool value) { return value ? "true" : "false"; }
 
 void EnsureDirRecursive(const std::string& rawPath) {
     if (rawPath.empty()) return;
@@ -61,62 +372,6 @@ void ApplyUniformScalarField(const std::shared_ptr<volScalarField>& field, doubl
     for (double& v : field->data) v = value;
 }
 
-double ComputeMeshCharLength(const MeshManager& mgr) {
-    const auto& cells = mgr.mesh().getCells();
-    if (cells.empty()) return 0.0;
-    double totalV = 0.0;
-    for (const auto& c : cells) totalV += std::max(c.volume, 0.0);
-    if (totalV <= 0.0) return 0.0;
-    return std::sqrt(totalV / static_cast<double>(cells.size()));
-}
-
-struct LeftRightAverageResult {
-    bool valid = false;
-    double left_avg = std::numeric_limits<double>::quiet_NaN();
-    double right_avg = std::numeric_limits<double>::quiet_NaN();
-    int left_count = 0;
-    int right_count = 0;
-};
-
-LeftRightAverageResult ComputeLeftRightAverage(const MeshManager& mgr,
-                                               const std::vector<double>& values,
-                                               double xSplit) {
-    LeftRightAverageResult out;
-    const auto& cells = mgr.mesh().getCells();
-    if (cells.size() != values.size() || cells.empty()) return out;
-
-    double leftSum = 0.0;
-    double rightSum = 0.0;
-    int leftCnt = 0;
-    int rightCnt = 0;
-
-    for (size_t i = 0; i < cells.size(); ++i) {
-        if (cells[i].center.m_x < xSplit) {
-            leftSum += values[i];
-            ++leftCnt;
-        } else {
-            rightSum += values[i];
-            ++rightCnt;
-        }
-    }
-
-    if (leftCnt <= 0 || rightCnt <= 0) return out;
-    out.valid = true;
-    out.left_avg = leftSum / static_cast<double>(leftCnt);
-    out.right_avg = rightSum / static_cast<double>(rightCnt);
-    out.left_count = leftCnt;
-    out.right_count = rightCnt;
-    return out;
-}
-
-double ComputeMaxAbsDelta(const std::vector<double>& values, double ref) {
-    double maxAbs = 0.0;
-    for (double v : values) {
-        maxAbs = std::max(maxAbs, std::abs(v - ref));
-    }
-    return maxAbs;
-}
-
 void SyncPTFieldsToFM(MeshManager& mgr,
                       FieldManager_2D& fm,
                       const std::vector<double>& pBlocks,
@@ -139,15 +394,12 @@ void SyncPTFieldsToFM(MeshManager& mgr,
     auto fracTviz = fm.getOrCreateFractureScalar("T", tFallback);
 
     const int nMat = mgr.getMatrixDOFCount();
-    const int nTotal = mgr.getTotalDOFCount();
-    const int nUse = std::min(static_cast<int>(pBlocks.size()), nTotal);
-
+    const int nUse = std::min(static_cast<int>(pBlocks.size()), mgr.getTotalDOFCount());
     for (int i = 0; i < nUse; ++i) {
         const double p = pBlocks[static_cast<std::size_t>(i)];
         const double t = (i < static_cast<int>(tBlocks.size()))
             ? tBlocks[static_cast<std::size_t>(i)]
             : tFallback;
-
         if (i < nMat) {
             if (fPw && i < static_cast<int>(fPw->data.size())) fPw->data[static_cast<std::size_t>(i)] = p;
             if (fPviz && i < static_cast<int>(fPviz->data.size())) fPviz->data[static_cast<std::size_t>(i)] = p;
@@ -163,106 +415,1382 @@ void SyncPTFieldsToFM(MeshManager& mgr,
     }
 }
 
-struct TestCaseSpec {
-    std::string case_name = "h_t_co2_constpp_nofrac_nowell";
-    std::string output_base_dir = "Test/Transient/FullCaseTest";
-    std::string sub_dir = "H_T_CO2_ConstPP";
+BoundarySetting::BoundaryConditionManager BuildPressureBoundaryManager(const TestCaseSpec& cfg) {
+    BoundarySetting::BoundaryConditionManager bcP;
+    bcP.Clear();
+    bcP.SetDirichletBC(MeshTags::LEFT, cfg.p_left);
+    bcP.SetDirichletBC(MeshTags::RIGHT, cfg.p_right);
+    bcP.SetNeumannBC(MeshTags::BOTTOM, 0.0);
+    bcP.SetNeumannBC(MeshTags::TOP, 0.0);
+    return bcP;
+}
 
-    double lx = 400.0;
-    double ly = 40.0;
-    int nx = 48;
-    int ny = 6;
+BoundarySetting::BoundaryConditionManager BuildTemperatureBoundaryManager(const TestCaseSpec& cfg) {
+    BoundarySetting::BoundaryConditionManager bcT;
+    bcT.Clear();
+    bcT.SetDirichletBC(MeshTags::LEFT, cfg.t_left);
+    bcT.SetDirichletBC(MeshTags::RIGHT, cfg.t_right);
+    bcT.SetNeumannBC(MeshTags::BOTTOM, 0.0);
+    bcT.SetNeumannBC(MeshTags::TOP, 0.0);
+    return bcT;
+}
 
-    double matrix_phi = 0.10;
-    double matrix_perm = 1.0e-13;
-    double matrix_ct = 5.0e-9;
+std::vector<Vector> BuildSortedCellPolygon2D(const Cell& cell, const std::unordered_map<int, Node>& nodes) {
+    std::vector<Vector> polygon;
+    polygon.reserve(cell.CellNodeIDs.size());
+    for (int nodeId : cell.CellNodeIDs) {
+        const auto it = nodes.find(nodeId);
+        if (it == nodes.end()) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing node while building cell polygon.");
+        }
+        polygon.push_back(it->second.coord);
+    }
+    std::sort(polygon.begin(), polygon.end(), [&](const Vector& a, const Vector& b) {
+        const double angleA = std::atan2(a.m_y - cell.center.m_y, a.m_x - cell.center.m_x);
+        const double angleB = std::atan2(b.m_y - cell.center.m_y, b.m_x - cell.center.m_x);
+        return angleA < angleB;
+    });
+    return polygon;
+}
 
-    double co2_rho_const = 700.0;
-    double co2_mu_const = 6.0e-5;
-    double co2_cp_const = 1100.0;
-    double co2_cv_const = 850.0;
-    double co2_k_const = 0.03;
+bool PointOnSegment2D(double px, double py, const Vector& a, const Vector& b, double tol) {
+    const double cross = (px - a.m_x) * (b.m_y - a.m_y) - (py - a.m_y) * (b.m_x - a.m_x);
+    if (std::abs(cross) > tol) return false;
+    const double dot = (px - a.m_x) * (b.m_x - a.m_x) + (py - a.m_y) * (b.m_y - a.m_y);
+    if (dot < -tol) return false;
+    const double lenSq = (b.m_x - a.m_x) * (b.m_x - a.m_x) + (b.m_y - a.m_y) * (b.m_y - a.m_y);
+    return dot <= lenSq + tol;
+}
 
-    double p_init = 10.0e6;
-    double p_left = 12.0e6;
-    double p_right = 8.0e6;
-    double t_init = 380.0;
-    double t_left = 400.0;
-    double t_right = 360.0;
+bool PointInPolygon2D(double px, double py, const std::vector<Vector>& polygon, double tol) {
+    if (polygon.size() < 3) return false;
+    bool inside = false;
+    for (std::size_t i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
+        const Vector& vi = polygon[i];
+        const Vector& vj = polygon[j];
+        if (PointOnSegment2D(px, py, vj, vi, tol)) return true;
+        const bool intersects = ((vi.m_y > py) != (vj.m_y > py)) &&
+            (px <= (vj.m_x - vi.m_x) * (py - vi.m_y) / ((vj.m_y - vi.m_y) + 1.0e-30) + vi.m_x + tol);
+        if (intersects) inside = !inside;
+    }
+    return inside;
+}
 
-    double dt_init = 120.0;
-    double dt_min = 1.0;
-    double dt_max = 5000.0;
-    double target_end_time_s = 1.0e5;
-    int max_steps = 12000;
-    int max_newton_iter = 14;
+int FindNearestMatrixCell(const MeshManager& mgr, double targetX, double targetY) {
+    const auto& cells = mgr.mesh().getCells();
+    if (cells.empty()) return -1;
+    int bestCell = -1;
+    double bestDistSq = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const double dx = cells[i].center.m_x - targetX;
+        const double dy = cells[i].center.m_y - targetY;
+        const double distSq = dx * dx + dy * dy;
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestCell = static_cast<int>(i);
+        }
+    }
+    return bestCell;
+}
 
-    FIM_Engine::LinearSolverType lin_solver = FIM_Engine::LinearSolverType::AMGCL;
-    bool amgcl_use_fallback_sparselu = true;
-    double amgcl_tol = 1.0e-6;
-    int amgcl_maxiter = 500;
+int FindContainingMatrixCell(const MeshManager& mgr, double targetX, double targetY) {
+    const auto& mesh = mgr.mesh();
+    const auto& cells = mesh.getCells();
+    const auto& nodes = mesh.getNodesMap();
+    const double tol = 1.0e-8;
+    int bestCell = -1;
+    double bestDistSq = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i < cells.size(); ++i) {
+        const Cell& cell = cells[i];
+        if (targetX < cell.boundingBox.min.m_x - tol || targetX > cell.boundingBox.max.m_x + tol ||
+            targetY < cell.boundingBox.min.m_y - tol || targetY > cell.boundingBox.max.m_y + tol) {
+            continue;
+        }
+        if (!PointInPolygon2D(targetX, targetY, BuildSortedCellPolygon2D(cell, nodes), tol)) continue;
+        const double dx = cell.center.m_x - targetX;
+        const double dy = cell.center.m_y - targetY;
+        const double distSq = dx * dx + dy * dy;
+        if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestCell = static_cast<int>(i);
+        }
+    }
+    return bestCell;
+}
 
-    bool enable_non_orthogonal_correction = true;
-    bool enable_row_scaling = true;
+std::shared_ptr<volVectorField> BuildLeastSquaresGradient(const MeshManager& mgr,
+                                                          const std::vector<double>& blocks,
+                                                          const std::string& fieldName,
+                                                          double fallbackValue,
+                                                          const BoundarySetting::BoundaryConditionManager& bc) {
+    const std::size_t nCells = mgr.mesh().getCells().size();
+    auto field = std::make_shared<volScalarField>(fieldName, nCells, fallbackValue);
+    const std::size_t nUse = std::min(nCells, blocks.size());
+    for (std::size_t i = 0; i < nUse; ++i) {
+        field->data[i] = blocks[i];
+    }
+    FVM_Grad grad(mgr.mesh(), nullptr, nullptr, &bc);
+    grad.precomputeLS();
+    return grad.compute(*field, FVM_Grad::Method::LeastSquares);
+}
 
-    double abs_res_tol = 1.0e-8;
-    double rel_res_tol = 1.0e-6;
-    double rel_update_tol = 1.0e-8;
+ReconstructedFieldValue SampleFieldAtTarget(const MeshManager& mgr,
+                                            const SpatialSamplePoint& point,
+                                            const std::vector<double>& blocks,
+                                            const std::shared_ptr<volVectorField>& gradient) {
+    const auto& cells = mgr.mesh().getCells();
+    if (cells.empty()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] cannot sample empty mesh.");
 
-    double max_dP = 2.0e7;
-    double max_dT = 10.0;
-    bool enable_armijo_line_search = false;
+    const int containingCell = FindContainingMatrixCell(mgr, point.target_x, point.target_y);
+    int carrierCell = containingCell;
+    bool usedContaining = containingCell >= 0;
+    if (carrierCell < 0) {
+        if (point.block_id >= 0 && point.block_id < static_cast<int>(cells.size())) {
+            carrierCell = point.block_id;
+        } else {
+            carrierCell = FindNearestMatrixCell(mgr, point.target_x, point.target_y);
+        }
+    }
+    if (carrierCell < 0 || carrierCell >= static_cast<int>(cells.size()) ||
+        carrierCell >= static_cast<int>(blocks.size())) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid carrier cell during fixed-target sampling.");
+    }
 
-    double rollback_shrink_factor = 0.7;
-    double dt_relres_grow_factor = 1.08;
+    ReconstructedFieldValue out;
+    out.carrier_cell_id = carrierCell;
+    out.carrier_x = cells[static_cast<std::size_t>(carrierCell)].center.m_x;
+    out.carrier_y = cells[static_cast<std::size_t>(carrierCell)].center.m_y;
+    out.value = blocks[static_cast<std::size_t>(carrierCell)];
+    out.sample_mode = usedContaining ? "containing_cell_center" : "nearest_cell_center";
 
-    Vector gravity_vector = Vector(0.0, -9.81, 0.0);
-    FIM_Engine::DiagLevel diag_level = FIM_Engine::DiagLevel::Off;
+    if (usedContaining && gradient && carrierCell < static_cast<int>(gradient->data.size())) {
+        const Vector delta(
+            point.target_x - out.carrier_x,
+            point.target_y - out.carrier_y,
+            0.0);
+        out.value += gradient->data[static_cast<std::size_t>(carrierCell)] * delta;
+        out.sample_mode = "containing_ls";
+    }
+    return out;
+}
 
-    double min_max_abs_dp_for_evolution = 1.0e3;
-    double min_max_abs_dt_for_evolution = 1.0e-1;
+std::vector<ReconstructedSpatialPointSample> BuildReconstructedSamples(const MeshManager& mgr,
+                                                                       const std::vector<SpatialSamplePoint>& points,
+                                                                       const std::vector<double>& pBlocks,
+                                                                       const std::vector<double>& tBlocks,
+                                                                       const std::string& timeTag,
+                                                                       int sampleId,
+                                                                       double targetTimeS,
+                                                                       double actualTimeS,
+                                                                       const TestCaseSpec& cfg) {
+    std::vector<ReconstructedSpatialPointSample> rows;
+    rows.reserve(points.size());
+    const auto pressureBC = BuildPressureBoundaryManager(cfg);
+    const auto temperatureBC = BuildTemperatureBoundaryManager(cfg);
+    const std::shared_ptr<volVectorField> pGrad =
+        BuildLeastSquaresGradient(mgr, pBlocks, "p_fixed_target_sample", cfg.p_init, pressureBC);
+    const std::shared_ptr<volVectorField> tGrad =
+        BuildLeastSquaresGradient(mgr, tBlocks, "t_fixed_target_sample", cfg.t_init, temperatureBC);
+
+    for (const auto& point : points) {
+        ReconstructedSpatialPointSample row;
+        row.point_id = point.id;
+        row.sample_id = sampleId;
+        row.time_tag = timeTag;
+        row.label = point.label;
+        row.family = point.family;
+        row.location = point.location;
+        row.target_axis_m = point.target_axis_m;
+        row.target_x = point.target_x;
+        row.target_y = point.target_y;
+        row.block_id = point.block_id;
+        row.actual_x = point.actual_x;
+        row.actual_y = point.actual_y;
+        row.target_time_s = targetTimeS;
+        row.actual_time_s = actualTimeS;
+        row.pressure = SampleFieldAtTarget(mgr, point, pBlocks, pGrad);
+        row.temperature = SampleFieldAtTarget(mgr, point, tBlocks, tGrad);
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+std::vector<ReconstructedSpatialPointSample> FilterReconstructedSamples(const std::vector<ReconstructedSpatialPointSample>& rows,
+                                                                        const std::string& family,
+                                                                        const std::string& timeTag) {
+    std::vector<ReconstructedSpatialPointSample> out;
+    for (const auto& row : rows) {
+        if (row.family == family && row.time_tag == timeTag) out.push_back(row);
+    }
+    return out;
+}
+
+bool IsInteriorHorizontalTarget(double targetX, const TestCaseSpec& cfg) {
+    const double tol = 1.0e-8;
+    const double profileDx =
+        (cfg.matrix_horizontal_station_count > 1)
+            ? (cfg.lx / static_cast<double>(cfg.matrix_horizontal_station_count - 1))
+            : 0.0;
+    const double margin = std::max(2.0 * profileDx, tol);
+    return targetX > margin && targetX < (cfg.lx - margin);
+}
+
+std::vector<ReconstructedSpatialPointSample> FilterInteriorHorizontalSamples(
+    const std::vector<ReconstructedSpatialPointSample>& rows,
+    const TestCaseSpec& cfg) {
+    std::vector<ReconstructedSpatialPointSample> out;
+    out.reserve(rows.size());
+    for (const auto& row : rows) {
+        if (IsInteriorHorizontalTarget(row.target_x, cfg)) out.push_back(row);
+    }
+    return out;
+}
+
+ProfileReferenceTable FilterInteriorHorizontalReference(const ProfileReferenceTable& table, const TestCaseSpec& cfg) {
+    ProfileReferenceTable out;
+    for (const auto& entry : table.rows_by_station_id) {
+        if (IsInteriorHorizontalTarget(entry.second.target_x, cfg)) {
+            out.rows_by_station_id.emplace(entry.first, entry.second);
+        }
+    }
+    return out;
+}
+
+std::string MakeReconstructedSampleKey(const ReconstructedSpatialPointSample& sample) {
+    return sample.time_tag + "#" + std::to_string(sample.point_id);
+}
+
+std::pair<FieldErrorMetrics, FieldErrorMetrics> EvaluateSelfConvergenceMetrics(
+    const std::vector<ReconstructedSpatialPointSample>& coarseSamples,
+    const std::vector<ReconstructedSpatialPointSample>& fineSamples,
+    const TestCaseSpec& cfg) {
+    if (coarseSamples.empty() || fineSamples.empty()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] empty profile samples during self-convergence comparison.");
+    }
+    std::unordered_map<std::string, ReconstructedSpatialPointSample> fineByKey;
+    for (const auto& row : fineSamples) {
+        fineByKey[MakeReconstructedSampleKey(row)] = row;
+    }
+
+    double pSumAbs = 0.0;
+    double pSumSq = 0.0;
+    double pMaxAbs = 0.0;
+    double tSumAbs = 0.0;
+    double tSumSq = 0.0;
+    double tMaxAbs = 0.0;
+    int count = 0;
+
+    for (const auto& coarse : coarseSamples) {
+        const auto it = fineByKey.find(MakeReconstructedSampleKey(coarse));
+        if (it == fineByKey.end()) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing fine-grid/fine-dt sample during self-convergence comparison.");
+        }
+        const double pAbsErr = std::abs(coarse.pressure.value - it->second.pressure.value);
+        const double tAbsErr = std::abs(coarse.temperature.value - it->second.temperature.value);
+        pSumAbs += pAbsErr;
+        pSumSq += pAbsErr * pAbsErr;
+        pMaxAbs = std::max(pMaxAbs, pAbsErr);
+        tSumAbs += tAbsErr;
+        tSumSq += tAbsErr * tAbsErr;
+        tMaxAbs = std::max(tMaxAbs, tAbsErr);
+        ++count;
+    }
+
+    return std::make_pair(
+        BuildErrorMetrics(pSumAbs, pSumSq, pMaxAbs, count, PressureScale(cfg)),
+        BuildErrorMetrics(tSumAbs, tSumSq, tMaxAbs, count, TemperatureScale(cfg)));
+}
+
+double ComputeMeshCharLength(const MeshManager& mgr) {
+    const auto& cells = mgr.mesh().getCells();
+    if (cells.empty()) return 0.0;
+    double totalV = 0.0;
+    for (const auto& c : cells) totalV += std::max(c.volume, 0.0);
+    if (totalV <= 0.0) return 0.0;
+    return std::sqrt(totalV / static_cast<double>(cells.size()));
+}
+
+double ClampFraction(double value) { return std::max(0.0, std::min(1.0, value)); }
+
+std::string MakeReportTag(double fraction) {
+    std::ostringstream oss;
+    oss << "t" << std::setw(3) << std::setfill('0')
+        << static_cast<int>(std::round(ClampFraction(fraction) * 100.0)) << "pct";
+    return oss.str();
+}
+
+std::vector<double> BuildSortedFractions(const std::vector<double>& raw) {
+    std::vector<double> out;
+    for (double value : raw) {
+        const double clamped = ClampFraction(value);
+        bool duplicate = false;
+        for (double existing : out) {
+            if (std::abs(existing - clamped) <= 1.0e-12) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) out.push_back(clamped);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+double PressureScale(const TestCaseSpec& cfg) {
+    return std::max(std::abs(cfg.p_left - cfg.p_right), 1.0);
+}
+
+double TemperatureScale(const TestCaseSpec& cfg) {
+    return std::max(std::abs(cfg.t_left - cfg.t_right), 1.0);
+}
+
+double ComputePressureDiffusivity(const TestCaseSpec& cfg) {
+    const double denom = cfg.co2_mu_const * cfg.matrix_phi * cfg.matrix_ct;
+    if (cfg.matrix_perm <= 0.0 || denom <= 0.0) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid constant-property coefficients for analytical diffusivity.");
+    }
+    return cfg.matrix_perm / denom;
+}
+
+double EvaluateAnalyticalPressure(const TestCaseSpec& cfg, double x, double timeS) {
+    if (cfg.lx <= 0.0) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid domain length.");
+    if (timeS <= 0.0) return cfg.p_init;
+    const double xClamped = std::max(0.0, std::min(cfg.lx, x));
+    const double deltaP = cfg.p_left - cfg.p_right;
+    const double pSteady = cfg.p_left - deltaP * (xClamped / cfg.lx);
+    const double a0 = cfg.p_init - cfg.p_left;
+    const double D = ComputePressureDiffusivity(cfg);
+    double transient = 0.0;
+    for (int n = 1; n <= cfg.analytical_terms; ++n) {
+        const double sign_n = (n % 2 == 0) ? 1.0 : -1.0;
+        const double bn = (2.0 / (static_cast<double>(n) * kPi))
+            * (a0 * (1.0 - sign_n) - deltaP * sign_n);
+        const double lambda = static_cast<double>(n) * kPi / cfg.lx;
+        transient += bn * std::sin(lambda * xClamped) * std::exp(-D * lambda * lambda * timeS);
+    }
+    return pSteady + transient;
+}
+
+std::string MakeLabel(const std::string& prefix, int index, int width) {
+    std::ostringstream oss;
+    oss << prefix << std::setw(width) << std::setfill('0') << index;
+    return oss.str();
+}
+
+SpatialSamplePoint MakeNearestMatrixSample(const MeshManager& mgr,
+                                          int id,
+                                          const std::string& label,
+                                          const std::string& family,
+                                          double targetAxisM,
+                                          double targetX,
+                                          double targetY) {
+    SpatialSamplePoint sample;
+    sample.id = id;
+    sample.label = label;
+    sample.family = family;
+    sample.location = kLocationMatrix;
+    sample.target_axis_m = targetAxisM;
+    sample.target_x = targetX;
+    sample.target_y = targetY;
+    const auto& cells = mgr.mesh().getCells();
+    if (cells.empty()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] cannot build sample on empty mesh.");
+    sample.block_id = FindContainingMatrixCell(mgr, targetX, targetY);
+    if (sample.block_id < 0) {
+        sample.block_id = FindNearestMatrixCell(mgr, targetX, targetY);
+    }
+    if (sample.block_id >= 0) {
+        sample.actual_x = cells[static_cast<std::size_t>(sample.block_id)].center.m_x;
+        sample.actual_y = cells[static_cast<std::size_t>(sample.block_id)].center.m_y;
+    }
+    return sample;
+}
+
+std::vector<SpatialSamplePoint> BuildProfileStations(const MeshManager& mgr, const TestCaseSpec& cfg) {
+    if (cfg.matrix_horizontal_station_count < 2 || cfg.matrix_vertical_station_count < 2) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid profile station counts.");
+    }
+    std::vector<SpatialSamplePoint> stations;
+    int nextId = 0;
+    for (int i = 0; i < cfg.matrix_horizontal_station_count; ++i) {
+        const double ratio = static_cast<double>(i) / static_cast<double>(cfg.matrix_horizontal_station_count - 1);
+        const double x = ratio * cfg.lx;
+        const double y = 0.5 * cfg.ly;
+        stations.push_back(MakeNearestMatrixSample(
+            mgr, nextId++, MakeLabel("mh", i, 3), kFamilyMatrixHorizontal, x, x, y));
+    }
+    for (int i = 0; i < cfg.matrix_vertical_station_count; ++i) {
+        const double ratio = static_cast<double>(i) / static_cast<double>(cfg.matrix_vertical_station_count - 1);
+        const double x = 0.5 * cfg.lx;
+        const double y = ratio * cfg.ly;
+        stations.push_back(MakeNearestMatrixSample(
+            mgr, nextId++, MakeLabel("mv", i, 3), kFamilyMatrixVerticalMidline, y, x, y));
+    }
+    return stations;
+}
+
+std::vector<SpatialSamplePoint> BuildMonitorPoints(const MeshManager& mgr, const TestCaseSpec& cfg) {
+    const double xFractions[] = {0.1, 0.25, 0.5, 0.75, 0.9};
+    std::vector<SpatialSamplePoint> points;
+    int nextId = 0;
+    for (std::size_t i = 0; i < sizeof(xFractions) / sizeof(xFractions[0]); ++i) {
+        const double x = xFractions[i] * cfg.lx;
+        const double y = 0.5 * cfg.ly;
+        points.push_back(MakeNearestMatrixSample(
+            mgr, nextId++, MakeLabel("mx", static_cast<int>(i + 1), 2), "monitor", x, x, y));
+    }
+    return points;
+}
+
+std::vector<SnapshotState> BuildSnapshots(const TestCaseSpec& cfg) {
+    std::vector<SnapshotState> snapshots;
+    const std::vector<double> fractions = BuildSortedFractions(cfg.report_time_fractions);
+    snapshots.reserve(fractions.size());
+    for (double fraction : fractions) {
+        SnapshotState state;
+        state.tag = MakeReportTag(fraction);
+        state.requested_fraction = fraction;
+        state.target_time_s = fraction * cfg.target_end_time_s;
+        snapshots.push_back(state);
+    }
+    return snapshots;
+}
+
+std::vector<MonitorScheduleState> BuildMonitorSchedule(const TestCaseSpec& cfg) {
+    std::vector<MonitorScheduleState> schedule;
+    int sampleId = 0;
+    schedule.push_back(MonitorScheduleState());
+    schedule.back().sample_id = sampleId++;
+    schedule.back().target_time_s = 0.0;
+    for (double fraction : BuildSortedFractions(cfg.report_time_fractions)) {
+        MonitorScheduleState state;
+        state.sample_id = sampleId++;
+        state.target_time_s = fraction * cfg.target_end_time_s;
+        schedule.push_back(state);
+    }
+    return schedule;
+}
+
+void CaptureSnapshotIfCrossed(double prevTime,
+                              const std::vector<double>& prevPBlocks,
+                              const std::vector<double>& prevTBlocks,
+                              double currentTime,
+                              const std::vector<double>& currentPBlocks,
+                              const std::vector<double>& currentTBlocks,
+                              SnapshotState& snapshot) {
+    if (snapshot.captured || currentTime + kPendingTimeTolerance < snapshot.target_time_s) return;
+    const bool usePrev = !prevPBlocks.empty() && !prevTBlocks.empty() && prevTime >= 0.0
+        && std::abs(prevTime - snapshot.target_time_s) < std::abs(currentTime - snapshot.target_time_s);
+    snapshot.captured = true;
+    snapshot.actual_time_s = usePrev ? prevTime : currentTime;
+    snapshot.p_blocks = usePrev ? prevPBlocks : currentPBlocks;
+    snapshot.t_blocks = usePrev ? prevTBlocks : currentTBlocks;
+}
+
+void CaptureMonitorIfCrossed(double prevTime,
+                             const std::vector<double>& prevPBlocks,
+                             const std::vector<double>& prevTBlocks,
+                             double currentTime,
+                             const std::vector<double>& currentPBlocks,
+                             const std::vector<double>& currentTBlocks,
+                             MonitorScheduleState& sample) {
+    if (sample.captured || currentTime + kPendingTimeTolerance < sample.target_time_s) return;
+    const bool usePrev = !prevPBlocks.empty() && !prevTBlocks.empty() && prevTime >= 0.0
+        && std::abs(prevTime - sample.target_time_s) < std::abs(currentTime - sample.target_time_s);
+    sample.captured = true;
+    sample.actual_time_s = usePrev ? prevTime : currentTime;
+    sample.p_blocks = usePrev ? prevPBlocks : currentPBlocks;
+    sample.t_blocks = usePrev ? prevTBlocks : currentTBlocks;
+}
+
+void FinalizeMissingSnapshots(double finalTime,
+                              const std::vector<double>& finalPBlocks,
+                              const std::vector<double>& finalTBlocks,
+                              std::vector<SnapshotState>& snapshots) {
+    for (auto& snapshot : snapshots) {
+        if (!snapshot.captured) {
+            snapshot.captured = true;
+            snapshot.actual_time_s = finalTime;
+            snapshot.p_blocks = finalPBlocks;
+            snapshot.t_blocks = finalTBlocks;
+        }
+    }
+}
+
+void FinalizeMissingMonitorSamples(double finalTime,
+                                   const std::vector<double>& finalPBlocks,
+                                   const std::vector<double>& finalTBlocks,
+                                   std::vector<MonitorScheduleState>& schedule) {
+    for (auto& sample : schedule) {
+        if (!sample.captured) {
+            sample.captured = true;
+            sample.actual_time_s = finalTime;
+            sample.p_blocks = finalPBlocks;
+            sample.t_blocks = finalTBlocks;
+        }
+    }
+}
+
+std::vector<std::string> OrderedProfileFamilies() {
+    return {kFamilyMatrixHorizontal, kFamilyMatrixVerticalMidline};
+}
+
+std::pair<int, int> GetFinestGridCase(const TestCaseSpec& cfg) {
+    if (cfg.grid_sweep_cases.empty()) {
+        return std::make_pair(cfg.nx, cfg.ny);
+    }
+    return *std::max_element(
+        cfg.grid_sweep_cases.begin(),
+        cfg.grid_sweep_cases.end(),
+        [](const std::pair<int, int>& lhs, const std::pair<int, int>& rhs) {
+            const int lhsCells = lhs.first * lhs.second;
+            const int rhsCells = rhs.first * rhs.second;
+            if (lhsCells != rhsCells) return lhsCells < rhsCells;
+            return lhs.first < rhs.first;
+        });
+}
+
+std::vector<SpatialSamplePoint> FilterStationsByFamily(const std::vector<SpatialSamplePoint>& stations,
+                                                       const std::string& family) {
+    std::vector<SpatialSamplePoint> out;
+    for (const auto& station : stations) {
+        if (station.family == family) out.push_back(station);
+    }
+    return out;
+}
+
+std::string Trim(std::string value) {
+    const char* whitespace = " \t\r\n";
+    const std::size_t begin = value.find_first_not_of(whitespace);
+    if (begin == std::string::npos) return "";
+    const std::size_t end = value.find_last_not_of(whitespace);
+    return value.substr(begin, end - begin + 1);
+}
+
+std::vector<std::string> SplitCsvLine(const std::string& line) {
+    std::vector<std::string> out;
+    std::stringstream ss(line);
+    std::string token;
+    while (std::getline(ss, token, ',')) out.push_back(Trim(token));
+    return out;
+}
+
+struct CsvTable {
+    std::vector<std::string> headers;
+    std::unordered_map<std::string, std::size_t> index_by_header;
+    std::vector<std::vector<std::string> > rows;
 };
 
-struct TestCaseSummary {
-    std::string case_dir;
-    std::string convergence_log_path;
-    std::string metrics_csv_path;
+CsvTable ReadCsvTable(const std::string& path) {
+    std::ifstream in(path.c_str(), std::ios::in);
+    if (!in.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to read CSV: " + path);
+    CsvTable table;
+    std::string line;
+    if (!std::getline(in, line)) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] empty CSV: " + path);
+    }
+    table.headers = SplitCsvLine(line);
+    for (std::size_t i = 0; i < table.headers.size(); ++i) {
+        table.index_by_header[table.headers[i]] = i;
+    }
+    while (std::getline(in, line)) {
+        if (!Trim(line).empty()) table.rows.push_back(SplitCsvLine(line));
+    }
+    return table;
+}
 
-    int nx = 0;
-    int ny = 0;
-    int n_cells = 0;
-    double h_char = 0.0;
+double CsvGetDouble(const CsvTable& table, std::size_t row, const std::string& column) {
+    const auto it = table.index_by_header.find(column);
+    if (it == table.index_by_header.end()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing CSV column: " + column);
+    }
+    if (row >= table.rows.size() || it->second >= table.rows[row].size()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] malformed CSV row for column: " + column);
+    }
+    return std::stod(table.rows[row][it->second]);
+}
 
-    int steps = 0;
-    int total_rollbacks = 0;
-    double avg_iters = 0.0;
-    int max_iters = 0;
-    double t_end = 0.0;
+FieldErrorMetrics BuildErrorMetrics(double sumAbs, double sumSq, double maxAbs, int count, double scale) {
+    FieldErrorMetrics metrics;
+    metrics.sample_count = count;
+    if (count <= 0) return metrics;
+    const double safeScale = std::max(scale, 1.0);
+    metrics.l1_abs = sumAbs / static_cast<double>(count);
+    metrics.l2_abs = std::sqrt(sumSq / static_cast<double>(count));
+    metrics.linf_abs = maxAbs;
+    metrics.l1_norm = metrics.l1_abs / safeScale;
+    metrics.l2_norm = metrics.l2_abs / safeScale;
+    metrics.linf_norm = metrics.linf_abs / safeScale;
+    return metrics;
+}
 
-    double p_left_avg = std::numeric_limits<double>::quiet_NaN();
-    double p_right_avg = std::numeric_limits<double>::quiet_NaN();
-    int p_left_count = 0;
-    int p_right_count = 0;
-    int p_lr_pass = 0;
+double ComputeNormalizedStd(const std::vector<double>& values, double scale) {
+    if (values.empty()) return 0.0;
+    const double mean = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
+    double sumSq = 0.0;
+    for (double value : values) {
+        const double diff = value - mean;
+        sumSq += diff * diff;
+    }
+    return std::sqrt(sumSq / static_cast<double>(values.size())) / std::max(scale, 1.0);
+}
 
-    double t_left_avg = std::numeric_limits<double>::quiet_NaN();
-    double t_right_avg = std::numeric_limits<double>::quiet_NaN();
-    int t_left_count = 0;
-    int t_right_count = 0;
-    int t_lr_pass = 0;
+PressureCellMetrics EvaluatePressureCellMetrics(const MeshManager& mgr,
+                                                const SnapshotState& snapshot,
+                                                const TestCaseSpec& cfg,
+                                                const std::string& csvPath,
+                                                bool writeCsv) {
+    const auto& cells = mgr.mesh().getCells();
+    const std::size_t nUse = std::min(cells.size(), snapshot.p_blocks.size());
+    if (nUse == 0) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] empty state for analytical pressure comparison.");
+    const double scale = PressureScale(cfg);
+    double sumAbs = 0.0;
+    double sumSq = 0.0;
+    double maxAbs = 0.0;
+    int maxErrCell = -1;
+    std::ofstream out;
+    if (writeCsv) {
+        out.open(csvPath.c_str(), std::ios::out | std::ios::trunc);
+        if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical cell csv: " + csvPath);
+        out << "cell_id,x_m,y_m,target_time_s,actual_time_s,p_num_pa,p_ref_pa,p_abs_err_pa,p_abs_err_over_dp\n";
+    }
+    for (std::size_t i = 0; i < nUse; ++i) {
+        const double pRef = EvaluateAnalyticalPressure(cfg, cells[i].center.m_x, snapshot.actual_time_s);
+        const double pAbsErr = std::abs(snapshot.p_blocks[i] - pRef);
+        sumAbs += pAbsErr;
+        sumSq += pAbsErr * pAbsErr;
+        if (pAbsErr >= maxAbs) {
+            maxAbs = pAbsErr;
+            maxErrCell = static_cast<int>(i);
+        }
+        if (writeCsv) {
+            out << i << ","
+                << std::setprecision(12) << cells[i].center.m_x << ","
+                << cells[i].center.m_y << ","
+                << snapshot.target_time_s << ","
+                << snapshot.actual_time_s << ","
+                << snapshot.p_blocks[i] << ","
+                << pRef << ","
+                << pAbsErr << ","
+                << (pAbsErr / scale) << "\n";
+        }
+    }
+    PressureCellMetrics metrics;
+    metrics.tag = snapshot.tag;
+    metrics.requested_fraction = snapshot.requested_fraction;
+    metrics.target_time_s = snapshot.target_time_s;
+    metrics.actual_time_s = snapshot.actual_time_s;
+    metrics.pressure = BuildErrorMetrics(sumAbs, sumSq, maxAbs, static_cast<int>(nUse), scale);
+    metrics.max_err_cell = maxErrCell;
+    metrics.compare_csv_path = writeCsv ? csvPath : "";
+    return metrics;
+}
 
-    double max_abs_dp = 0.0;
-    double max_abs_dt = 0.0;
-    int p_evolution_pass = 0;
-    int t_evolution_pass = 0;
+void WriteAnalyticalProfileReferenceCsv(const std::vector<SpatialSamplePoint>& stations,
+                                        const SnapshotState& snapshot,
+                                        const TestCaseSpec& cfg,
+                                        const std::string& family,
+                                        const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical profile reference: " + path);
+    out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,target_time_s,p_ref_pa\n";
+    for (const auto& station : stations) {
+        if (station.family != family) continue;
+        out << station.id << "," << station.label << "," << station.family << "," << station.location << ","
+            << std::setprecision(12) << station.target_axis_m << "," << station.target_x << "," << station.target_y << ","
+            << snapshot.actual_time_s << ","
+            << EvaluateAnalyticalPressure(cfg, station.actual_x, snapshot.actual_time_s) << "\n";
+    }
+}
 
-    int physics_checks_pass = 0;
-};
+void WriteAnalyticalMonitorReferenceCsv(const std::vector<SpatialSamplePoint>& points,
+                                        const std::vector<MonitorScheduleState>& schedule,
+                                        const TestCaseSpec& cfg,
+                                        const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical monitor reference: " + path);
+    out << "sample_id,target_time_s";
+    for (const auto& point : points) out << ",p_ref_" << point.label;
+    out << "\n";
+    for (const auto& sample : schedule) {
+        out << sample.sample_id << "," << std::setprecision(12) << sample.actual_time_s;
+        for (const auto& point : points) {
+            out << "," << EvaluateAnalyticalPressure(cfg, point.actual_x, sample.actual_time_s);
+        }
+        out << "\n";
+    }
+}
 
-struct TestCasePlan {
-    std::string plan_key;
-    TestCaseSpec spec;
-};
+void WriteProfileStationDefinitions(const std::vector<SpatialSamplePoint>& stations, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write profile station definitions: " + path);
+    out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m\n";
+    for (const auto& station : stations) {
+        out << station.id << "," << station.label << "," << station.family << "," << station.location << ","
+            << std::setprecision(12) << station.target_axis_m << "," << station.target_x << "," << station.target_y << ","
+            << station.block_id << "," << station.actual_x << "," << station.actual_y << "\n";
+    }
+}
+
+void WriteMonitorPointDefinitions(const std::vector<SpatialSamplePoint>& points, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write monitor point definitions: " + path);
+    out << "point_id,label,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m\n";
+    for (const auto& point : points) {
+        out << point.id << "," << point.label << "," << point.location << ","
+            << std::setprecision(12) << point.target_axis_m << "," << point.target_x << "," << point.target_y << ","
+            << point.block_id << "," << point.actual_x << "," << point.actual_y << "\n";
+    }
+}
+
+void WriteProfileSchedule(const std::vector<SnapshotState>& snapshots, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write profile schedule: " + path);
+    out << "tag,requested_fraction,target_time_s,actual_time_s\n";
+    for (const auto& snapshot : snapshots) {
+        out << snapshot.tag << ","
+            << std::setprecision(12) << snapshot.requested_fraction << ","
+            << snapshot.target_time_s << "," << snapshot.actual_time_s << "\n";
+    }
+}
+
+void WriteMonitorSchedule(const std::vector<MonitorScheduleState>& schedule, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write monitor schedule: " + path);
+    out << "sample_id,target_time_s,actual_time_s\n";
+    for (const auto& sample : schedule) {
+        out << sample.sample_id << ","
+            << std::setprecision(12) << sample.target_time_s << "," << sample.actual_time_s << "\n";
+    }
+}
+
+void WriteEngineeringProfileCsv(const std::vector<SpatialSamplePoint>& stations,
+                                const std::string& family,
+                                const SnapshotState& snapshot,
+                                const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write engineering profile csv: " + path);
+    out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m,target_time_s,actual_time_s,p_num_pa,t_num_k\n";
+    for (const auto& station : stations) {
+        if (station.family != family) continue;
+        if (station.block_id < 0 ||
+            station.block_id >= static_cast<int>(snapshot.p_blocks.size()) ||
+            station.block_id >= static_cast<int>(snapshot.t_blocks.size())) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid block id during engineering profile export.");
+        }
+        out << station.id << "," << station.label << "," << station.family << "," << station.location << ","
+            << std::setprecision(12) << station.target_axis_m << "," << station.target_x << "," << station.target_y << ","
+            << station.block_id << "," << station.actual_x << "," << station.actual_y << ","
+            << snapshot.target_time_s << "," << snapshot.actual_time_s << ","
+            << snapshot.p_blocks[static_cast<std::size_t>(station.block_id)] << ","
+            << snapshot.t_blocks[static_cast<std::size_t>(station.block_id)] << "\n";
+    }
+}
+
+void WriteEngineeringMonitorCsv(const std::vector<SpatialSamplePoint>& points,
+                                const std::vector<MonitorScheduleState>& schedule,
+                                const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write engineering monitor csv: " + path);
+    out << "sample_id,target_time_s,actual_time_s";
+    for (const auto& point : points) out << ",p_num_" << point.label;
+    for (const auto& point : points) out << ",t_num_" << point.label;
+    out << "\n";
+    for (const auto& sample : schedule) {
+        out << sample.sample_id << "," << std::setprecision(12) << sample.target_time_s << "," << sample.actual_time_s;
+        for (const auto& point : points) {
+            if (point.block_id < 0 || point.block_id >= static_cast<int>(sample.p_blocks.size())) {
+                throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid pressure block id during engineering monitor export.");
+            }
+            out << "," << sample.p_blocks[static_cast<std::size_t>(point.block_id)];
+        }
+        for (const auto& point : points) {
+            if (point.block_id < 0 || point.block_id >= static_cast<int>(sample.t_blocks.size())) {
+                throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] invalid temperature block id during engineering monitor export.");
+            }
+            out << "," << sample.t_blocks[static_cast<std::size_t>(point.block_id)];
+        }
+        out << "\n";
+    }
+}
+
+void WritePropertyTables(const TestCaseSpec& cfg,
+                         const std::string& engineeringPath,
+                         const std::string& comsolInputPath) {
+    const auto writeOne = [&](const std::string& path) {
+        std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+        if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write property table: " + path);
+        out << "key,value,unit\n";
+        out << "lx," << std::setprecision(12) << cfg.lx << ",m\n";
+        out << "ly," << cfg.ly << ",m\n";
+        out << "p_init," << cfg.p_init << ",Pa\n";
+        out << "p_left," << cfg.p_left << ",Pa\n";
+        out << "p_right," << cfg.p_right << ",Pa\n";
+        out << "t_init," << cfg.t_init << ",K\n";
+        out << "t_left," << cfg.t_left << ",K\n";
+        out << "t_right," << cfg.t_right << ",K\n";
+        out << "dt_init," << cfg.dt_init << ",s\n";
+        out << "target_end_time_s," << cfg.target_end_time_s << ",s\n";
+        out << "matrix_phi," << cfg.matrix_phi << ",1\n";
+        out << "matrix_perm," << cfg.matrix_perm << ",m^2\n";
+        out << "matrix_ct," << cfg.matrix_ct << ",1/Pa\n";
+        out << "matrix_rho_r," << cfg.matrix_rho_r << ",kg/m^3\n";
+        out << "matrix_cp_r," << cfg.matrix_cp_r << ",J/(kg*K)\n";
+        out << "matrix_lambda_r," << cfg.matrix_lambda_r << ",W/(m*K)\n";
+        out << "co2_rho_const," << cfg.co2_rho_const << ",kg/m^3\n";
+        out << "co2_mu_const," << cfg.co2_mu_const << ",Pa*s\n";
+        out << "co2_cp_const," << cfg.co2_cp_const << ",J/(kg*K)\n";
+        out << "co2_cv_const," << cfg.co2_cv_const << ",J/(kg*K)\n";
+        out << "co2_k_const," << cfg.co2_k_const << ",W/(m*K)\n";
+        out << "gravity_x," << cfg.gravity_vector.m_x << ",m/s^2\n";
+        out << "gravity_y," << cfg.gravity_vector.m_y << ",m/s^2\n";
+        out << "gravity_z," << cfg.gravity_vector.m_z << ",m/s^2\n";
+    };
+    writeOne(engineeringPath);
+    writeOne(comsolInputPath);
+}
+
+void WriteReferenceSpec(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
+    std::ofstream out(summary.reference_spec_path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write reference spec: " + summary.reference_spec_path);
+    out << "# Engineering Reference Spec\n\n";
+    out << "## Case\n";
+    out << "- Case: `" << cfg.case_name << "`\n";
+    out << "- Geometry: `" << cfg.lx << " m x " << cfg.ly << " m`\n";
+    out << "- Mesh: non-orthogonal quadrilateral, `" << cfg.nx << " x " << cfg.ny << "` nominal split\n";
+    out << "- Fluid model: single-phase CO2, constant properties\n";
+    out << "- Fractures / wells: none\n";
+    out << "- Gravity: disabled\n";
+    out << "- Pressure BC: left/right Dirichlet, top/bottom zero-flux\n";
+    out << "- Temperature BC: left/right Dirichlet, top/bottom zero-flux\n\n";
+    out << "## Validation Strategy\n";
+    out << "- Pressure reference: closed-form 1D Fourier analytical solution at cell centers, profiles, and monitor times\n";
+    out << "- Temperature reference: COMSOL 6.3 matrix-only no-fracture reference exported under `" << summary.comsol_output_dir << "`\n";
+    out << "- Coupled acceptance: pressure analytical gate and temperature COMSOL gate must both pass\n\n";
+    out << "## Inputs Shared With COMSOL\n";
+    out << "- `engineering/profile_station_definitions.csv`\n";
+    out << "- `engineering/profile_report_schedule.csv`\n";
+    out << "- `engineering/monitor_point_definitions.csv`\n";
+    out << "- `engineering/monitor_sample_schedule.csv`\n";
+    out << "- `reference/comsol_input/property_table.csv`\n";
+}
+
+void WriteAnalyticalNote(const TestCaseSpec& cfg, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write analytical note: " + path);
+    out << "# Analytical Pressure Reference\n\n";
+    out << "- Pressure admits a 1D Fourier series solution because the target no-fracture case reduces to x-directed diffusion under constant coefficients and zero gravity.\n";
+    out << "- Diffusivity: `" << ComputePressureDiffusivity(cfg) << " m^2/s`\n";
+    out << "- Pressure normalization: `Delta p = " << PressureScale(cfg) << " Pa`\n";
+    out << "- Temperature closed form: not enforced in v1; COMSOL is the authority for temperature.\n";
+}
+
+void WriteComsolReferenceSpec(const TestCaseSpec& cfg, const std::string& caseDir, const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write COMSOL reference spec: " + path);
+    out << "# COMSOL Reference Specification\n\n";
+    out << "## Case\n";
+    out << "- Case directory: `" << caseDir << "`\n";
+    out << "- Geometry: `" << cfg.lx << " m x " << cfg.ly << " m`\n";
+    out << "- Pressure window: `" << cfg.p_left / 1.0e6 << " MPa` -> `" << cfg.p_right / 1.0e6 << " MPa`\n";
+    out << "- Temperature window: `" << cfg.t_left << " K` -> `" << cfg.t_right << " K`\n";
+    out << "- Gravity: disabled\n";
+    out << "- Requested route: built-in Darcy + Heat Transfer in Porous Media if practical, otherwise PDE fallback\n";
+    out << "- Implemented v1 route: `" << kComsolRepresentationMatrixOnly << "`\n\n";
+    out << "## Expected Outputs\n";
+    out << "- `reference/comsol/comsol_profile_matrix_horizontal_*.csv`\n";
+    out << "- `reference/comsol/comsol_profile_matrix_vertical_midline_*.csv`\n";
+    out << "- `reference/comsol/comsol_monitor_timeseries.csv`\n";
+    out << "- `reference/comsol/comsol_model.mph`\n";
+    out << "- `reference/comsol/comsol_progress.log`\n";
+    out << "- `reference/comsol/comsol_run_summary.md`\n";
+    out << "- `reference/comsol/comsol_reference_mesh_check.txt`\n\n";
+    out << "## Commands\n";
+    out << "```powershell\n";
+    out << "powershell -ExecutionPolicy Bypass -File " << cfg.comsol_wrapper_relpath << " -Mode Compile\n";
+    out << "powershell -ExecutionPolicy Bypass -File " << cfg.comsol_wrapper_relpath << " -Mode Run\n";
+    out << "```\n";
+}
+
+ProfileReferenceTable LoadProfileReference(const std::string& path) {
+    const CsvTable table = ReadCsvTable(path);
+    ProfileReferenceTable ref;
+    for (std::size_t row = 0; row < table.rows.size(); ++row) {
+        ProfileReferenceRow item;
+        item.station_id = static_cast<int>(std::llround(CsvGetDouble(table, row, "station_id")));
+        item.target_axis_m = CsvGetDouble(table, row, "target_axis_m");
+        item.target_x = CsvGetDouble(table, row, "target_x_m");
+        item.target_y = CsvGetDouble(table, row, "target_y_m");
+        item.target_time_s = CsvGetDouble(table, row, "target_time_s");
+        item.p_ref = CsvGetDouble(table, row, "p_ref_pa");
+        item.t_ref = CsvGetDouble(table, row, "t_ref_k");
+        ref.rows_by_station_id[item.station_id] = item;
+    }
+    return ref;
+}
+
+MonitorReferenceSeries LoadMonitorReference(const std::string& path, const std::vector<SpatialSamplePoint>& monitorPoints) {
+    const CsvTable table = ReadCsvTable(path);
+    MonitorReferenceSeries ref;
+    for (std::size_t row = 0; row < table.rows.size(); ++row) {
+        MonitorReferenceRow item;
+        item.sample_id = static_cast<int>(std::llround(CsvGetDouble(table, row, "sample_id")));
+        item.target_time_s = CsvGetDouble(table, row, "target_time_s");
+        for (const auto& point : monitorPoints) {
+            item.p_ref_by_label[point.label] = CsvGetDouble(table, row, "p_ref_" + point.label);
+            item.t_ref_by_label[point.label] = CsvGetDouble(table, row, "t_ref_" + point.label);
+        }
+        ref.sample_id_to_row[item.sample_id] = ref.rows.size();
+        ref.rows.push_back(item);
+    }
+    return ref;
+}
+
+ProfileCompareMetrics EvaluateProfileAgainstReference(const std::vector<ReconstructedSpatialPointSample>& sampledRows,
+                                                      const ProfileReferenceTable& reference,
+                                                      const TestCaseSpec& cfg,
+                                                      const std::string& csvPath,
+                                                      bool writeCsv) {
+    if (sampledRows.empty()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] empty sampled profile rows during reference comparison.");
+    }
+    double pSumAbs = 0.0;
+    double pSumSq = 0.0;
+    double pMaxAbs = 0.0;
+    double tSumAbs = 0.0;
+    double tSumSq = 0.0;
+    double tMaxAbs = 0.0;
+    std::vector<double> pValues;
+    std::vector<double> tValues;
+    std::ofstream out;
+    if (writeCsv) {
+        out.open(csvPath.c_str(), std::ios::out | std::ios::trunc);
+        if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write profile compare csv: " + csvPath);
+        out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m,target_time_s,actual_time_s,"
+               "p_sample_mode,p_carrier_cell_id,p_carrier_x_m,p_carrier_y_m,p_num_pa,p_ref_pa,p_abs_err_pa,p_abs_err_over_dp,"
+               "t_sample_mode,t_carrier_cell_id,t_carrier_x_m,t_carrier_y_m,t_num_k,t_ref_k,t_abs_err_k,t_abs_err_over_dt\n";
+    }
+    for (const auto& sample : sampledRows) {
+        const auto refIt = reference.rows_by_station_id.find(sample.point_id);
+        if (refIt == reference.rows_by_station_id.end()) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing station id in profile reference.");
+        }
+        const ProfileReferenceRow& refRow = refIt->second;
+        const double pNum = sample.pressure.value;
+        const double tNum = sample.temperature.value;
+        const double pRef = EvaluateAnalyticalPressure(cfg, sample.target_x, sample.actual_time_s);
+        const double pAbsErr = std::abs(pNum - pRef);
+        const double tAbsErr = std::abs(tNum - refRow.t_ref);
+        pSumAbs += pAbsErr;
+        pSumSq += pAbsErr * pAbsErr;
+        pMaxAbs = std::max(pMaxAbs, pAbsErr);
+        tSumAbs += tAbsErr;
+        tSumSq += tAbsErr * tAbsErr;
+        tMaxAbs = std::max(tMaxAbs, tAbsErr);
+        pValues.push_back(pNum);
+        tValues.push_back(tNum);
+        if (writeCsv) {
+            out << sample.point_id << "," << sample.label << "," << sample.family << "," << sample.location << ","
+                << std::setprecision(12) << sample.target_axis_m << "," << sample.target_x << "," << sample.target_y << ","
+                << sample.block_id << "," << sample.actual_x << "," << sample.actual_y << ","
+                << sample.target_time_s << "," << sample.actual_time_s << ","
+                << sample.pressure.sample_mode << "," << sample.pressure.carrier_cell_id << ","
+                << sample.pressure.carrier_x << "," << sample.pressure.carrier_y << ","
+                << pNum << "," << pRef << "," << pAbsErr << "," << (pAbsErr / PressureScale(cfg)) << ","
+                << sample.temperature.sample_mode << "," << sample.temperature.carrier_cell_id << ","
+                << sample.temperature.carrier_x << "," << sample.temperature.carrier_y << ","
+                << tNum << "," << refRow.t_ref << "," << tAbsErr << "," << (tAbsErr / TemperatureScale(cfg)) << "\n";
+        }
+    }
+    ProfileCompareMetrics metrics;
+    metrics.family = sampledRows.empty() ? "" : sampledRows.front().family;
+    metrics.tag = sampledRows.empty() ? "" : sampledRows.front().time_tag;
+    metrics.target_time_s = sampledRows.empty() ? 0.0 : sampledRows.front().target_time_s;
+    metrics.actual_time_s = sampledRows.empty() ? 0.0 : sampledRows.front().actual_time_s;
+    metrics.pressure = BuildErrorMetrics(pSumAbs, pSumSq, pMaxAbs, static_cast<int>(sampledRows.size()), PressureScale(cfg));
+    metrics.temperature = BuildErrorMetrics(tSumAbs, tSumSq, tMaxAbs, static_cast<int>(sampledRows.size()), TemperatureScale(cfg));
+    metrics.pressure_uniformity_norm_std = ComputeNormalizedStd(pValues, PressureScale(cfg));
+    metrics.temperature_uniformity_norm_std = ComputeNormalizedStd(tValues, TemperatureScale(cfg));
+    metrics.compare_csv_path = writeCsv ? csvPath : "";
+    return metrics;
+}
+
+std::pair<FieldErrorMetrics, FieldErrorMetrics> WriteMonitorCompareCsv(const std::vector<SpatialSamplePoint>& monitorPoints,
+                                                                       const std::vector<ReconstructedSpatialPointSample>& sampledRows,
+                                                                       const MonitorReferenceSeries& reference,
+                                                                       const TestCaseSpec& cfg,
+                                                                       const std::string& path) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write monitor compare csv: " + path);
+    out << "sample_id,target_time_s,actual_time_s";
+    for (const auto& point : monitorPoints) out << ",carrier_cell_" << point.label;
+    for (const auto& point : monitorPoints) out << ",p_sample_mode_" << point.label;
+    for (const auto& point : monitorPoints) out << ",t_sample_mode_" << point.label;
+    for (const auto& point : monitorPoints) out << ",p_num_" << point.label;
+    for (const auto& point : monitorPoints) out << ",p_ref_" << point.label;
+    for (const auto& point : monitorPoints) out << ",t_num_" << point.label;
+    for (const auto& point : monitorPoints) out << ",t_ref_" << point.label;
+    out << "\n";
+
+    double pSumAbs = 0.0;
+    double pSumSq = 0.0;
+    double pMaxAbs = 0.0;
+    double tSumAbs = 0.0;
+    double tSumSq = 0.0;
+    double tMaxAbs = 0.0;
+    int count = 0;
+
+    std::unordered_map<int, std::unordered_map<std::string, ReconstructedSpatialPointSample> > samplesBySchedule;
+    std::unordered_map<int, std::pair<double, double> > sampleTimes;
+    for (const auto& row : sampledRows) {
+        samplesBySchedule[row.sample_id][row.label] = row;
+        sampleTimes[row.sample_id] = std::make_pair(row.target_time_s, row.actual_time_s);
+    }
+
+    for (const auto& sampleEntry : samplesBySchedule) {
+        const int sampleId = sampleEntry.first;
+        const auto refIt = reference.sample_id_to_row.find(sampleId);
+        if (refIt == reference.sample_id_to_row.end()) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing monitor sample in reference.");
+        }
+        const MonitorReferenceRow& refRow = reference.rows[refIt->second];
+        const auto timeIt = sampleTimes.find(sampleId);
+        if (timeIt == sampleTimes.end()) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing monitor sample time metadata.");
+        }
+        out << sampleId << "," << std::setprecision(12) << timeIt->second.first << "," << timeIt->second.second;
+        for (const auto& point : monitorPoints) {
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            if (sampleIt == sampleEntry.second.end()) {
+                throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing sampled monitor point.");
+            }
+            out << "," << sampleIt->second.pressure.carrier_cell_id;
+        }
+        for (const auto& point : monitorPoints) {
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            out << "," << sampleIt->second.pressure.sample_mode;
+        }
+        for (const auto& point : monitorPoints) {
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            out << "," << sampleIt->second.temperature.sample_mode;
+        }
+        for (const auto& point : monitorPoints) {
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            out << "," << sampleIt->second.pressure.value;
+        }
+        for (const auto& point : monitorPoints) {
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            const double pRef = EvaluateAnalyticalPressure(cfg, sampleIt->second.target_x, sampleIt->second.actual_time_s);
+            const double pAbsErr = std::abs(sampleIt->second.pressure.value - pRef);
+            pSumAbs += pAbsErr;
+            pSumSq += pAbsErr * pAbsErr;
+            pMaxAbs = std::max(pMaxAbs, pAbsErr);
+            out << "," << pRef;
+        }
+        for (const auto& point : monitorPoints) {
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            out << "," << sampleIt->second.temperature.value;
+        }
+        for (const auto& point : monitorPoints) {
+            const auto tIt = refRow.t_ref_by_label.find(point.label);
+            if (tIt == refRow.t_ref_by_label.end()) {
+                throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing monitor point label in temperature reference.");
+            }
+            const auto sampleIt = sampleEntry.second.find(point.label);
+            const double tAbsErr = std::abs(sampleIt->second.temperature.value - tIt->second);
+            tSumAbs += tAbsErr;
+            tSumSq += tAbsErr * tAbsErr;
+            tMaxAbs = std::max(tMaxAbs, tAbsErr);
+            out << "," << tIt->second;
+            ++count;
+        }
+        out << "\n";
+    }
+
+    const FieldErrorMetrics pMetrics = BuildErrorMetrics(
+        pSumAbs, pSumSq, pMaxAbs, count, PressureScale(cfg));
+    const FieldErrorMetrics tMetrics = BuildErrorMetrics(
+        tSumAbs, tSumSq, tMaxAbs, count, TemperatureScale(cfg));
+    return std::make_pair(pMetrics, tMetrics);
+}
+
+double ComputeOrder(double coarseError, double fineError, double coarseScale, double fineScale) {
+    if (coarseError <= 0.0 || fineError <= 0.0 || coarseScale <= 0.0 || fineScale <= 0.0 || coarseScale == fineScale) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::log(coarseError / fineError) / std::log(coarseScale / fineScale);
+}
+
+void AnnotateObservedOrders(std::vector<SweepStudyRow>& rows, bool gridStudy) {
+    for (std::size_t i = 1; i < rows.size(); ++i) {
+        const double coarseScale = gridStudy ? rows[i - 1].h_char : rows[i - 1].dt_init;
+        const double fineScale = gridStudy ? rows[i].h_char : rows[i].dt_init;
+        const double coarsePressureError = gridStudy
+            ? rows[i - 1].pressure_cell_l2_norm
+            : rows[i - 1].pressure_time_self_l2_norm;
+        const double finePressureError = gridStudy
+            ? rows[i].pressure_cell_l2_norm
+            : rows[i].pressure_time_self_l2_norm;
+        const double coarseTemperatureError = gridStudy
+            ? rows[i - 1].temperature_horizontal_l2_norm
+            : rows[i - 1].temperature_time_self_l2_norm;
+        const double fineTemperatureError = gridStudy
+            ? rows[i].temperature_horizontal_l2_norm
+            : rows[i].temperature_time_self_l2_norm;
+        rows[i].pressure_order = ComputeOrder(
+            coarsePressureError,
+            finePressureError,
+            coarseScale,
+            fineScale);
+        rows[i].temperature_order = ComputeOrder(
+            coarseTemperatureError,
+            fineTemperatureError,
+            coarseScale,
+            fineScale);
+    }
+}
+
+bool IsMonotonicNonIncreasingWithTol(const std::vector<double>& values, double absTol) {
+    for (std::size_t i = 1; i < values.size(); ++i) {
+        if (values[i] > values[i - 1] + absTol) return false;
+    }
+    return true;
+}
+
+double ComputeMinFiniteOrder(const std::vector<SweepStudyRow>& rows, bool pressureOrder) {
+    double minOrder = std::numeric_limits<double>::infinity();
+    bool hasFinite = false;
+    for (const auto& row : rows) {
+        const double value = pressureOrder ? row.pressure_order : row.temperature_order;
+        if (std::isfinite(value)) {
+            minOrder = std::min(minOrder, value);
+            hasFinite = true;
+        }
+    }
+    return hasFinite ? minOrder : std::numeric_limits<double>::quiet_NaN();
+}
+
+void WriteStudyCsv(const std::vector<SweepStudyRow>& rows, const std::string& path, const std::string& studyTag) {
+    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write study csv: " + path);
+    out << "study,label,case_dir,nx,ny,dt_init,h_char,t_end,steps,pressure_cell_l2_norm,pressure_horizontal_l2_norm,temperature_horizontal_l2_norm,pressure_vertical_uniformity_norm_std,temperature_vertical_uniformity_norm_std,pressure_time_self_l2_norm,temperature_time_self_l2_norm,pressure_order,temperature_order\n";
+    for (const auto& row : rows) {
+        out << studyTag << "," << row.label << "," << row.case_dir << ","
+            << row.nx << "," << row.ny << ","
+            << std::setprecision(12) << row.dt_init << "," << row.h_char << "," << row.t_end << "," << row.steps << ","
+            << row.pressure_cell_l2_norm << "," << row.pressure_horizontal_l2_norm << ","
+            << row.temperature_horizontal_l2_norm << "," << row.pressure_vertical_uniformity_norm_std << ","
+            << row.temperature_vertical_uniformity_norm_std << "," << row.pressure_time_self_l2_norm << ","
+            << row.temperature_time_self_l2_norm << "," << row.pressure_order << "," << row.temperature_order << "\n";
+    }
+}
+
+std::string ReadTextFile(const std::string& path) {
+    std::ifstream in(path.c_str(), std::ios::in);
+    if (!in.good()) return "";
+    std::ostringstream oss;
+    oss << in.rdbuf();
+    return oss.str();
+}
+
+std::string ExtractComsolRepresentation(const std::string& runSummaryPath) {
+    std::ifstream in(runSummaryPath.c_str(), std::ios::in);
+    if (!in.good()) return "";
+    std::string line;
+    const std::string token = "Representation:";
+    while (std::getline(in, line)) {
+        const std::size_t pos = line.find(token);
+        if (pos == std::string::npos) continue;
+        std::string value = Trim(line.substr(pos + token.size()));
+        if (!value.empty() && value.front() == '`') value.erase(value.begin());
+        while (!value.empty() && (value.back() == '`' || value.back() == '.' || value.back() == '\r')) value.pop_back();
+        return Trim(value);
+    }
+    return "";
+}
+
+bool ComsolFineCheckWasSkipped(const std::string& meshCheckPath) {
+    const std::string text = ReadTextFile(meshCheckPath);
+    return text.find("fine_check_skipped=true") != std::string::npos;
+}
+
+bool ReferenceFilesReady(TestCaseSummary& summary, const std::vector<SnapshotState>& snapshots) {
+    summary.missing_reference_files.clear();
+    std::vector<std::string> required;
+    required.push_back(summary.comsol_output_dir + "/comsol_monitor_timeseries.csv");
+    required.push_back(summary.comsol_output_dir + "/comsol_model.mph");
+    required.push_back(summary.comsol_output_dir + "/comsol_progress.log");
+    required.push_back(summary.comsol_output_dir + "/comsol_run_summary.md");
+    required.push_back(summary.comsol_output_dir + "/comsol_reference_mesh_check.txt");
+    for (const auto& snapshot : snapshots) {
+        for (const std::string& family : OrderedProfileFamilies()) {
+            required.push_back(summary.comsol_output_dir + "/comsol_profile_" + family + "_" + snapshot.tag + ".csv");
+        }
+    }
+    for (const auto& path : required) {
+        std::ifstream in(path.c_str(), std::ios::in | std::ios::binary);
+        if (!in.good()) summary.missing_reference_files.push_back(path);
+    }
+    summary.reference_ready = summary.missing_reference_files.empty();
+    return summary.reference_ready;
+}
+
+void InvokeComsolReferenceGeneration(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
+    std::ostringstream cmd;
+    cmd << "\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -ExecutionPolicy Bypass -File \"" << cfg.comsol_wrapper_relpath
+        << "\" -Mode All -CaseDir \"" << summary.case_dir << "\"";
+    const int code = std::system(cmd.str().c_str());
+    if (code != 0) {
+        throw std::runtime_error(
+            "[Test_H_T_CO2_ConstPP_NoFrac] COMSOL reference generation failed with exit code " + std::to_string(code));
+    }
+}
+
+void WriteMetricsCsv(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
+    std::ofstream out(summary.metrics_csv_path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write metrics csv: " + summary.metrics_csv_path);
+    out << "case_name,nx,ny,n_cells,h_char,t_end,steps,total_rollbacks,avg_nonlinear_iters,max_nonlinear_iters,"
+           "reference_ready,validation_performed,validation_passed,grid_convergence_ok,time_sensitivity_ok,"
+           "final_pressure_cell_l1_norm,final_pressure_cell_l2_norm,final_pressure_cell_linf_norm,"
+           "final_pressure_horizontal_l2_norm,final_pressure_horizontal_linf_norm,"
+           "final_temperature_horizontal_l2_norm,final_temperature_horizontal_linf_norm,"
+           "final_monitor_pressure_l2_norm,final_monitor_pressure_linf_norm,"
+           "final_monitor_temperature_l2_norm,final_monitor_temperature_linf_norm,"
+           "final_pressure_vertical_uniformity_norm_std,final_temperature_vertical_uniformity_norm_std,"
+           "grid_pressure_order_min,grid_temperature_order_min,time_pressure_order_min,time_temperature_order_min,"
+           "comsol_representation,validation_status\n";
+    out << cfg.case_name << "," << cfg.nx << "," << cfg.ny << "," << summary.n_cells << ","
+        << std::setprecision(12) << summary.h_char << "," << summary.t_end << ","
+        << summary.steps << "," << summary.total_rollbacks << "," << summary.avg_iters << "," << summary.max_iters << ","
+        << BoolString(summary.reference_ready) << "," << BoolString(summary.validation_performed) << ","
+        << BoolString(summary.validation_passed) << "," << BoolString(summary.grid_convergence_ok) << ","
+        << BoolString(summary.time_sensitivity_ok) << ","
+        << summary.final_pressure_cell_l1_norm << "," << summary.final_pressure_cell_l2_norm << ","
+        << summary.final_pressure_cell_linf_norm << "," << summary.final_pressure_horizontal_l2_norm << ","
+        << summary.final_pressure_horizontal_linf_norm << "," << summary.final_temperature_horizontal_l2_norm << ","
+        << summary.final_temperature_horizontal_linf_norm << "," << summary.final_monitor_pressure_l2_norm << ","
+        << summary.final_monitor_pressure_linf_norm << "," << summary.final_monitor_temperature_l2_norm << ","
+        << summary.final_monitor_temperature_linf_norm << "," << summary.final_pressure_vertical_uniformity_norm_std << ","
+        << summary.final_temperature_vertical_uniformity_norm_std << "," << summary.grid_pressure_order_min << ","
+        << summary.grid_temperature_order_min << "," << summary.time_pressure_order_min << ","
+        << summary.time_temperature_order_min << "," << summary.comsol_representation << ","
+        << summary.validation_status << "\n";
+}
+
+void WriteValidationSummaryCsv(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
+    std::ofstream out(summary.validation_summary_csv_path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write validation summary csv: " + summary.validation_summary_csv_path);
+    out << "case_name,reference_mode,validation_status,reference_ready,validation_performed,validation_passed,"
+           "grid_convergence_ok,time_sensitivity_ok,final_pressure_cell_l2_norm,final_pressure_cell_linf_norm,"
+           "final_temperature_horizontal_l2_norm,final_temperature_horizontal_linf_norm,"
+           "final_monitor_temperature_l2_norm,final_monitor_temperature_linf_norm,"
+           "final_pressure_vertical_uniformity_norm_std,final_temperature_vertical_uniformity_norm_std,"
+           "grid_pressure_order_min,grid_temperature_order_min,time_pressure_order_min,time_temperature_order_min,comsol_representation,"
+           "grid_order_semantics,time_order_semantics\n";
+    out << cfg.case_name << "," << summary.resolved_reference_mode << "," << summary.validation_status << ","
+        << BoolString(summary.reference_ready) << "," << BoolString(summary.validation_performed) << ","
+        << BoolString(summary.validation_passed) << "," << BoolString(summary.grid_convergence_ok) << ","
+        << BoolString(summary.time_sensitivity_ok) << "," << summary.final_pressure_cell_l2_norm << ","
+        << summary.final_pressure_cell_linf_norm << "," << summary.final_temperature_horizontal_l2_norm << ","
+        << summary.final_temperature_horizontal_linf_norm << "," << summary.final_monitor_temperature_l2_norm << ","
+        << summary.final_monitor_temperature_linf_norm << "," << summary.final_pressure_vertical_uniformity_norm_std << ","
+        << summary.final_temperature_vertical_uniformity_norm_std << "," << summary.grid_pressure_order_min << ","
+        << summary.grid_temperature_order_min << "," << summary.time_pressure_order_min << ","
+        << summary.time_temperature_order_min << "," << summary.comsol_representation << ","
+        << "pressure_abs_cell__temperature_fixed_target_abs_profile_interior_only" << ","
+        << "fixed_target_self_against_dt30s" << "\n";
+}
+
+void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
+    std::ofstream out(summary.validation_summary_path.c_str(), std::ios::out | std::ios::trunc);
+    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write validation summary: " + summary.validation_summary_path);
+    out << "# Validation Summary\n\n";
+    out << "## Status\n";
+    out << "- Case: `" << cfg.case_name << "`\n";
+    out << "- Output directory: `" << summary.case_dir << "`\n";
+    out << "- Reference mode: `" << summary.resolved_reference_mode << "`\n";
+    out << "- Validation status: `" << summary.validation_status << "`\n";
+    out << "- Reference ready: `" << BoolString(summary.reference_ready) << "`\n";
+    out << "- Validation performed: `" << BoolString(summary.validation_performed) << "`\n";
+    out << "- Validation passed: `" << BoolString(summary.validation_passed) << "`\n";
+    out << "- Grid convergence ok: `" << BoolString(summary.grid_convergence_ok) << "`\n";
+    out << "- Time sensitivity ok: `" << BoolString(summary.time_sensitivity_ok) << "`\n\n";
+
+    out << "## Physical Alignment\n";
+    out << "- Gravity vector: `(" << cfg.gravity_vector.m_x << ", " << cfg.gravity_vector.m_y << ", " << cfg.gravity_vector.m_z << ")`\n";
+    out << "- Non-orthogonal correction: `" << BoolString(cfg.enable_non_orthogonal_correction) << "`\n";
+    out << "- Pressure reference: analytical 1D Fourier diffusion\n";
+    out << "- Temperature reference: COMSOL 6.3 `" << summary.comsol_representation << "`\n";
+    out << "- COMSOL fine check skipped: `" << BoolString(summary.comsol_fine_check_skipped) << "`\n\n";
+
+    out << "## Final Acceptance Metrics\n";
+    out << "- Pressure cell `L2_norm`: `" << summary.final_pressure_cell_l2_norm << "`\n";
+    out << "- Pressure cell `Linf_norm`: `" << summary.final_pressure_cell_linf_norm << "`\n";
+    out << "- Pressure horizontal profile `L2_norm`: `" << summary.final_pressure_horizontal_l2_norm << "`\n";
+    out << "- Temperature horizontal profile `L2_norm`: `" << summary.final_temperature_horizontal_l2_norm << "`\n";
+    out << "- Temperature horizontal profile `Linf_norm`: `" << summary.final_temperature_horizontal_linf_norm << "`\n";
+    out << "- Temperature monitor `L2_norm`: `" << summary.final_monitor_temperature_l2_norm << "`\n";
+    out << "- Temperature monitor `Linf_norm`: `" << summary.final_monitor_temperature_linf_norm << "`\n";
+    out << "- Pressure vertical uniformity norm-std: `" << summary.final_pressure_vertical_uniformity_norm_std << "`\n";
+    out << "- Temperature vertical uniformity norm-std: `" << summary.final_temperature_vertical_uniformity_norm_std << "`\n";
+    out << "- Thresholds: pressure `L2 <= " << cfg.pressure_l2_threshold << "`, pressure `Linf <= " << cfg.pressure_linf_threshold
+        << "`, temperature `L2 <= " << cfg.temperature_l2_threshold << "`, temperature `Linf <= " << cfg.temperature_linf_threshold
+        << "`, vertical uniformity `<= " << cfg.vertical_uniformity_threshold << "`\n\n";
+
+    out << "## Convergence Semantics\n";
+    out << "- Baseline absolute validation: pressure uses analytical reference at cell centers / fixed target points; temperature uses COMSOL fixed-target reference.\n";
+    out << "- Grid order: pressure uses absolute cell `L2`; temperature uses final-time horizontal fixed-target profile `L2` on interior stations only, excluding two profile intervals adjacent to each Dirichlet boundary.\n";
+    out << "- Time order: pressure and temperature use fixed-target self-convergence against `dt_30s`; absolute reference errors remain diagnostic only.\n\n";
+
+    out << "## Outputs\n";
+    out << "- Engineering dir: `" << summary.engineering_dir << "`\n";
+    out << "- Analytical dir: `" << summary.analytic_dir << "`\n";
+    out << "- COMSOL input dir: `" << summary.comsol_input_dir << "`\n";
+    out << "- COMSOL output dir: `" << summary.comsol_output_dir << "`\n";
+    out << "- Reference spec: `" << summary.reference_spec_path << "`\n";
+    out << "- Analytical note: `" << summary.analytical_note_path << "`\n";
+    out << "- COMSOL spec: `" << summary.comsol_reference_spec_path << "`\n";
+    out << "- Property table: `" << summary.property_table_path << "`\n";
+    out << "- COMSOL property table: `" << summary.comsol_property_table_path << "`\n";
+    if (!summary.grid_convergence_csv_path.empty()) out << "- Grid convergence csv: `" << summary.grid_convergence_csv_path << "`\n";
+    if (!summary.time_sensitivity_csv_path.empty()) out << "- Time sensitivity csv: `" << summary.time_sensitivity_csv_path << "`\n";
+
+    if (!summary.pressure_cell_metrics.empty()) {
+        out << "\n## Pressure Cell Records\n";
+        for (const auto& metric : summary.pressure_cell_metrics) {
+            out << "- `" << metric.tag << "`: L2=`" << metric.pressure.l2_norm
+                << "`, Linf=`" << metric.pressure.linf_norm
+                << "`, csv=`" << metric.compare_csv_path << "`\n";
+        }
+    }
+
+    if (!summary.report_metrics.empty()) {
+        out << "\n## Profile Compare Records\n";
+        for (const auto& metric : summary.report_metrics) {
+            out << "- `" << metric.family << " / " << metric.tag
+                << "`: pL2=`" << metric.pressure.l2_norm
+                << "`, tL2=`" << metric.temperature.l2_norm
+                << "`, pUniformity=`" << metric.pressure_uniformity_norm_std
+                << "`, tUniformity=`" << metric.temperature_uniformity_norm_std
+                << "`, csv=`" << metric.compare_csv_path << "`\n";
+        }
+    }
+
+    if (!summary.missing_reference_files.empty()) {
+        out << "\n## Missing Reference Files\n";
+        for (const auto& path : summary.missing_reference_files) out << "- `" << path << "`\n";
+    }
+}
+
+bool FinalMetricsWithinThreshold(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
+    return summary.final_pressure_cell_l2_norm <= cfg.pressure_l2_threshold &&
+           summary.final_pressure_cell_linf_norm <= cfg.pressure_linf_threshold &&
+           summary.final_temperature_horizontal_l2_norm <= cfg.temperature_l2_threshold &&
+           summary.final_temperature_horizontal_linf_norm <= cfg.temperature_linf_threshold &&
+           summary.final_monitor_temperature_l2_norm <= cfg.temperature_l2_threshold &&
+           summary.final_monitor_temperature_linf_norm <= cfg.temperature_linf_threshold &&
+           summary.final_pressure_vertical_uniformity_norm_std <= cfg.vertical_uniformity_threshold &&
+           summary.final_temperature_vertical_uniformity_norm_std <= cfg.vertical_uniformity_threshold;
+}
 
 FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {
     FIM_Engine::TransientSolverParams p;
@@ -271,26 +1799,21 @@ FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {
     p.dt_min = cfg.dt_min;
     p.dt_max = cfg.dt_max;
     p.target_end_time_s = cfg.target_end_time_s;
-
     p.max_newton_iter = cfg.max_newton_iter;
     p.abs_res_tol = cfg.abs_res_tol;
     p.rel_res_tol = cfg.rel_res_tol;
     p.rel_update_tol = cfg.rel_update_tol;
-
     p.lin_solver = cfg.lin_solver;
     p.amgcl_use_fallback_sparselu = cfg.amgcl_use_fallback_sparselu;
     p.amgcl_tol = cfg.amgcl_tol;
     p.amgcl_maxiter = cfg.amgcl_maxiter;
-
     p.enable_non_orthogonal_correction = cfg.enable_non_orthogonal_correction;
     p.enable_row_scaling = cfg.enable_row_scaling;
-
     p.max_dP = cfg.max_dP;
     p.max_dT = cfg.max_dT;
     p.max_dSw = 0.1;
     p.min_alpha = 1.0e-8;
     p.enable_armijo_line_search = cfg.enable_armijo_line_search;
-
     p.rollback_shrink_factor = cfg.rollback_shrink_factor;
     p.dt_relres_grow_factor = cfg.dt_relres_grow_factor;
     p.gravity_vector = cfg.gravity_vector;
@@ -298,35 +1821,56 @@ FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {
     return p;
 }
 
-TestCasePlan BuildDefaultPlan() {
-    TestCasePlan plan;
-    plan.plan_key = "h_t_co2_constpp_nofrac_nowell";
-    return plan;
-}
+CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& outputDirOverride) {
+    CaseRunArtifacts artifacts;
+    artifacts.summary.case_dir = outputDirOverride.empty()
+        ? (cfg.output_base_dir + "/" + cfg.sub_dir + "/" + cfg.case_name)
+        : outputDirOverride;
+    artifacts.summary.engineering_dir = artifacts.summary.case_dir + "/engineering";
+    artifacts.summary.reference_dir = artifacts.summary.case_dir + "/reference";
+    artifacts.summary.analytic_dir = artifacts.summary.reference_dir + "/analytic";
+    artifacts.summary.comsol_input_dir = artifacts.summary.reference_dir + "/comsol_input";
+    artifacts.summary.comsol_output_dir = artifacts.summary.reference_dir + "/comsol";
+    artifacts.summary.report_dir = artifacts.summary.case_dir + "/report";
+    EnsureDirRecursive(artifacts.summary.case_dir);
+    EnsureDirRecursive(artifacts.summary.engineering_dir);
+    EnsureDirRecursive(artifacts.summary.reference_dir);
+    EnsureDirRecursive(artifacts.summary.analytic_dir);
+    EnsureDirRecursive(artifacts.summary.comsol_input_dir);
+    EnsureDirRecursive(artifacts.summary.comsol_output_dir);
+    EnsureDirRecursive(artifacts.summary.report_dir);
 
-using BuilderFn = TestCasePlan(*)();
+    artifacts.summary.convergence_log_path = artifacts.summary.case_dir + "/convergence.log";
+    artifacts.summary.run_log_path = artifacts.summary.case_dir + "/run.log";
+    artifacts.summary.metrics_csv_path = artifacts.summary.case_dir + "/metrics.csv";
+    artifacts.summary.validation_summary_path = artifacts.summary.report_dir + "/validation_summary.md";
+    artifacts.summary.validation_summary_csv_path = artifacts.summary.case_dir + "/validation_summary.csv";
+    artifacts.summary.reference_spec_path = artifacts.summary.engineering_dir + "/reference_spec.md";
+    artifacts.summary.analytical_note_path = artifacts.summary.analytic_dir + "/pressure_analytical_note.md";
+    artifacts.summary.comsol_reference_spec_path = artifacts.summary.reference_dir + "/comsol_reference_spec.md";
+    artifacts.summary.property_table_path = artifacts.summary.engineering_dir + "/property_table.csv";
+    artifacts.summary.comsol_property_table_path = artifacts.summary.comsol_input_dir + "/property_table.csv";
+    artifacts.summary.profile_station_definitions_path = artifacts.summary.engineering_dir + "/profile_station_definitions.csv";
+    artifacts.summary.monitor_point_definitions_path = artifacts.summary.engineering_dir + "/monitor_point_definitions.csv";
+    artifacts.summary.profile_schedule_path = artifacts.summary.engineering_dir + "/profile_report_schedule.csv";
+    artifacts.summary.monitor_schedule_path = artifacts.summary.engineering_dir + "/monitor_sample_schedule.csv";
+    artifacts.summary.eng_monitor_timeseries_path = artifacts.summary.engineering_dir + "/eng_monitor_timeseries.csv";
+    artifacts.summary.grid_convergence_csv_path = artifacts.summary.case_dir + "/grid_convergence.csv";
+    artifacts.summary.time_sensitivity_csv_path = artifacts.summary.case_dir + "/time_sensitivity.csv";
+    artifacts.summary.nx = cfg.nx;
+    artifacts.summary.ny = cfg.ny;
 
-const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
-    static const std::unordered_map<std::string, BuilderFn> registry = {
-        {"h_t_co2_constpp_nofrac_nowell", &BuildDefaultPlan}
-    };
-    return registry;
-}
-
-TestCaseSummary RunCase(const TestCaseSpec& cfg) {
-    TestCaseSummary summary;
-
-    summary.case_dir = cfg.output_base_dir + "/" + cfg.sub_dir + "/" + cfg.case_name;
-    EnsureDirRecursive(summary.case_dir);
-    summary.convergence_log_path = summary.case_dir + "/convergence.log";
-    summary.metrics_csv_path = summary.case_dir + "/metrics.csv";
-    summary.nx = cfg.nx;
-    summary.ny = cfg.ny;
-
-    std::ofstream convergenceLog(summary.convergence_log_path, std::ios::out | std::ios::trunc);
+    std::ofstream convergenceLog(artifacts.summary.convergence_log_path.c_str(), std::ios::out | std::ios::trunc);
     if (!convergenceLog.good()) {
-        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to open convergence log: " + summary.convergence_log_path);
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to open convergence log: " + artifacts.summary.convergence_log_path);
     }
+    std::ofstream runLog(artifacts.summary.run_log_path.c_str(), std::ios::out | std::ios::trunc);
+    if (!runLog.good()) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to open run log: " + artifacts.summary.run_log_path);
+    }
+    runLog << "case=" << cfg.case_name << "\n";
+    runLog << "reference_mode=" << artifacts.summary.resolved_reference_mode << "\n";
+    runLog << "output_dir=" << artifacts.summary.case_dir << "\n";
 
     MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
     mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
@@ -337,12 +1881,15 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     FieldManager_2D fm;
     FIM_CaseKit::InitFieldManager(mgr, fm);
 
-    const size_t nCells = mgr.mesh().getCells().size();
+    const std::size_t nCells = mgr.mesh().getCells().size();
     const int totalBlocks = mgr.getTotalDOFCount();
-    if (nCells == 0) {
-        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] matrix cell count is zero");
-    }
-    summary.n_cells = static_cast<int>(nCells);
+    if (nCells == 0) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] matrix cell count is zero");
+    artifacts.summary.n_cells = static_cast<int>(nCells);
+
+    artifacts.profile_stations = BuildProfileStations(mgr, cfg);
+    artifacts.monitor_points = BuildMonitorPoints(mgr, cfg);
+    artifacts.snapshots = BuildSnapshots(cfg);
+    artifacts.monitor_schedule = BuildMonitorSchedule(cfg);
 
     FIM_Engine::InitialConditions ic;
     ic.P_init = cfg.p_init;
@@ -368,20 +1915,32 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     VTKBoundaryVisualizationContext bcVizCtx;
     bcVizCtx.water_family_policy = VTKBCWaterFamilyDerivePolicy::FollowPrimaryFluid;
     bcVizCtx.primary_fluid_model = VTKBCPrimaryFluidModel::CO2;
-    bcVizCtx.bindings.push_back(
-        VTKBCVariableBinding{ pEqCfg.pressure_field, &bcP, VTKBCTransportKind::Pressure });
-    bcVizCtx.bindings.push_back(
-        VTKBCVariableBinding{ tEqCfg.temperatue_field, &bcT, VTKBCTransportKind::Temperature });
+    bcVizCtx.bindings.push_back(VTKBCVariableBinding{pEqCfg.pressure_field, &bcP, VTKBCTransportKind::Pressure});
+    bcVizCtx.bindings.push_back(VTKBCVariableBinding{tEqCfg.temperatue_field, &bcT, VTKBCTransportKind::Temperature});
 
     std::vector<double> pBlocksLatest(static_cast<std::size_t>(std::max(totalBlocks, 0)), cfg.p_init);
     std::vector<double> tBlocksLatest(static_cast<std::size_t>(std::max(totalBlocks, 0)), cfg.t_init);
     SyncPTFieldsToFM(mgr, fm, pBlocksLatest, tBlocksLatest, cfg.p_init, cfg.t_init);
-    PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(summary.case_dir + "/initial.vtk", 0.0);
+    if (cfg.export_vtk) {
+        PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/initial.vtk", 0.0);
+    }
+
+    for (auto& sample : artifacts.monitor_schedule) {
+        if (sample.target_time_s <= kPendingTimeTolerance) {
+            sample.captured = true;
+            sample.actual_time_s = 0.0;
+            sample.p_blocks = pBlocksLatest;
+            sample.t_blocks = tBlocksLatest;
+        }
+    }
 
     bool midExported = false;
     int iterSum = 0;
     int iterCount = 0;
     int maxIters = 0;
+    double prevAcceptedTime = 0.0;
+    std::vector<double> prevAcceptedPBlocks = pBlocksLatest;
+    std::vector<double> prevAcceptedTBlocks = tBlocksLatest;
 
     FIM_Engine::TransientOptionalModules<MeshManager, FieldManager_2D> modules;
     modules.pressure_bc = &bcP;
@@ -399,6 +1958,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     modules.property_initializer = [&cfg](MeshManager&, FieldManager_2D& fld) {
         const auto rock = PhysicalProperties_string_op::Rock();
         const auto frac = PhysicalProperties_string_op::Fracture_string();
+        const auto gas = PhysicalProperties_string_op::CO2();
         const auto water = PhysicalProperties_string_op::Water();
 
         ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.k_xx_tag, cfg.matrix_perm), cfg.matrix_perm);
@@ -406,15 +1966,17 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
         ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.k_zz_tag, cfg.matrix_perm), cfg.matrix_perm);
         ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.phi_tag, cfg.matrix_phi), cfg.matrix_phi);
         ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.c_r_tag, cfg.matrix_ct), cfg.matrix_ct);
-        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.rho_tag, 2600.0), 2600.0);
-        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.cp_tag, 1000.0), 1000.0);
-        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.lambda_tag, 2.0), 2.0);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.rho_tag, cfg.matrix_rho_r), cfg.matrix_rho_r);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.cp_tag, cfg.matrix_cp_r), cfg.matrix_cp_r);
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(rock.lambda_tag, cfg.matrix_lambda_r), cfg.matrix_lambda_r);
 
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.k_t_tag, cfg.matrix_perm), cfg.matrix_perm);
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.k_n_tag, cfg.matrix_perm), cfg.matrix_perm);
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.phi_tag, cfg.matrix_phi), cfg.matrix_phi);
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(frac.c_r_tag, cfg.matrix_ct), cfg.matrix_ct);
 
+        ApplyUniformScalarField(fld.getOrCreateMatrixScalar(gas.k_tag, cfg.co2_k_const), cfg.co2_k_const);
+        ApplyUniformScalarField(fld.getOrCreateFractureScalar(gas.k_tag, cfg.co2_k_const), cfg.co2_k_const);
         ApplyUniformScalarField(fld.getOrCreateMatrixScalar(water.k_tag, cfg.co2_k_const), cfg.co2_k_const);
         ApplyUniformScalarField(fld.getOrCreateFractureScalar(water.k_tag, cfg.co2_k_const), cfg.co2_k_const);
     };
@@ -425,14 +1987,13 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
             const std::vector<double>& pVec, const std::vector<double>& tVec,
             const std::vector<double>*) {
             if (step <= 0) return;
-
             if (!pVec.empty()) pBlocksLatest = pVec;
             if (!tVec.empty()) tBlocksLatest = tVec;
             SyncPTFieldsToFM(mgr, fm, pBlocksLatest, tBlocksLatest, cfg.p_init, cfg.t_init);
 
-            summary.steps = step;
-            summary.t_end = timeS;
-            summary.total_rollbacks = totalRollbacks;
+            artifacts.summary.steps = step;
+            artifacts.summary.t_end = timeS;
+            artifacts.summary.total_rollbacks = totalRollbacks;
             iterSum += newtonIters;
             iterCount += 1;
             maxIters = std::max(maxIters, newtonIters);
@@ -444,121 +2005,480 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
                            << " rollbacks=" << totalRollbacks
                            << " mode=" << convergeMode << "\n";
 
-            if (!midExported && timeS >= 0.5 * cfg.target_end_time_s - 1.0e-12) {
-                PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(summary.case_dir + "/mid.vtk", timeS);
+            for (auto& snapshot : artifacts.snapshots) {
+                CaptureSnapshotIfCrossed(
+                    prevAcceptedTime, prevAcceptedPBlocks, prevAcceptedTBlocks,
+                    timeS, pBlocksLatest, tBlocksLatest, snapshot);
+            }
+            for (auto& sample : artifacts.monitor_schedule) {
+                CaptureMonitorIfCrossed(
+                    prevAcceptedTime, prevAcceptedPBlocks, prevAcceptedTBlocks,
+                    timeS, pBlocksLatest, tBlocksLatest, sample);
+            }
+            prevAcceptedTime = timeS;
+            prevAcceptedPBlocks = pBlocksLatest;
+            prevAcceptedTBlocks = tBlocksLatest;
+
+            if (cfg.export_vtk && !midExported && timeS >= 0.5 * cfg.target_end_time_s - 1.0e-12) {
+                PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/mid.vtk", timeS);
                 midExported = true;
             }
         };
 
     const auto params = BuildSolverParams(cfg);
-    FIM_Engine::RunGenericFIMTransient<2>(
-        cfg.case_name,
-        mgr,
-        fm,
-        ic,
-        {},
-        params,
-        FIM_Engine::SolverRoute::FIM,
-        modules);
+    FIM_Engine::RunGenericFIMTransient<2>(cfg.case_name, mgr, fm, ic, {}, params, FIM_Engine::SolverRoute::FIM, modules);
 
     SyncPTFieldsToFM(mgr, fm, pBlocksLatest, tBlocksLatest, cfg.p_init, cfg.t_init);
-    if (!midExported) {
-        PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(summary.case_dir + "/mid.vtk", summary.t_end);
+    if (cfg.export_vtk) {
+        if (!midExported) PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/mid.vtk", artifacts.summary.t_end);
+        PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(artifacts.summary.case_dir + "/final.vtk", artifacts.summary.t_end);
     }
-    PostProcess_2D(mgr, fm, &bcVizCtx).ExportVTK(summary.case_dir + "/final.vtk", summary.t_end);
 
-    summary.max_iters = maxIters;
-    summary.avg_iters = (iterCount > 0) ? (static_cast<double>(iterSum) / static_cast<double>(iterCount)) : 0.0;
-    summary.h_char = ComputeMeshCharLength(mgr);
+    FinalizeMissingSnapshots(artifacts.summary.t_end, pBlocksLatest, tBlocksLatest, artifacts.snapshots);
+    FinalizeMissingMonitorSamples(artifacts.summary.t_end, pBlocksLatest, tBlocksLatest, artifacts.monitor_schedule);
 
-    std::vector<double> pFinal;
-    std::vector<double> tFinal;
-    auto pFinalField = fm.getMatrixScalar(pEqCfg.pressure_field);
-    auto tFinalField = fm.getMatrixScalar(tEqCfg.temperatue_field);
-    if (pFinalField) pFinal = pFinalField->data;
-    if (tFinalField) tFinal = tFinalField->data;
+    artifacts.summary.max_iters = maxIters;
+    artifacts.summary.avg_iters = (iterCount > 0) ? (static_cast<double>(iterSum) / static_cast<double>(iterCount)) : 0.0;
+    artifacts.summary.h_char = ComputeMeshCharLength(mgr);
 
-    const double xSplit = 0.5 * cfg.lx;
-    const auto pLR = ComputeLeftRightAverage(mgr, pFinal, xSplit);
-    const auto tLR = ComputeLeftRightAverage(mgr, tFinal, xSplit);
-    if (pLR.valid) {
-        summary.p_left_avg = pLR.left_avg;
-        summary.p_right_avg = pLR.right_avg;
-        summary.p_left_count = pLR.left_count;
-        summary.p_right_count = pLR.right_count;
+    runLog << "n_cells=" << artifacts.summary.n_cells << "\n";
+    runLog << "steps=" << artifacts.summary.steps << "\n";
+    runLog << "t_end=" << artifacts.summary.t_end << "\n";
+
+    for (const auto& snapshot : artifacts.snapshots) {
+        artifacts.summary.pressure_cell_metrics.push_back(EvaluatePressureCellMetrics(
+            mgr,
+            snapshot,
+            cfg,
+            artifacts.summary.analytic_dir + "/pressure_cells_" + snapshot.tag + ".csv",
+            cfg.emit_detailed_outputs));
     }
-    if (tLR.valid) {
-        summary.t_left_avg = tLR.left_avg;
-        summary.t_right_avg = tLR.right_avg;
-        summary.t_left_count = tLR.left_count;
-        summary.t_right_count = tLR.right_count;
+
+    artifacts.sampled_profile_points.clear();
+    for (const auto& snapshot : artifacts.snapshots) {
+        const std::vector<ReconstructedSpatialPointSample> sampled =
+            BuildReconstructedSamples(
+                mgr,
+                artifacts.profile_stations,
+                snapshot.p_blocks,
+                snapshot.t_blocks,
+                snapshot.tag,
+                -1,
+                snapshot.target_time_s,
+                snapshot.actual_time_s,
+                cfg);
+        artifacts.sampled_profile_points.insert(
+            artifacts.sampled_profile_points.end(),
+            sampled.begin(),
+            sampled.end());
     }
-    summary.p_lr_pass = (pLR.valid && pLR.left_avg > pLR.right_avg) ? 1 : 0;
-    summary.t_lr_pass = (tLR.valid && tLR.left_avg > tLR.right_avg) ? 1 : 0;
 
-    summary.max_abs_dp = ComputeMaxAbsDelta(pFinal, cfg.p_init);
-    summary.max_abs_dt = ComputeMaxAbsDelta(tFinal, cfg.t_init);
-    summary.p_evolution_pass = (summary.max_abs_dp >= cfg.min_max_abs_dp_for_evolution) ? 1 : 0;
-    summary.t_evolution_pass = (summary.max_abs_dt >= cfg.min_max_abs_dt_for_evolution) ? 1 : 0;
-    summary.physics_checks_pass = (summary.p_lr_pass && summary.t_lr_pass &&
-                                   summary.p_evolution_pass && summary.t_evolution_pass) ? 1 : 0;
+    artifacts.sampled_monitor_points.clear();
+    for (const auto& sample : artifacts.monitor_schedule) {
+        const std::vector<ReconstructedSpatialPointSample> sampled =
+            BuildReconstructedSamples(
+                mgr,
+                artifacts.monitor_points,
+                sample.p_blocks,
+                sample.t_blocks,
+                "monitor",
+                sample.sample_id,
+                sample.target_time_s,
+                sample.actual_time_s,
+                cfg);
+        artifacts.sampled_monitor_points.insert(
+            artifacts.sampled_monitor_points.end(),
+            sampled.begin(),
+            sampled.end());
+    }
 
-    std::ofstream metrics(summary.metrics_csv_path, std::ios::out | std::ios::trunc);
-    metrics << "case_name,nx,ny,n_cells,h_char,t_end,steps,total_rollbacks,"
-               "avg_nonlinear_iters,max_nonlinear_iters,"
-               "dt_init,dt_min,dt_max,property_mode,solver_route,"
-               "p_left_avg,p_right_avg,p_left_count,p_right_count,p_lr_pass,"
-               "t_left_avg,t_right_avg,t_left_count,t_right_count,t_lr_pass,"
-               "max_abs_dp,max_abs_dt,dp_evolution_threshold,dt_evolution_threshold,"
-               "p_evolution_pass,t_evolution_pass,physics_checks_pass\n";
+    if (cfg.emit_detailed_outputs) {
+        WriteProfileStationDefinitions(artifacts.profile_stations, artifacts.summary.profile_station_definitions_path);
+        WriteMonitorPointDefinitions(artifacts.monitor_points, artifacts.summary.monitor_point_definitions_path);
+        WriteProfileSchedule(artifacts.snapshots, artifacts.summary.profile_schedule_path);
+        WriteMonitorSchedule(artifacts.monitor_schedule, artifacts.summary.monitor_schedule_path);
+        for (const auto& snapshot : artifacts.snapshots) {
+            for (const std::string& family : OrderedProfileFamilies()) {
+                WriteEngineeringProfileCsv(
+                    artifacts.profile_stations,
+                    family,
+                    snapshot,
+                    artifacts.summary.engineering_dir + "/eng_profile_" + family + "_" + snapshot.tag + ".csv");
+                WriteAnalyticalProfileReferenceCsv(
+                    artifacts.profile_stations,
+                    snapshot,
+                    cfg,
+                    family,
+                    artifacts.summary.analytic_dir + "/pressure_profile_" + family + "_" + snapshot.tag + ".csv");
+            }
+        }
+        WriteEngineeringMonitorCsv(artifacts.monitor_points, artifacts.monitor_schedule, artifacts.summary.eng_monitor_timeseries_path);
+        WriteAnalyticalMonitorReferenceCsv(
+            artifacts.monitor_points,
+            artifacts.monitor_schedule,
+            cfg,
+            artifacts.summary.analytic_dir + "/pressure_monitor_timeseries.csv");
+        WritePropertyTables(cfg, artifacts.summary.property_table_path, artifacts.summary.comsol_property_table_path);
+        WriteReferenceSpec(cfg, artifacts.summary);
+        WriteAnalyticalNote(cfg, artifacts.summary.analytical_note_path);
+        WriteComsolReferenceSpec(cfg, artifacts.summary.case_dir, artifacts.summary.comsol_reference_spec_path);
+    }
 
-    metrics << cfg.case_name << ","
-            << cfg.nx << ","
-            << cfg.ny << ","
-            << nCells << ","
-            << std::setprecision(12) << summary.h_char << ","
-            << summary.t_end << ","
-            << summary.steps << ","
-            << summary.total_rollbacks << ","
-            << summary.avg_iters << ","
-            << summary.max_iters << ","
-            << cfg.dt_init << ","
-            << cfg.dt_min << ","
-            << cfg.dt_max << ","
-            << "ConstantSinglePhaseCO2" << ","
-            << "RunGenericFIMTransient<2>" << ","
-            << std::scientific << std::setprecision(8)
-            << summary.p_left_avg << ","
-            << summary.p_right_avg << ","
-            << summary.p_left_count << ","
-            << summary.p_right_count << ","
-            << summary.p_lr_pass << ","
-            << summary.t_left_avg << ","
-            << summary.t_right_avg << ","
-            << summary.t_left_count << ","
-            << summary.t_right_count << ","
-            << summary.t_lr_pass << ","
-            << summary.max_abs_dp << ","
-            << summary.max_abs_dt << ","
-            << cfg.min_max_abs_dp_for_evolution << ","
-            << cfg.min_max_abs_dt_for_evolution << ","
-            << summary.p_evolution_pass << ","
-            << summary.t_evolution_pass << ","
-            << summary.physics_checks_pass << "\n";
+    if (!artifacts.summary.pressure_cell_metrics.empty()) {
+        const PressureCellMetrics& finalMetric = artifacts.summary.pressure_cell_metrics.back();
+        artifacts.summary.final_pressure_cell_l1_norm = finalMetric.pressure.l1_norm;
+        artifacts.summary.final_pressure_cell_l2_norm = finalMetric.pressure.l2_norm;
+        artifacts.summary.final_pressure_cell_linf_norm = finalMetric.pressure.linf_norm;
+    }
 
+    if (!artifacts.snapshots.empty()) {
+        const SnapshotState& finalSnapshot = artifacts.snapshots.back();
+        const std::vector<SpatialSamplePoint> horizontalStations =
+            FilterStationsByFamily(artifacts.profile_stations, kFamilyMatrixHorizontal);
+        const std::vector<SpatialSamplePoint> verticalStations =
+            FilterStationsByFamily(artifacts.profile_stations, kFamilyMatrixVerticalMidline);
+
+        double pHAbsSum = 0.0;
+        double pHSumSq = 0.0;
+        double pHMaxAbs = 0.0;
+        for (const auto& station : horizontalStations) {
+            const double pNum = finalSnapshot.p_blocks[static_cast<std::size_t>(station.block_id)];
+            const double pRef = EvaluateAnalyticalPressure(cfg, station.actual_x, finalSnapshot.actual_time_s);
+            const double absErr = std::abs(pNum - pRef);
+            pHAbsSum += absErr;
+            pHSumSq += absErr * absErr;
+            pHMaxAbs = std::max(pHMaxAbs, absErr);
+        }
+        const FieldErrorMetrics horizontalPMetrics = BuildErrorMetrics(
+            pHAbsSum, pHSumSq, pHMaxAbs, static_cast<int>(horizontalStations.size()), PressureScale(cfg));
+        artifacts.summary.final_pressure_horizontal_l2_norm = horizontalPMetrics.l2_norm;
+        artifacts.summary.final_pressure_horizontal_linf_norm = horizontalPMetrics.linf_norm;
+
+        std::vector<double> verticalPValues;
+        for (const auto& station : verticalStations) {
+            verticalPValues.push_back(finalSnapshot.p_blocks[static_cast<std::size_t>(station.block_id)]);
+        }
+        artifacts.summary.final_pressure_vertical_uniformity_norm_std =
+            ComputeNormalizedStd(verticalPValues, PressureScale(cfg));
+    }
+
+    return artifacts;
+}
+
+TestCaseSummary RunCase(const TestCaseSpec& cfg) {
+    CaseRunArtifacts mainArtifacts = RunSingleCaseCore(cfg, "");
+    TestCaseSummary& summary = mainArtifacts.summary;
+
+    const bool readyBefore = ReferenceFilesReady(summary, mainArtifacts.snapshots);
+    if (!readyBefore && cfg.allow_full_workflow_comsol_autorun) {
+        try {
+            InvokeComsolReferenceGeneration(cfg, summary);
+            ReferenceFilesReady(summary, mainArtifacts.snapshots);
+        } catch (const std::exception& ex) {
+            std::ofstream runLog(summary.run_log_path.c_str(), std::ios::out | std::ios::app);
+            if (runLog.good()) runLog << "comsol_autorun_error=" << ex.what() << "\n";
+        }
+    }
+
+    if (!summary.reference_ready) {
+        summary.validation_status = "missing_reference";
+        summary.validation_performed = false;
+        summary.validation_passed = false;
+        WriteValidationSummary(cfg, summary);
+        WriteValidationSummaryCsv(cfg, summary);
+        WriteMetricsCsv(cfg, summary);
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] COMSOL temperature reference files are missing.");
+    }
+
+    summary.comsol_representation = ExtractComsolRepresentation(summary.comsol_output_dir + "/comsol_run_summary.md");
+    if (summary.comsol_representation.empty()) summary.comsol_representation = kComsolRepresentationMatrixOnly;
+    summary.comsol_fine_check_skipped =
+        ComsolFineCheckWasSkipped(summary.comsol_output_dir + "/comsol_reference_mesh_check.txt");
+
+    const MonitorReferenceSeries monitorReference =
+        LoadMonitorReference(summary.comsol_output_dir + "/comsol_monitor_timeseries.csv", mainArtifacts.monitor_points);
+
+    const SnapshotState* finalSnapshot = mainArtifacts.snapshots.empty() ? nullptr : &mainArtifacts.snapshots.back();
+    if (!finalSnapshot) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] no engineering snapshots available.");
+    }
+
+    summary.report_metrics.clear();
+    for (const auto& snapshot : mainArtifacts.snapshots) {
+        for (const std::string& family : OrderedProfileFamilies()) {
+            const std::vector<ReconstructedSpatialPointSample> sampledProfileRows =
+                FilterReconstructedSamples(mainArtifacts.sampled_profile_points, family, snapshot.tag);
+            const ProfileReferenceTable reference = LoadProfileReference(
+                summary.comsol_output_dir + "/comsol_profile_" + family + "_" + snapshot.tag + ".csv");
+            const std::string comparePath = summary.case_dir + "/compare_profile_" + family + "_" + snapshot.tag + ".csv";
+            summary.report_metrics.push_back(EvaluateProfileAgainstReference(
+                sampledProfileRows,
+                reference,
+                cfg,
+                comparePath,
+                cfg.emit_detailed_outputs));
+        }
+    }
+
+    summary.final_temperature_horizontal_l2_norm = std::numeric_limits<double>::quiet_NaN();
+    summary.final_temperature_horizontal_linf_norm = std::numeric_limits<double>::quiet_NaN();
+    summary.final_temperature_vertical_uniformity_norm_std = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& metric : summary.report_metrics) {
+        if (metric.tag != finalSnapshot->tag) continue;
+        if (metric.family == kFamilyMatrixHorizontal) {
+            summary.final_pressure_horizontal_l2_norm = metric.pressure.l2_norm;
+            summary.final_pressure_horizontal_linf_norm = metric.pressure.linf_norm;
+            summary.final_temperature_horizontal_l2_norm = metric.temperature.l2_norm;
+            summary.final_temperature_horizontal_linf_norm = metric.temperature.linf_norm;
+        } else if (metric.family == kFamilyMatrixVerticalMidline) {
+            summary.final_pressure_vertical_uniformity_norm_std = metric.pressure_uniformity_norm_std;
+            summary.final_temperature_vertical_uniformity_norm_std = metric.temperature_uniformity_norm_std;
+        }
+    }
+
+    const std::pair<FieldErrorMetrics, FieldErrorMetrics> monitorMetrics = WriteMonitorCompareCsv(
+        mainArtifacts.monitor_points,
+        mainArtifacts.sampled_monitor_points,
+        monitorReference,
+        cfg,
+        summary.case_dir + "/compare_monitor_timeseries.csv");
+    summary.final_monitor_pressure_l2_norm = monitorMetrics.first.l2_norm;
+    summary.final_monitor_pressure_linf_norm = monitorMetrics.first.linf_norm;
+    summary.final_monitor_temperature_l2_norm = monitorMetrics.second.l2_norm;
+    summary.final_monitor_temperature_linf_norm = monitorMetrics.second.linf_norm;
+
+    std::vector<SweepStudyRow> gridRows;
+    std::vector<SweepStudyRow> timeRows;
+
+    if (cfg.enable_grid_convergence_study) {
+        for (const auto& gridCase : cfg.grid_sweep_cases) {
+            TestCaseSpec sweepCfg = cfg;
+            sweepCfg.nx = gridCase.first;
+            sweepCfg.ny = gridCase.second;
+            sweepCfg.case_name = cfg.case_name + "_grid_" + std::to_string(sweepCfg.nx) + "x" + std::to_string(sweepCfg.ny);
+            sweepCfg.enable_grid_convergence_study = false;
+            sweepCfg.enable_time_sensitivity_study = false;
+            sweepCfg.export_vtk = false;
+            sweepCfg.emit_detailed_outputs = false;
+
+            CaseRunArtifacts sweepArtifacts = RunSingleCaseCore(
+                sweepCfg,
+                summary.case_dir + "/studies/grid_" + std::to_string(sweepCfg.nx) + "x" + std::to_string(sweepCfg.ny));
+
+            SweepStudyRow row;
+            row.label = "grid_" + std::to_string(sweepCfg.nx) + "x" + std::to_string(sweepCfg.ny);
+            row.case_dir = sweepArtifacts.summary.case_dir;
+            row.nx = sweepCfg.nx;
+            row.ny = sweepCfg.ny;
+            row.dt_init = sweepCfg.dt_init;
+            row.h_char = sweepArtifacts.summary.h_char;
+            row.t_end = sweepArtifacts.summary.t_end;
+            row.steps = sweepArtifacts.summary.steps;
+            row.pressure_cell_l2_norm = sweepArtifacts.summary.final_pressure_cell_l2_norm;
+            const std::vector<ReconstructedSpatialPointSample> horizontalSamples =
+                FilterReconstructedSamples(sweepArtifacts.sampled_profile_points, kFamilyMatrixHorizontal, finalSnapshot->tag);
+            const ProfileReferenceTable horizontalReference =
+                LoadProfileReference(summary.comsol_output_dir + "/comsol_profile_matrix_horizontal_" + finalSnapshot->tag + ".csv");
+            const ProfileCompareMetrics hMetric = EvaluateProfileAgainstReference(
+                FilterInteriorHorizontalSamples(horizontalSamples, sweepCfg),
+                FilterInteriorHorizontalReference(horizontalReference, sweepCfg),
+                sweepCfg,
+                "",
+                false);
+            const ProfileCompareMetrics vMetric = EvaluateProfileAgainstReference(
+                FilterReconstructedSamples(sweepArtifacts.sampled_profile_points, kFamilyMatrixVerticalMidline, finalSnapshot->tag),
+                LoadProfileReference(summary.comsol_output_dir + "/comsol_profile_matrix_vertical_midline_" + finalSnapshot->tag + ".csv"),
+                sweepCfg,
+                "",
+                false);
+            row.pressure_horizontal_l2_norm = hMetric.pressure.l2_norm;
+            row.pressure_vertical_uniformity_norm_std = vMetric.pressure_uniformity_norm_std;
+            row.temperature_horizontal_l2_norm = hMetric.temperature.l2_norm;
+            row.temperature_vertical_uniformity_norm_std = vMetric.temperature_uniformity_norm_std;
+            gridRows.push_back(row);
+        }
+        AnnotateObservedOrders(gridRows, true);
+        WriteStudyCsv(gridRows, summary.grid_convergence_csv_path, "grid");
+        std::vector<double> pressureErrors;
+        std::vector<double> temperatureErrors;
+        for (const auto& row : gridRows) {
+            pressureErrors.push_back(row.pressure_cell_l2_norm);
+            temperatureErrors.push_back(row.temperature_horizontal_l2_norm);
+        }
+        summary.grid_pressure_order_min = ComputeMinFiniteOrder(gridRows, true);
+        summary.grid_temperature_order_min = ComputeMinFiniteOrder(gridRows, false);
+        summary.grid_convergence_ok =
+            IsMonotonicNonIncreasingWithTol(pressureErrors, kGridTimeMonotoneAbsTol) &&
+            IsMonotonicNonIncreasingWithTol(temperatureErrors, kGridTimeMonotoneAbsTol) &&
+            std::isfinite(summary.grid_pressure_order_min) &&
+            std::isfinite(summary.grid_temperature_order_min) &&
+            summary.grid_pressure_order_min >= cfg.grid_pressure_order_threshold &&
+            summary.grid_temperature_order_min >= cfg.grid_temperature_order_threshold;
+    }
+
+    if (cfg.enable_time_sensitivity_study) {
+        const std::pair<int, int> finestGrid = GetFinestGridCase(cfg);
+        for (double dtInit : cfg.time_step_sweep) {
+            TestCaseSpec sweepCfg = cfg;
+            sweepCfg.nx = finestGrid.first;
+            sweepCfg.ny = finestGrid.second;
+            sweepCfg.dt_init = dtInit;
+            sweepCfg.case_name = cfg.case_name + "_dt_" + std::to_string(static_cast<int>(std::round(dtInit))) + "s";
+            sweepCfg.enable_grid_convergence_study = false;
+            sweepCfg.enable_time_sensitivity_study = false;
+            sweepCfg.export_vtk = false;
+            sweepCfg.emit_detailed_outputs = false;
+
+            CaseRunArtifacts sweepArtifacts = RunSingleCaseCore(
+                sweepCfg,
+                summary.case_dir + "/studies/dt_" + std::to_string(static_cast<int>(std::round(dtInit))) + "s");
+
+            SweepStudyRow row;
+            row.label = "dt_" + std::to_string(static_cast<int>(std::round(dtInit))) + "s";
+            row.case_dir = sweepArtifacts.summary.case_dir;
+            row.nx = sweepCfg.nx;
+            row.ny = sweepCfg.ny;
+            row.dt_init = dtInit;
+            row.h_char = sweepArtifacts.summary.h_char;
+            row.t_end = sweepArtifacts.summary.t_end;
+            row.steps = sweepArtifacts.summary.steps;
+            row.pressure_cell_l2_norm = sweepArtifacts.summary.final_pressure_cell_l2_norm;
+            const std::vector<ReconstructedSpatialPointSample> horizontalSamples =
+                FilterReconstructedSamples(sweepArtifacts.sampled_profile_points, kFamilyMatrixHorizontal, finalSnapshot->tag);
+            const ProfileReferenceTable horizontalReference =
+                LoadProfileReference(summary.comsol_output_dir + "/comsol_profile_matrix_horizontal_" + finalSnapshot->tag + ".csv");
+            const ProfileCompareMetrics hMetric = EvaluateProfileAgainstReference(
+                FilterInteriorHorizontalSamples(horizontalSamples, sweepCfg),
+                FilterInteriorHorizontalReference(horizontalReference, sweepCfg),
+                sweepCfg,
+                "",
+                false);
+            const ProfileCompareMetrics vMetric = EvaluateProfileAgainstReference(
+                FilterReconstructedSamples(sweepArtifacts.sampled_profile_points, kFamilyMatrixVerticalMidline, finalSnapshot->tag),
+                LoadProfileReference(summary.comsol_output_dir + "/comsol_profile_matrix_vertical_midline_" + finalSnapshot->tag + ".csv"),
+                sweepCfg,
+                "",
+                false);
+            row.pressure_horizontal_l2_norm = hMetric.pressure.l2_norm;
+            row.pressure_vertical_uniformity_norm_std = vMetric.pressure_uniformity_norm_std;
+            row.temperature_horizontal_l2_norm = hMetric.temperature.l2_norm;
+            row.temperature_vertical_uniformity_norm_std = vMetric.temperature_uniformity_norm_std;
+            row.profile_samples = sweepArtifacts.sampled_profile_points;
+            timeRows.push_back(row);
+        }
+        auto finestIt = std::min_element(timeRows.begin(), timeRows.end(), [](const SweepStudyRow& a, const SweepStudyRow& b) {
+            return a.dt_init < b.dt_init;
+        });
+        if (finestIt == timeRows.end()) {
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] time sensitivity study produced no rows.");
+        }
+        for (auto& row : timeRows) {
+            if (std::abs(row.dt_init - finestIt->dt_init) <= 1.0e-12) {
+                row.pressure_time_self_l2_norm = 0.0;
+                row.temperature_time_self_l2_norm = 0.0;
+                continue;
+            }
+            const std::pair<FieldErrorMetrics, FieldErrorMetrics> selfMetrics =
+                EvaluateSelfConvergenceMetrics(row.profile_samples, finestIt->profile_samples, cfg);
+            row.pressure_time_self_l2_norm = selfMetrics.first.l2_norm;
+            row.temperature_time_self_l2_norm = selfMetrics.second.l2_norm;
+        }
+        AnnotateObservedOrders(timeRows, false);
+        WriteStudyCsv(timeRows, summary.time_sensitivity_csv_path, "time");
+        std::vector<double> pressureErrors;
+        std::vector<double> temperatureErrors;
+        for (const auto& row : timeRows) {
+            pressureErrors.push_back(row.pressure_time_self_l2_norm);
+            temperatureErrors.push_back(row.temperature_time_self_l2_norm);
+        }
+        summary.time_pressure_order_min = ComputeMinFiniteOrder(timeRows, true);
+        summary.time_temperature_order_min = ComputeMinFiniteOrder(timeRows, false);
+        summary.time_sensitivity_ok =
+            IsMonotonicNonIncreasingWithTol(pressureErrors, kGridTimeMonotoneAbsTol) &&
+            IsMonotonicNonIncreasingWithTol(temperatureErrors, kGridTimeMonotoneAbsTol) &&
+            std::isfinite(summary.time_pressure_order_min) &&
+            std::isfinite(summary.time_temperature_order_min) &&
+            summary.time_pressure_order_min >= cfg.time_pressure_order_threshold &&
+            summary.time_temperature_order_min >= cfg.time_temperature_order_threshold;
+    }
+
+    summary.validation_performed = true;
+    summary.validation_passed =
+        FinalMetricsWithinThreshold(cfg, summary) &&
+        (!cfg.enable_grid_convergence_study || summary.grid_convergence_ok) &&
+        (!cfg.enable_time_sensitivity_study || summary.time_sensitivity_ok);
+    summary.validation_status = summary.validation_passed ? "passed" : "failed";
+
+    WriteValidationSummary(cfg, summary);
+    WriteValidationSummaryCsv(cfg, summary);
+    WriteMetricsCsv(cfg, summary);
+
+    if (!summary.validation_passed) {
+        std::ostringstream oss;
+        oss << "[Test_H_T_CO2_ConstPP_NoFrac] validation failed: "
+            << "p_cell_l2=" << summary.final_pressure_cell_l2_norm
+            << ", p_cell_linf=" << summary.final_pressure_cell_linf_norm
+            << ", t_profile_l2=" << summary.final_temperature_horizontal_l2_norm
+            << ", t_profile_linf=" << summary.final_temperature_horizontal_linf_norm
+            << ", t_monitor_l2=" << summary.final_monitor_temperature_l2_norm
+            << ", t_monitor_linf=" << summary.final_monitor_temperature_linf_norm
+            << ", p_vertical_std=" << summary.final_pressure_vertical_uniformity_norm_std
+            << ", t_vertical_std=" << summary.final_temperature_vertical_uniformity_norm_std
+            << ", grid_ok=" << BoolString(summary.grid_convergence_ok)
+            << ", time_ok=" << BoolString(summary.time_sensitivity_ok);
+        throw std::runtime_error(oss.str());
+    }
     return summary;
 }
 
-void ExecutePlanByKey(const std::string& key) {
+TestCasePlan BuildDefaultPlan() {
+    TestCasePlan plan;
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell";
+    return plan;
+}
+
+TestCasePlan BuildGridPlan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_grid";
+    plan.spec.enable_grid_convergence_study = true;
+    return plan;
+}
+
+TestCasePlan BuildDtPlan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_dt";
+    plan.spec.enable_time_sensitivity_study = true;
+    return plan;
+}
+
+TestCasePlan BuildAllPlan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_constpp_nofrac_nowell_all";
+    plan.spec.enable_grid_convergence_study = true;
+    plan.spec.enable_time_sensitivity_study = true;
+    return plan;
+}
+
+using BuilderFn = TestCasePlan(*)();
+
+const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
+    static const std::unordered_map<std::string, BuilderFn> registry = {
+        {"h_t_co2_constpp_nofrac_nowell", &BuildDefaultPlan},
+        {"h_t_co2_constpp_nofrac_nowell_grid", &BuildGridPlan},
+        {"h_t_co2_constpp_nofrac_nowell_dt", &BuildDtPlan},
+        {"h_t_co2_constpp_nofrac_nowell_all", &BuildAllPlan}
+    };
+    return registry;
+}
+
+void ExecutePlanByKeyImpl(const std::string& key) {
     const auto& registry = GetRegistry();
-    auto it = registry.find(key);
+    const auto it = registry.find(key);
     if (it == registry.end()) {
         throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] unknown registry key: " + key);
     }
-
     const TestCasePlan plan = it->second();
     const TestCaseSummary summary = RunCase(plan.spec);
-
     std::cout << "\n============================================\n";
     std::cout << "[Test_H_T_CO2_ConstPP_NoFrac] run completed\n";
     std::cout << "  output_dir: " << summary.case_dir << "\n";
@@ -569,18 +2489,23 @@ void ExecutePlanByKey(const std::string& key) {
     std::cout << "  Newton iters: avg=" << std::fixed << std::setprecision(2) << summary.avg_iters
               << "  max=" << summary.max_iters << "\n";
     std::cout << "  final_time: " << std::scientific << std::setprecision(4) << summary.t_end << " s\n";
-    std::cout << "  checks: p_lr=" << summary.p_lr_pass
-              << " t_lr=" << summary.t_lr_pass
-              << " p_evo=" << summary.p_evolution_pass
-              << " t_evo=" << summary.t_evolution_pass
-              << " overall=" << summary.physics_checks_pass << "\n";
+    std::cout << "  validation_status: " << summary.validation_status << "\n";
+    std::cout << "  pressure cell L2/Linf: "
+              << summary.final_pressure_cell_l2_norm << " / " << summary.final_pressure_cell_linf_norm << "\n";
+    std::cout << "  temperature profile L2/Linf: "
+              << summary.final_temperature_horizontal_l2_norm << " / " << summary.final_temperature_horizontal_linf_norm << "\n";
+    std::cout << "  validation_summary: " << summary.validation_summary_path << "\n";
     std::cout << "============================================\n";
 }
 
 } // namespace
 
 void RunTestCase() {
-    ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell");
+    ExecutePlanByKeyImpl("h_t_co2_constpp_nofrac_nowell");
+}
+
+void ExecutePlanByKey(const std::string& key) {
+    ExecutePlanByKeyImpl(key);
 }
 
 } // namespace Test_H_T_CO2_ConstPP_NoFrac

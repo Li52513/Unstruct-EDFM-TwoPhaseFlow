@@ -89,9 +89,6 @@ public:
     
     ///裂缝段划分
     void subdivide(const vector<Cell>& meshCells, const unordered_map<int, Node>& meshNodes, DistanceMetric metric);
-
-    ///计算几何耦合系数 geomCI 和 geomAlpha
-    void computeGeometryCouplingCoefficientgeomCIandgeomAlpha();
     
     ///给定 param，定位它属于哪一段
     int locateSegment(double param) const; 

@@ -33,11 +33,17 @@ PostProcess_2D::PostProcess_2D(const MeshManager& meshMgr,
 }
 
 namespace {
+    constexpr double kLegacyVtkMissingScalar = 0.0;
+
     inline double SafeFieldValue(const std::shared_ptr<volScalarField>& field, int idx, double fallback) {
         if (!field) return fallback;
         if (idx < 0 || idx >= static_cast<int>(field->data.size())) return fallback;
         const double v = field->data[idx];
         return std::isfinite(v) ? v : fallback;
+    }
+
+    inline double SanitizeLegacyVtkScalar(double value, double fallback = kLegacyVtkMissingScalar) {
+        return std::isfinite(value) ? value : fallback;
     }
 
     struct VtkBCFieldCache2D {
@@ -252,6 +258,51 @@ namespace {
                 const int pIdx = it->second;
                 if (pIdx < 0 || pIdx >= static_cast<int>(outMatPointVals.size())) continue;
                 weighted_sum[pIdx] += area * phi_owner;
+                weighted_area[pIdx] += area;
+                outMask[pIdx] = 1;
+            }
+        }
+
+        for (size_t i = 0; i < outMatPointVals.size(); ++i) {
+            if (weighted_area[i] > 0.0) {
+                outMatPointVals[i] = weighted_sum[i] / weighted_area[i];
+            }
+        }
+    }
+
+    void BuildPrescribedDirichletBCPointField2D(const MeshManager& meshMgr,
+                                                const VTKBCVariableBinding& binding,
+                                                const std::unordered_map<int, int>& nodeID2Index,
+                                                std::vector<double>& outMatPointVals,
+                                                std::vector<int>& outMask,
+                                                double geom_floor,
+                                                double coeff_floor) {
+        // Legacy ASCII VTK readers do not reliably accept NaN tokens.
+        // Use a finite placeholder and pair it with *_bc_mask for exact support.
+        outMatPointVals.assign(outMatPointVals.size(), kLegacyVtkMissingScalar);
+        outMask.assign(outMask.size(), 0);
+        if (!binding.bc) return;
+
+        const auto& faces = meshMgr.mesh().getFaces();
+        std::vector<double> weighted_sum(outMatPointVals.size(), 0.0);
+        std::vector<double> weighted_area(outMatPointVals.size(), 0.0);
+
+        for (const auto& face : faces) {
+            if (!face.isBoundary()) continue;
+            if (!binding.bc->HasBC(face.physicalGroupId)) continue;
+            const auto bc = binding.bc->GetBCCoefficients(face.physicalGroupId, face.midpoint);
+            if (bc.type != BoundarySetting::BoundaryType::Dirichlet) continue;
+
+            double area = std::max(face.vectorE.Mag(), 0.0);
+            if (area <= coeff_floor) area = std::max(face.length, 0.0);
+            if (area <= geom_floor) continue;
+
+            for (int nodeId : face.FaceNodeIDs) {
+                auto it = nodeID2Index.find(nodeId);
+                if (it == nodeID2Index.end()) continue;
+                const int pIdx = it->second;
+                if (pIdx < 0 || pIdx >= static_cast<int>(outMatPointVals.size())) continue;
+                weighted_sum[pIdx] += area * bc.c;
                 weighted_area[pIdx] += area;
                 outMask[pIdx] = 1;
             }
@@ -748,14 +799,18 @@ void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
         out << "SCALARS " << name << " double 1\nLOOKUP_TABLE default\n";
         const auto it = pointFieldCache.find(name);
         if (it != pointFieldCache.end()) {
-            for (double v : it->second) out << v << "\n";
+            for (double v : it->second) out << SanitizeLegacyVtkScalar(v) << "\n";
         }
         else {
             for (size_t p = 0; p < totalNodes; ++p) out << "0.0\n";
         }
     }
 
-    // BC-aware point fields for all exported variables: "<field>_bc_point" (+ "<field>_bc_mask")
+    // BC-aware point fields:
+    //   "<field>_bc_prescribed_point"   raw Dirichlet values (finite placeholder on non-Dirichlet points)
+    //   "<field>_bc_reconstructed_point" boundary-aware reconstruction used by legacy viewers
+    //   "<field>_bc_point"               backward-compatible alias of reconstructed field
+    //   "<field>_bc_mask"
     if (bcVizCtx_ && !bcVizCtx_->bindings.empty()) {
         const auto pEqCfg = PhysicalProperties_string_op::PressureEquation_String::FIM();
         const auto tEqCfg = PhysicalProperties_string_op::TemperatureEquation_String::FIM();
@@ -841,12 +896,17 @@ void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
 
             std::vector<double> bcMatVals = baseMatVals;
             std::vector<int> bcMaskMat(numMatrixNodes, 0);
+            std::vector<double> prescribedMatVals(numMatrixNodes, kLegacyVtkMissingScalar);
+            std::vector<int> prescribedMaskMat(numMatrixNodes, 0);
 
             const auto* binding = bcVizCtx_->findBinding(name);
             auto matField = fieldMgr_.getMatrixScalar(name);
 
             if (binding && matField) {
                 ReconstructBCPointField2D(meshMgr_, fieldMgr_, matField, *bcVizCtx_, *binding, nodeID2Index, baseMatVals, bcMatVals, bcMaskMat);
+                BuildPrescribedDirichletBCPointField2D(
+                    meshMgr_, *binding, nodeID2Index, prescribedMatVals, prescribedMaskMat,
+                    bcVizCtx_->geom_floor, bcVizCtx_->coeff_floor);
             }
             else if (matField) {
                 bcMaskMat = boundaryUnionMask;
@@ -872,8 +932,19 @@ void PostProcess_2D::ExportVTK(const std::string& filename, double time) const
                 bcPointVals[i] = bcMatVals[i];
             }
 
+            std::vector<double> prescribedPointVals(totalNodes, kLegacyVtkMissingScalar);
+            for (size_t i = 0; i < std::min(numMatrixNodes, prescribedMatVals.size()); ++i) {
+                prescribedPointVals[i] = prescribedMatVals[i];
+            }
+
+            out << "SCALARS " << name << "_bc_prescribed_point double 1\nLOOKUP_TABLE default\n";
+            for (double v : prescribedPointVals) out << SanitizeLegacyVtkScalar(v) << "\n";
+
+            out << "SCALARS " << name << "_bc_reconstructed_point double 1\nLOOKUP_TABLE default\n";
+            for (double v : bcPointVals) out << SanitizeLegacyVtkScalar(v) << "\n";
+
             out << "SCALARS " << name << "_bc_point double 1\nLOOKUP_TABLE default\n";
-            for (double v : bcPointVals) out << v << "\n";
+            for (double v : bcPointVals) out << SanitizeLegacyVtkScalar(v) << "\n";
 
             if (bcVizCtx_->export_bc_mask) {
                 out << "SCALARS " << name << "_bc_mask int 1\nLOOKUP_TABLE default\n";

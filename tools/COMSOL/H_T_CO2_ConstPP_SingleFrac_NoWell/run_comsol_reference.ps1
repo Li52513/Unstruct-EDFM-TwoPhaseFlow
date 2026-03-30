@@ -72,6 +72,38 @@ function Assert-ExpectedOutputs {
     }
 }
 
+function Get-ReferenceRepresentation {
+    param([string]$SummaryPath)
+    if (-not (Test-Path $SummaryPath)) {
+        return $null
+    }
+    $match = Select-String -Path $SummaryPath -Pattern 'Fracture representation:\s*(.+)$' | Select-Object -First 1
+    if ($null -eq $match) {
+        return $null
+    }
+    return $match.Matches[0].Groups[1].Value.Trim()
+}
+
+function Archive-LegacySurrogateOutputs {
+    param([string]$ReferenceDirPath)
+
+    $summaryPath = Join-Path $ReferenceDirPath 'comsol_run_summary.md'
+    $representation = Get-ReferenceRepresentation -SummaryPath $summaryPath
+    if ([string]::IsNullOrWhiteSpace($representation) -or $representation -ne 'thin_band_fallback') {
+        return
+    }
+
+    $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    $legacyRoot = Join-Path (Split-Path -Parent $ReferenceDirPath) 'comsol_surrogate_legacy'
+    $archiveDir = Join-Path $legacyRoot $timestamp
+    New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null
+
+    $entries = Get-ChildItem -Path $ReferenceDirPath -Force
+    foreach ($entry in $entries) {
+        Move-Item -Force -Path $entry.FullName -Destination (Join-Path $archiveDir $entry.Name)
+    }
+}
+
 function Invoke-LoggedProcess {
     param(
         [string]$FilePath,
@@ -209,6 +241,12 @@ try {
         if (-not (Test-Path $javaSupportJar)) {
             Build-JavaSupportJar
         }
+        Archive-LegacySurrogateOutputs -ReferenceDirPath $referenceDir
+        Remove-Item (Join-Path $referenceDir 'comsol_java_stdout.log') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $referenceDir 'comsol_java_stderr.log') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $referenceDir 'comsol_java_error.log') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $referenceDir 'comsol_batch_stdout.log') -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $referenceDir 'comsol_batch_stderr.log') -ErrorAction SilentlyContinue
         $runtimeLayout = Resolve-ComsolRuntimeLayout
 
         if ($Runtime -eq 'DirectJava') {
