@@ -7,9 +7,12 @@
 - All template artifacts follow the five-directory contract: `studies/`, `figures/`, `engineering/`, `reference/`, `report/`.
 - COMSOL remains weakly coupled: templates emit/consume reference artifacts, while external Java/PowerShell automation executes COMSOL.
 - Well defaults are frozen as injector-rate + producer-BHP; two-phase well cases inject CO2; thermal well cases use cold injection.
+- Documentation follows a dual-file workflow:
+  - [A1_F12_TEMPLATE_SYSTEM_MEMORY.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_TEMPLATE_SYSTEM_MEMORY.md) stores long-lived decisions, the 72-case status snapshot, blockers, and next steps.
+  - [A1_F12_进度记录.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_进度记录.md) is the execution log of milestones, ordered steps, completion evidence, and recent updates.
 
 ## Current Phase
-- Phase: contract bootstrap + catalog wiring + first template wave retrofits
+- Phase: M1 contract freeze kickoff after M0 gates passed in isolated worktree `codex/a1-f12-exec`
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
@@ -20,6 +23,13 @@
 - Disabled template-internal COMSOL autorun defaults for B1 and B3 to preserve weak coupling.
 - Bootstrapped staged skeleton templates for C1, A7, B7 and C7.
 - Updated [main.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/main.cpp) to support `--case=A1` and `--stage=...`.
+- Created the root-level execution tracker [A1_F12_进度记录.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_进度记录.md) in the isolated worktree and seeded M0 progress.
+- Verified the isolated worktree can build in `Debug|x64` and that `--list` enumerates the full A1-F12 catalog plus legacy/auxiliary cases.
+
+## Donor Templates
+- `A1`: donor for analytic validation, feature-line profiles, and grid/dt studies.
+- `B1`: donor for reference I/O, observation monitors, validation summaries, and Matlab generation.
+- `B3`: donor for fracture-aware validation, fracture sampling, and fracture figure generation.
 
 ## Replaced Legacy Entries
 - Legacy standalone entries for A1/B1/A3/A2/A4/B3 now route through `RunFullWorkflow()` instead of raw `RunTestCase()`.
@@ -143,12 +153,14 @@
 - Most of the 72 catalog cases are registered but still have `planned` or `skeleton` status.
 
 ## Next Steps
-- Lift the N=1 well restriction and promote A7 from `skeleton` to `implemented`.
+- Freeze `CaseMetadata`, `ValidationSpec2D/3D`, and `WellTemplateSpec` field sets as the first M1 deliverable.
+- Write the “no more template-internal common validation logic” rule into the execution documents and enforce it during subsequent edits.
 - Extract B1 validation/reference logic into shared 2D modules so staged semantics are physically separated, not just API-separated.
-- Promote B7 and C1 from skeletons into real thin templates.
-- Start the 3D side with D1/E1/F1 after the 2D first wave is stable.
+- Lift the N=1 well restriction and promote A7 from `skeleton` to `implemented`.
 
 ## Key Files
+- [A1_F12_进度记录.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_进度记录.md)
+- [A1_F12_TEMPLATE_SYSTEM_MEMORY.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_TEMPLATE_SYSTEM_MEMORY.md)
 - [main.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/main.cpp)
 - [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h)
 - [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp)
