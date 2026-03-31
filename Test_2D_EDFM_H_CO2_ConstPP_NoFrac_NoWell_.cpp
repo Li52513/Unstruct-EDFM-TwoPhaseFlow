@@ -80,15 +80,6 @@ double ComputeMeshCharLength(const MeshManager& mgr) {
 }
 
 std::string BoolString(bool value) { return value ? "true" : "false"; }
-double ClampFraction(double f) { return Case2DValidation::ClampFraction(f); }
-
-std::string MakeReportTag(double fraction) {
-    return Case2DValidation::MakeReportTag(fraction);
-}
-
-std::vector<double> BuildSortedFractions(const std::vector<double>& raw) {
-    return Case2DValidation::BuildSortedFractions(raw);
-}
 
 struct TestCaseSpec {
     std::string case_name = "h_co2_constpp_nofrac_nowell";
@@ -198,7 +189,7 @@ void WriteAnalyticalSummary(const TestCaseSpec& cfg, const TestCaseSummary& summ
     report.total_rollbacks = summary.total_rollbacks;
     report.h_char = summary.h_char;
     report.t_end = summary.t_end;
-    report.pressure_diffusivity = ComputePressureDiffusivity(cfg);
+    report.pressure_diffusivity = Case2DValidation::ComputePressureDiffusivity(BuildAnalyticalConfig(cfg));
     report.gravity_x = cfg.gravity_vector.m_x;
     report.gravity_y = cfg.gravity_vector.m_y;
     report.gravity_z = cfg.gravity_vector.m_z;

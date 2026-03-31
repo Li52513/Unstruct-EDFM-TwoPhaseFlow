@@ -1093,20 +1093,6 @@ std::string Trim(std::string value) {
     return value.substr(begin, end - begin + 1);
 }
 
-using CsvTable = Case2DReferenceIO::CsvTable;
-
-std::vector<std::string> SplitCsvLine(const std::string& line) {
-    return Case2DReferenceIO::SplitCsvLine(line);
-}
-
-CsvTable ReadCsvTable(const std::string& path) {
-    return Case2DReferenceIO::ReadCsvTable(path);
-}
-
-double CsvGetDouble(const CsvTable& table, std::size_t row, const std::string& column) {
-    return Case2DReferenceIO::CsvGetDouble(table, row, column);
-}
-
 FieldErrorMetrics BuildErrorMetrics(double sumAbs, double sumSq, double maxAbs, int count, double scale) {
     FieldErrorMetrics metrics;
     metrics.sample_count = count;
@@ -1582,271 +1568,6 @@ void WriteValidationSummaryCsv(const TestCaseSpec& cfg, const TestCaseSummary& s
         "fixed_target_self_against_finest_dt");
 }
 
-void WriteValidationSummary(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
-    Case2DReferenceIO::WriteValidationSummary(
-        cfg,
-        summary,
-        "pressure uses absolute cell `L2`; temperature uses final-time horizontal fixed-target profile `L2` on interior stations only, excluding two profile intervals adjacent to each Dirichlet boundary.",
-        "pressure and temperature use fixed-target self-convergence against the finest configured `dt_init`; absolute reference errors remain diagnostic only.");
-    return;
-    std::ofstream out(summary.validation_summary_path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write validation summary: " + summary.validation_summary_path);
-    out << "# Validation Summary\n\n";
-    out << "## Status\n";
-    out << "- Case: `" << cfg.case_name << "`\n";
-    out << "- Output directory: `" << summary.case_dir << "`\n";
-    out << "- Reference mode: `" << summary.resolved_reference_mode << "`\n";
-    out << "- Validation status: `" << summary.validation_status << "`\n";
-    out << "- Reference ready: `" << BoolString(summary.reference_ready) << "`\n";
-    out << "- Validation performed: `" << BoolString(summary.validation_performed) << "`\n";
-    out << "- Validation passed: `" << BoolString(summary.validation_passed) << "`\n";
-    out << "- Grid convergence ok: `" << BoolString(summary.grid_convergence_ok) << "`\n";
-    out << "- Time sensitivity ok: `" << BoolString(summary.time_sensitivity_ok) << "`\n\n";
-
-    out << "## Physical Alignment\n";
-    out << "- Gravity vector: `(" << cfg.gravity_vector.m_x << ", " << cfg.gravity_vector.m_y << ", " << cfg.gravity_vector.m_z << ")`\n";
-    out << "- Non-orthogonal correction: `" << BoolString(cfg.enable_non_orthogonal_correction) << "`\n";
-    out << "- Pressure reference: analytical 1D Fourier diffusion\n";
-    out << "- Temperature reference: COMSOL 6.3 `" << summary.comsol_representation << "`\n";
-    out << "- COMSOL fine check skipped: `" << BoolString(summary.comsol_fine_check_skipped) << "`\n\n";
-
-    out << "## Final Acceptance Metrics\n";
-    out << "- Pressure cell `L2_norm`: `" << summary.final_pressure_cell_l2_norm << "`\n";
-    out << "- Pressure cell `Linf_norm`: `" << summary.final_pressure_cell_linf_norm << "`\n";
-    out << "- Pressure horizontal profile `L2_norm`: `" << summary.final_pressure_horizontal_l2_norm << "`\n";
-    out << "- Temperature horizontal profile `L2_norm`: `" << summary.final_temperature_horizontal_l2_norm << "`\n";
-    out << "- Temperature horizontal profile `Linf_norm`: `" << summary.final_temperature_horizontal_linf_norm << "`\n";
-    out << "- Temperature monitor `L2_norm`: `" << summary.final_monitor_temperature_l2_norm << "`\n";
-    out << "- Temperature monitor `Linf_norm`: `" << summary.final_monitor_temperature_linf_norm << "`\n";
-    out << "- Pressure vertical uniformity norm-std: `" << summary.final_pressure_vertical_uniformity_norm_std << "`\n";
-    out << "- Temperature vertical uniformity norm-std: `" << summary.final_temperature_vertical_uniformity_norm_std << "`\n";
-    out << "- Thresholds: pressure `L2 <= " << cfg.pressure_l2_threshold << "`, pressure `Linf <= " << cfg.pressure_linf_threshold
-        << "`, temperature `L2 <= " << cfg.temperature_l2_threshold << "`, temperature `Linf <= " << cfg.temperature_linf_threshold
-        << "`, vertical uniformity `<= " << cfg.vertical_uniformity_threshold << "`\n\n";
-
-    out << "## Convergence Semantics\n";
-    out << "- Baseline absolute validation: pressure uses analytical reference at cell centers / fixed target points; temperature uses COMSOL fixed-target reference.\n";
-    out << "- Grid order: pressure uses absolute cell `L2`; temperature uses final-time horizontal fixed-target profile `L2` on interior stations only, excluding two profile intervals adjacent to each Dirichlet boundary.\n";
-    out << "- Time order: pressure and temperature use fixed-target self-convergence against the finest configured `dt_init`; absolute reference errors remain diagnostic only.\n\n";
-
-    out << "## Outputs\n";
-    out << "- Engineering dir: `" << summary.engineering_dir << "`\n";
-    out << "- Analytical dir: `" << summary.analytic_dir << "`\n";
-    out << "- COMSOL input dir: `" << summary.comsol_input_dir << "`\n";
-    out << "- COMSOL output dir: `" << summary.comsol_output_dir << "`\n";
-    out << "- Reference spec: `" << summary.reference_spec_path << "`\n";
-    out << "- Analytical note: `" << summary.analytical_note_path << "`\n";
-    out << "- COMSOL spec: `" << summary.comsol_reference_spec_path << "`\n";
-    out << "- MATLAB script: `" << summary.matlab_script_path << "`\n";
-    out << "- Property table: `" << summary.property_table_path << "`\n";
-    out << "- COMSOL property table: `" << summary.comsol_property_table_path << "`\n";
-    if (!summary.grid_convergence_csv_path.empty()) out << "- Grid convergence csv: `" << summary.grid_convergence_csv_path << "`\n";
-    if (!summary.time_sensitivity_csv_path.empty()) out << "- Time sensitivity csv: `" << summary.time_sensitivity_csv_path << "`\n";
-
-    if (!summary.pressure_cell_metrics.empty()) {
-        out << "\n## Pressure Cell Records\n";
-        for (const auto& metric : summary.pressure_cell_metrics) {
-            out << "- `" << metric.tag << "`: L2=`" << metric.pressure.l2_norm
-                << "`, Linf=`" << metric.pressure.linf_norm
-                << "`, csv=`" << metric.compare_csv_path << "`\n";
-        }
-    }
-
-    if (!summary.report_metrics.empty()) {
-        out << "\n## Profile Compare Records\n";
-        for (const auto& metric : summary.report_metrics) {
-            out << "- `" << metric.family << " / " << metric.tag
-                << "`: pL2=`" << metric.pressure.l2_norm
-                << "`, tL2=`" << metric.temperature.l2_norm
-                << "`, pUniformity=`" << metric.pressure_uniformity_norm_std
-                << "`, tUniformity=`" << metric.temperature_uniformity_norm_std
-                << "`, csv=`" << metric.compare_csv_path << "`\n";
-        }
-    }
-
-    if (!summary.missing_reference_files.empty()) {
-        out << "\n## Missing Reference Files\n";
-        for (const auto& path : summary.missing_reference_files) out << "- `" << path << "`\n";
-    }
-}
-
-void WriteMatlabPlotScript(const TestCaseSummary& summary) {
-    Case2DMatlab::ValidationPlotScriptSpec spec;
-    spec.script_path = summary.matlab_script_path;
-    spec.profile_families = OrderedProfileFamilies();
-    spec.final_tag = "t100pct";
-    Case2DMatlab::WriteNoFracPTValidationPlotScript(spec);
-    return;
-    std::ofstream out(summary.matlab_script_path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] failed to write MATLAB plot script: " + summary.matlab_script_path);
-    out <<
-"rootDir = fileparts(mfilename('fullpath'));\n"
-"if isempty(rootDir)\n"
-"    rootDir = pwd;\n"
-"end\n"
-"figDir = fullfile(rootDir, 'figures');\n"
-"if ~exist(figDir, 'dir')\n"
-"    mkdir(figDir);\n"
-"end\n"
-"\n"
-"families = {'matrix_horizontal', 'matrix_vertical_midline'};\n"
-"finalTag = 't100pct';\n"
-"\n"
-"for iFam = 1:numel(families)\n"
-"    fam = families{iFam};\n"
-"    cmpFile = fullfile(rootDir, ['compare_profile_' fam '_' finalTag '.csv']);\n"
-"    if ~isfile(cmpFile)\n"
-"        warning('Skipping final profile plot because file is missing: %s', cmpFile);\n"
-"        continue;\n"
-"    end\n"
-"    tbl = readtable(cmpFile);\n"
-"    f = figure('Color', 'w', 'Position', [100 100 1200 420]);\n"
-"    subplot(1,2,1);\n"
-"    plot(tbl.target_axis_m, tbl.p_num_pa, 'LineWidth', 1.6); hold on;\n"
-"    plot(tbl.target_axis_m, tbl.p_ref_pa, '--', 'LineWidth', 1.6);\n"
-"    xlabel('Target Axis (m)'); ylabel('Pressure (Pa)');\n"
-"    title(['Pressure Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
-"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
-"    subplot(1,2,2);\n"
-"    plot(tbl.target_axis_m, tbl.t_num_k, 'LineWidth', 1.6); hold on;\n"
-"    plot(tbl.target_axis_m, tbl.t_ref_k, '--', 'LineWidth', 1.6);\n"
-"    xlabel('Target Axis (m)'); ylabel('Temperature (K)');\n"
-"    title(['Temperature Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
-"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.pdf']), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.png']), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n"
-"\n"
-"monitorFile = fullfile(rootDir, 'compare_monitor_timeseries.csv');\n"
-"if isfile(monitorFile)\n"
-"    mon = readtable(monitorFile);\n"
-"    labelsP = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 'p_num_'));\n"
-"    labelsT = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 't_num_'));\n"
-"    f = figure('Color', 'w', 'Position', [120 120 1200 460]);\n"
-"    subplot(1,2,1); hold on;\n"
-"    for i = 1:numel(labelsP)\n"
-"        refName = strrep(labelsP{i}, 'p_num_', 'p_ref_');\n"
-"        plot(mon.target_time_s, mon.(labelsP{i}), 'LineWidth', 1.2);\n"
-"        if ismember(refName, mon.Properties.VariableNames)\n"
-"            plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
-"        end\n"
-"    end\n"
-"    xlabel('Time (s)'); ylabel('Pressure (Pa)'); title('Monitor Compare: Pressure'); grid on; box on;\n"
-"    subplot(1,2,2); hold on;\n"
-"    for i = 1:numel(labelsT)\n"
-"        refName = strrep(labelsT{i}, 't_num_', 't_ref_');\n"
-"        plot(mon.target_time_s, mon.(labelsT{i}), 'LineWidth', 1.2);\n"
-"        if ismember(refName, mon.Properties.VariableNames)\n"
-"            plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
-"        end\n"
-"    end\n"
-"    xlabel('Time (s)'); ylabel('Temperature (K)'); title('Monitor Compare: Temperature'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, 'monitor_compare.pdf'), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, 'monitor_compare.png'), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n"
-"\n"
-"gridFile = fullfile(rootDir, 'grid_convergence.csv');\n"
-"if isfile(gridFile)\n"
-"    gridTbl = sortrows(readtable(gridFile), 'h_char', 'descend');\n"
-"    f = figure('Color', 'w', 'Position', [140 140 1000 420]);\n"
-"    subplot(1,2,1);\n"
-"    plot(gridTbl.h_char, gridTbl.pressure_cell_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
-"    plot(gridTbl.h_char, gridTbl.temperature_horizontal_l2_norm, '-s', 'LineWidth', 1.6);\n"
-"    set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Normalized L2');\n"
-"    title('Grid Convergence: Pressure Cell / Temperature Horizontal');\n"
-"    legend({'Pressure cell', 'Temperature profile'}, 'Location', 'best'); grid on; box on;\n"
-"    subplot(1,2,2);\n"
-"    plot(gridTbl.h_char, gridTbl.pressure_order, '-o', 'LineWidth', 1.6); hold on;\n"
-"    plot(gridTbl.h_char, gridTbl.temperature_order, '-s', 'LineWidth', 1.6);\n"
-"    set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Observed Order');\n"
-"    title('Grid Convergence: Observed Order');\n"
-"    legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, 'grid_convergence.pdf'), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, 'grid_convergence.png'), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n"
-"\n"
-"timeFile = fullfile(rootDir, 'time_sensitivity.csv');\n"
-"if isfile(timeFile)\n"
-"    timeTbl = sortrows(readtable(timeFile), 'dt_init', 'descend');\n"
-"    pTimeCol = 'pressure_time_self_l2_norm';\n"
-"    tTimeCol = 'temperature_time_self_l2_norm';\n"
-"    if ~ismember(pTimeCol, timeTbl.Properties.VariableNames)\n"
-"        pTimeCol = 'pressure_horizontal_l2_norm';\n"
-"    end\n"
-"    if ~ismember(tTimeCol, timeTbl.Properties.VariableNames)\n"
-"        tTimeCol = 'temperature_horizontal_l2_norm';\n"
-"    end\n"
-"    f = figure('Color', 'w', 'Position', [160 160 1000 420]);\n"
-"    subplot(1,2,1);\n"
-"    plot(timeTbl.dt_init, timeTbl.(pTimeCol), '-o', 'LineWidth', 1.6); hold on;\n"
-"    plot(timeTbl.dt_init, timeTbl.(tTimeCol), '-s', 'LineWidth', 1.6);\n"
-"    set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Normalized L2');\n"
-"    title('Time Sensitivity: Self Convergence');\n"
-"    legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"    subplot(1,2,2);\n"
-"    plot(timeTbl.dt_init, timeTbl.pressure_order, '-o', 'LineWidth', 1.6); hold on;\n"
-"    plot(timeTbl.dt_init, timeTbl.temperature_order, '-s', 'LineWidth', 1.6);\n"
-"    set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Observed Order');\n"
-"    title('Time Sensitivity: Observed Order');\n"
-"    legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, 'time_sensitivity.pdf'), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, 'time_sensitivity.png'), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n"
-"\n"
-"summaryFile = fullfile(rootDir, 'validation_summary.csv');\n"
-"if isfile(summaryFile)\n"
-"    sumTbl = readtable(summaryFile);\n"
-"    f = figure('Color', 'w', 'Position', [180 180 960 420]);\n"
-"    vals = [sumTbl.final_pressure_cell_l2_norm(1), sumTbl.final_temperature_horizontal_l2_norm(1), ...\n"
-"        sumTbl.final_monitor_temperature_l2_norm(1), sumTbl.final_pressure_vertical_uniformity_norm_std(1), ...\n"
-"        sumTbl.final_temperature_vertical_uniformity_norm_std(1)];\n"
-"    bar(categorical({'p cell L2', 'T profile L2', 'T monitor L2', 'p vertical std', 'T vertical std'}), vals);\n"
-"    ylabel('Metric Value'); title('Validation Summary Metrics'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, 'validation_summary_metrics.pdf'), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, 'validation_summary_metrics.png'), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n"
-"\n"
-"pNum = []; pRef = []; tNum = []; tRef = []; pErr = []; tErr = [];\n"
-"for iFam = 1:numel(families)\n"
-"    cmpFile = fullfile(rootDir, ['compare_profile_' families{iFam} '_' finalTag '.csv']);\n"
-"    if ~isfile(cmpFile)\n"
-"        continue;\n"
-"    end\n"
-"    tbl = readtable(cmpFile);\n"
-"    pNum = [pNum; tbl.p_num_pa]; %#ok<AGROW>\n"
-"    pRef = [pRef; tbl.p_ref_pa]; %#ok<AGROW>\n"
-"    tNum = [tNum; tbl.t_num_k]; %#ok<AGROW>\n"
-"    tRef = [tRef; tbl.t_ref_k]; %#ok<AGROW>\n"
-"    pErr = [pErr; tbl.p_abs_err_over_dp]; %#ok<AGROW>\n"
-"    tErr = [tErr; tbl.t_abs_err_over_dt]; %#ok<AGROW>\n"
-"end\n"
-"if ~isempty(pRef) && ~isempty(tRef)\n"
-"    f = figure('Color', 'w', 'Position', [200 200 1000 420]);\n"
-"    subplot(1,2,1);\n"
-"    scatter(pRef, pNum, 18, 'filled'); hold on;\n"
-"    plot([min(pRef) max(pRef)], [min(pRef) max(pRef)], 'k--', 'LineWidth', 1.2);\n"
-"    xlabel('Reference Pressure (Pa)'); ylabel('Engineering Pressure (Pa)'); title('Parity Plot: Pressure'); grid on; box on;\n"
-"    subplot(1,2,2);\n"
-"    scatter(tRef, tNum, 18, 'filled'); hold on;\n"
-"    plot([min(tRef) max(tRef)], [min(tRef) max(tRef)], 'k--', 'LineWidth', 1.2);\n"
-"    xlabel('Reference Temperature (K)'); ylabel('Engineering Temperature (K)'); title('Parity Plot: Temperature'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, 'parity.pdf'), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, 'parity.png'), 'Resolution', 300);\n"
-"    close(f);\n"
-"    f = figure('Color', 'w', 'Position', [220 220 1000 420]);\n"
-"    subplot(1,2,1); histogram(pErr, 20); xlabel('Normalized Pressure Error'); ylabel('Count'); title('Error Histogram: Pressure'); grid on; box on;\n"
-"    subplot(1,2,2); histogram(tErr, 20); xlabel('Normalized Temperature Error'); ylabel('Count'); title('Error Histogram: Temperature'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, 'error_histogram.pdf'), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, 'error_histogram.png'), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n";
-}
-
 bool FinalMetricsWithinThreshold(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
     return summary.final_pressure_cell_l2_norm <= cfg.pressure_l2_threshold &&
            summary.final_pressure_cell_linf_norm <= cfg.pressure_linf_threshold &&
@@ -2255,7 +1976,11 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
         summary.validation_status = "missing_reference";
         summary.validation_performed = false;
         summary.validation_passed = false;
-        WriteValidationSummary(cfg, summary);
+        Case2DReferenceIO::WriteValidationSummary(
+            cfg,
+            summary,
+            "pressure uses absolute cell `L2`; temperature uses final-time horizontal fixed-target profile `L2` on interior stations only, excluding two profile intervals adjacent to each Dirichlet boundary.",
+            "pressure and temperature use fixed-target self-convergence against the finest configured `dt_init`; absolute reference errors remain diagnostic only.");
         WriteValidationSummaryCsv(cfg, summary);
         WriteMetricsCsv(cfg, summary);
         throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] COMSOL temperature reference files are missing.");
@@ -2480,10 +2205,20 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
         (!cfg.enable_time_sensitivity_study || summary.time_sensitivity_ok);
     summary.validation_status = summary.validation_passed ? "passed" : "failed";
 
-    WriteValidationSummary(cfg, summary);
+    Case2DReferenceIO::WriteValidationSummary(
+        cfg,
+        summary,
+        "pressure uses absolute cell `L2`; temperature uses final-time horizontal fixed-target profile `L2` on interior stations only, excluding two profile intervals adjacent to each Dirichlet boundary.",
+        "pressure and temperature use fixed-target self-convergence against the finest configured `dt_init`; absolute reference errors remain diagnostic only.");
     WriteValidationSummaryCsv(cfg, summary);
     WriteMetricsCsv(cfg, summary);
-    WriteMatlabPlotScript(summary);
+    {
+        Case2DMatlab::ValidationPlotScriptSpec spec;
+        spec.script_path = summary.matlab_script_path;
+        spec.profile_families = OrderedProfileFamilies();
+        spec.final_tag = "t100pct";
+        Case2DMatlab::WriteNoFracPTValidationPlotScript(spec);
+    }
 
     if (!summary.validation_passed) {
         std::ostringstream oss;

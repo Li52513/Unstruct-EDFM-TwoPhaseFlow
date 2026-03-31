@@ -9,6 +9,7 @@
 #include "BoundaryConditionManager.h"
 #include "Case2D_Matlab.h"
 #include "Case2D_ReferenceIO.h"
+#include "Case2D_Validation.h"
 #include "FIM_TransientCaseKit.hpp"
 #include "Fracture.h"
 #include "FractureElement.h"
@@ -378,67 +379,6 @@ std::string Trim(std::string value) {
     return value.substr(first);
 }
 
-std::vector<std::string> SplitCsvLine(const std::string& line) {
-    std::vector<std::string> out;
-    std::stringstream ss(line);
-    std::string token;
-    while (std::getline(ss, token, ',')) out.push_back(Trim(token));
-    if (!line.empty() && line.back() == ',') out.push_back("");
-    return out;
-}
-
-struct CsvTable {
-    std::vector<std::string> headers;
-    std::unordered_map<std::string, std::size_t> header_index;
-    std::vector<std::vector<std::string> > rows;
-};
-
-CsvTable ReadCsvTable(const std::string& path) {
-    std::ifstream in(path.c_str(), std::ios::in);
-    if (!in.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to open csv: " + path);
-    CsvTable table;
-    std::string line;
-    if (!std::getline(in, line)) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] empty csv: " + path);
-    table.headers = SplitCsvLine(line);
-    for (std::size_t i = 0; i < table.headers.size(); ++i) table.header_index[table.headers[i]] = i;
-    while (std::getline(in, line)) {
-        if (!Trim(line).empty()) table.rows.push_back(SplitCsvLine(line));
-    }
-    return table;
-}
-
-double CsvGetDouble(const CsvTable& table, std::size_t row, const std::string& column) {
-    const auto it = table.header_index.find(column);
-    if (it == table.header_index.end()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] missing csv column: " + column);
-    if (row >= table.rows.size()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] csv row out of range.");
-    const std::size_t col = it->second;
-    if (col >= table.rows[row].size()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] csv column out of range.");
-    return std::stod(table.rows[row][col]);
-}
-
-double ClampFraction(double fraction) { return std::max(0.0, std::min(1.0, fraction)); }
-
-std::string MakeReportTag(double fraction) {
-    std::ostringstream oss;
-    oss << "t" << std::setw(3) << std::setfill('0')
-        << static_cast<int>(std::round(ClampFraction(fraction) * 100.0)) << "pct";
-    return oss.str();
-}
-
-std::vector<double> BuildSortedFractions(const std::vector<double>& rawFractions) {
-    std::vector<double> fractions;
-    for (double value : rawFractions) {
-        const double clamped = ClampFraction(value);
-        bool duplicate = false;
-        for (double existing : fractions) {
-            if (std::abs(existing - clamped) <= 1.0e-12) { duplicate = true; break; }
-        }
-        if (!duplicate) fractions.push_back(clamped);
-    }
-    std::sort(fractions.begin(), fractions.end());
-    return fractions;
-}
-
 struct RunningStatsAccumulator {
     int count = 0;
     double sum = 0.0;
@@ -713,11 +653,11 @@ std::vector<SpatialSamplePoint> BuildMonitorPoints(const MeshManager& mgr, const
 
 std::vector<SnapshotState> BuildSnapshots(const TestCaseSpec& cfg) {
     std::vector<SnapshotState> snapshots;
-    const std::vector<double> fractions = BuildSortedFractions(cfg.report_time_fractions);
+    const std::vector<double> fractions = Case2DValidation::BuildSortedFractions(cfg.report_time_fractions);
     snapshots.reserve(fractions.size());
     for (double fraction : fractions) {
         SnapshotState state;
-        state.tag = MakeReportTag(fraction);
+        state.tag = Case2DValidation::MakeReportTag(fraction);
         state.requested_fraction = fraction;
         state.target_time_s = fraction * cfg.target_end_time_s;
         snapshots.push_back(state);
@@ -1145,9 +1085,9 @@ FieldErrorMetrics WriteMonitorCompareCsv(const std::vector<SpatialSamplePoint>& 
 std::vector<std::string> RequiredReferenceFiles(const TestCaseSummary& summary, const TestCaseSpec& cfg) {
     std::vector<std::string> files;
     for (const std::string& family : OrderedProfileFamilies()) {
-        const std::vector<double> fractions = BuildSortedFractions(cfg.report_time_fractions);
+        const std::vector<double> fractions = Case2DValidation::BuildSortedFractions(cfg.report_time_fractions);
         for (double fraction : fractions) {
-            files.push_back(summary.comsol_output_dir + "/comsol_profile_" + family + "_" + MakeReportTag(fraction) + ".csv");
+            files.push_back(summary.comsol_output_dir + "/comsol_profile_" + family + "_" + Case2DValidation::MakeReportTag(fraction) + ".csv");
         }
     }
     files.push_back(summary.comsol_output_dir + "/comsol_monitor_timeseries.csv");
