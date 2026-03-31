@@ -55,6 +55,12 @@ struct CaseEntry {
     std::function<int()> run;
 };
 
+struct CatalogAliasEntry {
+    std::string name;
+    std::string desc;
+    std::string catalog_case;
+};
+
 int RunDay2FvmAd() {
     std::cout << "\n=======================================\n";
     std::cout << ">>> Running Day2: FVM-AD operator tests <<<\n";
@@ -122,9 +128,34 @@ void PrintCases(const std::vector<CaseEntry>& cases) {
         std::cout << "  - " << entry.name << " : " << entry.desc << '\n';
     }
 }
+
+void PrintCatalogAliases(const std::vector<CatalogAliasEntry>& aliases) {
+    std::cout << "Catalog compatibility aliases:\n";
+    for (const auto& entry : aliases) {
+        std::cout << "  - " << entry.name
+                  << " -> " << entry.catalog_case
+                  << " : " << entry.desc << '\n';
+    }
+}
+
+const CatalogAliasEntry* ResolveCatalogCaseAlias(const std::vector<CatalogAliasEntry>& aliases,
+                                                 const std::string& name) {
+    for (const auto& entry : aliases) {
+        if (entry.name == name) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
 } // namespace
 
 int main (int argc, char** argv) {
+    std::vector<CatalogAliasEntry> legacyCatalogAliases = {
+        {"test_h_co2_constpp_nofrac_nowell", "Compatibility alias for the canonical A1 no-well full workflow.", "A1"},
+        {"test_h_t_co2_constpp_nofrac_nowell", "Compatibility alias for the canonical B1 no-well full workflow.", "B1"},
+        {"test_h_tp_co2h2o_constpp_nofrac_nowell", "Compatibility alias for the canonical C1 no-well full workflow.", "C1"},
+    };
+
     std::vector<CaseEntry> cases = {
         {"day1_arch_conn", "Day1 explicit gate: run R4(trans_2d) + R5(trans_3d)", []() { return RunDay1ArchitectureFreeze(); }},
         {"day1_arch_conn_repro", "Day1 reproducibility gate: trans_2d x2 + trans_3d x2", []() { return RunDay1ArchitectureFreezeRepro(); }},
@@ -155,8 +186,6 @@ int main (int argc, char** argv) {
         {"day6_t01_f2", "Day6 T01 immediate split gate: F2 crossing-fracture", []() { Test_Day6::Run_Day6_Campaign_2D_T01_F2(); return 0; }},
         {"day6_t1_2d_sp_nowell_analytical", "Day6 T1 baseline: 2D no-well single-phase diffusion with Fourier analytical validation", []() { Test_Day6::Run_Day6_T1_2D_SP_NoWell_Analytical(); return 0; }},
 #endif
-        {"test_h_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property no-fracture no-well (independent template)", []() { Test_H_CO2_ConstPP::RunFullWorkflow(); return 0; }},
-        {"test_h_t_co2_constpp_nofrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_fast", "Standalone fast-screen test: 2D single-phase CO2 const-property P-T coupled no-fracture no-well with t_end=1.0e7 s", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_fast"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_fast_grid", "Standalone fast-screen grid study: 2D single-phase CO2 const-property P-T coupled no-fracture no-well with t_end=1.0e7 s", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_fast_grid"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_grid", "Standalone validation-chain grid study: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_grid"); return 0; }},
@@ -255,12 +284,16 @@ int main (int argc, char** argv) {
         std::cout << '\n';
         PrintCatalogCases();
         std::cout << '\n';
+        PrintCatalogAliases(legacyCatalogAliases);
+        std::cout << '\n';
         PrintCases(cases);
         return 0;
     }
 
     if (showList) {
         PrintCatalogCases();
+        std::cout << '\n';
+        PrintCatalogAliases(legacyCatalogAliases);
         std::cout << '\n';
         PrintCases(cases);
         return 0;
@@ -271,9 +304,17 @@ int main (int argc, char** argv) {
         std::cout << "[Info] no --case provided. Using default: " << caseName << '\n';
     }
 
+    const CatalogAliasEntry* resolvedAlias = ResolveCatalogCaseAlias(legacyCatalogAliases, caseName);
+    const std::string dispatchCaseName = resolvedAlias ? resolvedAlias->catalog_case : caseName;
+
     try {
         CaseCommon::ValidateCaseCatalogOrThrow();
-        if (const CaseCommon::CaseCatalogEntry* catalogEntry = CaseCommon::FindCaseCatalogEntry(caseName)) {
+        if (const CaseCommon::CaseCatalogEntry* catalogEntry = CaseCommon::FindCaseCatalogEntry(dispatchCaseName)) {
+            if (resolvedAlias) {
+                std::cout << "[Catalog Alias] " << caseName
+                          << " -> " << resolvedAlias->catalog_case
+                          << " - stage=" << CaseCommon::ToString(caseStage) << "\n";
+            }
             std::cout << "[Catalog Case] " << catalogEntry->metadata.case_code
                       << " - " << catalogEntry->metadata.dispatcher_key
                       << " - stage=" << CaseCommon::ToString(caseStage) << "\n";
