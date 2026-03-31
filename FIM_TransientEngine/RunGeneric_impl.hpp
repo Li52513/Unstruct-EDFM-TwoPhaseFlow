@@ -581,10 +581,6 @@ namespace FIM_Engine {
         {
             const auto modules = ResolveTransientFluidModelConfig(modules_in);
 
-            if (!wells.empty()) {
-                throw std::runtime_error("[N=1] unsupported: wells are not enabled in pressure-only AD route.");
-            }
-
             std::cout << "\n========== Starting Transient Scenario (N=1 AD): " << caseName << " ==========\n";
             MakePath(params.output_root_dir, caseName);
             InjectStaticProperties(fm);
@@ -593,21 +589,29 @@ namespace FIM_Engine {
                 std::cout << "[Init] External property module injected.\n";
             }
 
-            const int totalBlocks = mgr.getTotalDOFCount();
-            const int totalEq = totalBlocks;
-            if (totalBlocks <= 0 || totalEq <= 0) {
+            const int reservoirBlocks = mgr.getTotalDOFCount();
+            const int reservoirEq = reservoirBlocks;
+            if (reservoirBlocks <= 0 || reservoirEq <= 0) {
                 throw std::runtime_error("[N=1] invalid system size.");
             }
 
+            const std::vector<WellScheduleStep> normalized_wells_superset =
+                detail::SelectActiveAndNormalizeWells(wells, mgr, 0.0, false);
+
+            WellDOFManager<1> well_mgr;
+            well_mgr.Setup(normalized_wells_superset, reservoirBlocks);
+            const int totalBlocksWithWells = well_mgr.TotalBlocksWithWells();
+            const int totalEqWithWells = totalBlocksWithWells;
+
             const int nMat = MatrixBlockCount(mgr);
             FIM_StateMap<1> state;
-            state.InitSizes(totalBlocks);
-            for (int i = 0; i < totalBlocks; ++i) {
+            state.InitSizes(totalBlocksWithWells);
+            for (int i = 0; i < totalBlocksWithWells; ++i) {
                 state.P[i] = ic.P_init;
                 state.T[i] = ic.T_init;
             }
 
-            std::vector<double> vols(totalBlocks, 1.0);
+            std::vector<double> vols(totalBlocksWithWells, 1.0);
             for (size_t i = 0; i < mgr.mesh().getCells().size(); ++i) vols[i] = mgr.mesh().getCells()[i].volume;
             for (size_t i = 0; i < mgr.fracture_network().getOrderedFractureElements().size(); ++i) {
                 auto* elem = mgr.fracture_network().getOrderedFractureElements()[i];
@@ -621,7 +625,7 @@ namespace FIM_Engine {
                 }
             }
 
-            std::vector<Vector> blockCenters(totalBlocks, Vector(0.0, 0.0, 0.0));
+            std::vector<Vector> blockCenters(totalBlocksWithWells, Vector(0.0, 0.0, 0.0));
             for (size_t i = 0; i < mgr.mesh().getCells().size(); ++i) blockCenters[i] = mgr.mesh().getCells()[i].center;
             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                 const auto& orderedFrac = mgr.fracture_network().getOrderedFractureElements();
@@ -649,6 +653,20 @@ namespace FIM_Engine {
                 std::cout << "[Init] External state initializer injected.\n";
             }
 
+            const std::vector<WellScheduleStep> initial_active_wells =
+                detail::SelectActiveAndNormalizeWells(wells, mgr, 0.0, true);
+            well_mgr.InitWellState(state, ic.P_init, ic.T_init, ic.Sw_init, initial_active_wells);
+            for (int w = 0; w < well_mgr.NumWells(); ++w) {
+                const auto& e = well_mgr.GetEntry(w);
+                const int comp_cell = well_mgr.GetPrimaryCompletionCell(w);
+                if (comp_cell >= 0 && comp_cell < static_cast<int>(blockCenters.size())) {
+                    blockCenters[e.block_idx] = blockCenters[comp_cell];
+                }
+            }
+            if (!well_mgr.Empty()) {
+                well_mgr.PrintSummary();
+            }
+
             FIM_ConnectionManager connMgr;
             if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
                 TransmissibilitySolver_2D::Calculate_Transmissibility_Matrix(mgr, fm);
@@ -666,10 +684,13 @@ namespace FIM_Engine {
             }
             connMgr.FinalizeAndAggregate();
 
-            FIM_BlockSparseMatrix<1> global_mat(totalBlocks);
+            FIM_BlockSparseMatrix<1> global_mat(totalBlocksWithWells);
             for (const auto& conn : connMgr.GetConnections()) {
                 global_mat.AddOffDiagBlock(conn.nodeI, conn.nodeJ, Eigen::Matrix<double, 1, 1>::Zero());
                 global_mat.AddOffDiagBlock(conn.nodeJ, conn.nodeI, Eigen::Matrix<double, 1, 1>::Zero());
+            }
+            if (!well_mgr.Empty()) {
+                well_mgr.RegisterPatternConnections(global_mat);
             }
             global_mat.FreezePattern();
 
@@ -684,7 +705,7 @@ namespace FIM_Engine {
             auto cr_frac = fm.getFractureScalar(str_frac.c_r_tag);
             auto kt_frac = fm.getFractureScalar(str_frac.k_t_tag);
             if (!cr_mat) std::cout << "    [Warning] Matrix c_r field not found, defaulting to 0.0.\n";
-            if (nMat < totalBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
+            if (nMat < reservoirBlocks && !cr_frac) std::cout << "    [Warning] Fracture c_r field not found, defaulting to 0.0.\n";
 
             const double t_eval = (modules.pressure_only_temperature_k > 0.0)
                 ? modules.pressure_only_temperature_k
@@ -762,7 +783,7 @@ namespace FIM_Engine {
                 auto frac_P_viz = fm.getOrCreateFractureScalar(internalNamesN1.pressure_viz, 0.0);
 
                 const double lam_w_mob = 1.0 / std::max(baseline_mu, 1.0e-20);
-                for (int i = 0; i < totalBlocks; ++i) {
+                for (int i = 0; i < reservoirBlocks; ++i) {
                     const double p = state.P[i];
                     if (i < nMat) {
                         if (f_pw && i < static_cast<int>(f_pw->data.size())) f_pw->data[i] = p;
@@ -788,8 +809,8 @@ namespace FIM_Engine {
                 }
             };
 
-            std::vector<double> P_ref(totalBlocks, ic.P_init);
-            for (int i = 0; i < totalBlocks; ++i) P_ref[i] = state.P[i];
+            std::vector<double> P_ref(reservoirBlocks, ic.P_init);
+            for (int i = 0; i < reservoirBlocks; ++i) P_ref[i] = state.P[i];
 
             double p_floor = 1.0e4;
             double p_ceil = std::numeric_limits<double>::max();
@@ -838,6 +859,8 @@ namespace FIM_Engine {
                 dt = std::max(params.dt_min, std::min(dt, params.dt_max));
 
                 FIM_StateMap<1> old_state = state;
+                std::vector<WellScheduleStep> active_wells =
+                    detail::SelectActiveAndNormalizeWells(wells, mgr, t, true);
                 LinearSolverCache<1> linear_solver_cache;
                 linear_solver_cache.Configure(params);
 
@@ -852,11 +875,11 @@ namespace FIM_Engine {
                 for (int iter = 1; iter <= std::max(1, params.max_newton_iter); ++iter) {
                     iter_used = iter;
                     global_mat.SetZero();
-                    std::vector<EqContrib> eq_contribs(totalEq);
+                    std::vector<EqContrib> eq_contribs(totalEqWithWells);
 
                     struct CellCache { double rho = 0.0; double mu = 0.0; double mob = 0.0; };
-                    std::vector<CellCache> cprop(totalBlocks);
-                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                    std::vector<CellCache> cprop(reservoirBlocks);
+                    for (int bi = 0; bi < reservoirBlocks; ++bi) {
                         const auto props = eval_pressure_props(ADVar<1>(state.P[bi]));
                         const double rho = std::max(props.rho.val, 1.0e-12);
                         const double mu = std::max(props.mu.val, 1.0e-20);
@@ -910,7 +933,7 @@ namespace FIM_Engine {
                         }
                     }
 
-                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                    for (int bi = 0; bi < reservoirBlocks; ++bi) {
                         double phi_ref = 0.2;
                         double c_r = 0.0;
                         if (bi < nMat) {
@@ -949,7 +972,7 @@ namespace FIM_Engine {
                         FIM_GlobalAssembler<1, ADVar<1>>::AssembleAccumulation(bi, acc_eqs, global_mat);
 
                         const int eq = mgr.getEquationIndex(bi, 0);
-                        if (eq >= 0 && eq < totalEq) {
+                        if (eq >= 0 && eq < reservoirEq) {
                             eq_contribs[eq].R_acc += acc.val;
                             eq_contribs[eq].D_acc += acc.grad(0);
                         }
@@ -985,11 +1008,11 @@ namespace FIM_Engine {
 
                         const int eq_i = mgr.getEquationIndex(i, 0);
                         const int eq_j = mgr.getEquationIndex(j, 0);
-                        if (eq_i >= 0 && eq_i < totalEq) {
+                        if (eq_i >= 0 && eq_i < reservoirEq) {
                             eq_contribs[eq_i].R_flux += -f_i[0].val;
                             eq_contribs[eq_i].D_flux += -f_i[0].grad(0);
                         }
-                        if (eq_j >= 0 && eq_j < totalEq) {
+                        if (eq_j >= 0 && eq_j < reservoirEq) {
                             eq_contribs[eq_j].R_flux += f_i[0].val;
                             eq_contribs[eq_j].D_flux += f_j[0].grad(0);
                         }
@@ -1013,8 +1036,8 @@ namespace FIM_Engine {
                                     const double mass_corr = K_eff * mob * corr_P;
                                     global_mat.AddResidual(i, 0, -mass_corr);
                                     global_mat.AddResidual(j, 0, mass_corr);
-                                    if (eq_i >= 0 && eq_i < totalEq) eq_contribs[eq_i].R_flux += -mass_corr;
-                                    if (eq_j >= 0 && eq_j < totalEq) eq_contribs[eq_j].R_flux += mass_corr;
+                                    if (eq_i >= 0 && eq_i < reservoirEq) eq_contribs[eq_i].R_flux += -mass_corr;
+                                    if (eq_j >= 0 && eq_j < reservoirEq) eq_contribs[eq_j].R_flux += mass_corr;
                                 }
                             }
                         }
@@ -1065,17 +1088,57 @@ namespace FIM_Engine {
 
                                 const int eq_owner = mgr.getEquationIndex(owner, 0);
                                 const int eq_nei = mgr.getEquationIndex(nei, 0);
-                                if (eq_owner >= 0 && eq_owner < totalEq) eq_contribs[eq_owner].R_flux += corr_mass;
-                                if (eq_nei >= 0 && eq_nei < totalEq) eq_contribs[eq_nei].R_flux += -corr_mass;
+                                if (eq_owner >= 0 && eq_owner < reservoirEq) eq_contribs[eq_owner].R_flux += corr_mass;
+                                if (eq_nei >= 0 && eq_nei < reservoirEq) eq_contribs[eq_nei].R_flux += -corr_mass;
                             }
                         }
+                    }
+
+                    if (!well_mgr.Empty()) {
+                        sync_pressure_only_state_to_fields();
+                        std::vector<double> w_res(reservoirEq, 0.0);
+                        std::vector<std::array<double, 3>> w_jac3(reservoirEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                        std::vector<WellCompletionLinearization> w_lin;
+                        const auto well_bhp_now = well_mgr.BuildWellBhpMap(state);
+                        const bool sp_use_co2 = use_eos || modules.single_phase_fluid == SinglePhaseFluidModel::CO2;
+                        const int well_dof_w = sp_use_co2 ? -1 : 0;
+                        const int well_dof_g = sp_use_co2 ? 0 : -1;
+                        const int well_dof_e = -1;
+
+                        if constexpr (std::is_same_v<MeshMgrType, MeshManager>) {
+                            BoundaryAssembler::Assemble_Wells_2D_FullJac(
+                                mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e,
+                                w_res, w_jac3, modules.fluid_property_eval, modules.vg_params, modules.rp_params,
+                                &w_lin, &well_bhp_now);
+                        }
+                        else {
+                            BoundaryAssembler::Assemble_Wells_3D_FullJac(
+                                mgr, fm, active_wells, 0, well_dof_w, well_dof_g, well_dof_e,
+                                w_res, w_jac3, modules.fluid_property_eval, modules.vg_params, modules.rp_params,
+                                &w_lin, &well_bhp_now);
+                        }
+
+                        for (int bi = 0; bi < reservoirBlocks; ++bi) {
+                            const int eq = mgr.getEquationIndex(bi, 0);
+                            if (eq < 0 || eq >= reservoirEq) continue;
+                            const double rWell = params.well_source_sign * w_res[eq];
+                            const double dRdP = params.well_source_sign * w_jac3[eq][0];
+                            if (std::abs(rWell) <= 1.0e-16 && std::abs(dRdP) <= 1.0e-16) continue;
+                            global_mat.AddResidual(bi, 0, rWell);
+                            global_mat.AddDiagJacobian(bi, 0, 0, dRdP);
+                            eq_contribs[eq].R_well += rWell;
+                            eq_contribs[eq].D_well += dRdP;
+                        }
+
+                        well_mgr.AssembleWellEquations(
+                            global_mat, state, active_wells, w_lin, params.well_source_sign);
                     }
 
                     if (modules.pressure_bc) {
                         if (use_eos) {
                             sync_pressure_only_state_to_fields();
-                            std::vector<double> bc_res(totalEq, 0.0);
-                            std::vector<std::array<double, 3>> bc_jac3(totalEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
+                            std::vector<double> bc_res(reservoirEq, 0.0);
+                            std::vector<std::array<double, 3>> bc_jac3(reservoirEq, std::array<double, 3>{ 0.0, 0.0, 0.0 });
                             FluidPropertyEvalConfig bc_fluid_cfg = modules.fluid_property_eval;
                             bc_fluid_cfg.enable_single_phase_constant = false;
                             bc_fluid_cfg.enable_two_phase_constant = false;
@@ -1093,9 +1156,9 @@ namespace FIM_Engine {
                                     bc_res, bc_jac3, modules.pressure_bc, nullptr, bc_fluid_cfg, modules.vg_params, modules.rp_params);
                             }
 
-                            for (int bi = 0; bi < totalBlocks; ++bi) {
+                            for (int bi = 0; bi < reservoirBlocks; ++bi) {
                                 const int eq = mgr.getEquationIndex(bi, 0);
-                                if (eq < 0 || eq >= totalEq) continue;
+                                if (eq < 0 || eq >= reservoirEq) continue;
                                 const double r_bc = bc_res[eq];
                                 const double dRdP = bc_jac3[eq][0];
                                 if (std::abs(r_bc) <= 1.0e-16 && std::abs(dRdP) <= 1.0e-16) continue;
@@ -1114,7 +1177,7 @@ namespace FIM_Engine {
                                 if (!face.isBoundary()) continue;
                                 if (!modules.pressure_bc->HasBC(face.physicalGroupId)) continue;
                                 const int owner = face.ownerCell_index;
-                                if (owner < 0 || owner >= totalBlocks || owner >= static_cast<int>(cells.size())) continue;
+                                if (owner < 0 || owner >= reservoirBlocks || owner >= static_cast<int>(cells.size())) continue;
 
                                 const auto bc = modules.pressure_bc->GetBCCoefficients(face.physicalGroupId, face.midpoint);
                                 ADVar<1> P_cell(state.P[owner]);
@@ -1174,7 +1237,7 @@ namespace FIM_Engine {
                                 global_mat.AddResidual(owner, 0, q_bc.val);
                                 global_mat.AddDiagJacobian(owner, 0, 0, q_bc.grad(0));
                                 const int eq = mgr.getEquationIndex(owner, 0);
-                                if (eq >= 0 && eq < totalEq) {
+                                if (eq >= 0 && eq < reservoirEq) {
                                     eq_contribs[eq].R_bc += q_bc.val;
                                     eq_contribs[eq].D_bc += q_bc.grad(0);
                                 }
@@ -1200,8 +1263,8 @@ namespace FIM_Engine {
                         break;
                     }
 
-                    auto linear_out = SolveLinearSystem<1>(A, b, eq_contribs, totalEq, params, linear_solver_cache);
-                    if (!linear_out.compute_ok || !linear_out.solve_ok || linear_out.dx.size() != totalEq) {
+                    auto linear_out = SolveLinearSystem<1>(A, b, eq_contribs, totalEqWithWells, params, linear_solver_cache);
+                    if (!linear_out.compute_ok || !linear_out.solve_ok || linear_out.dx.size() != totalEqWithWells) {
                         fail_reason = "linear_solve_fail";
                         break;
                     }
@@ -1216,7 +1279,7 @@ namespace FIM_Engine {
                     // can stall Newton updates and trigger perpetual nonlinear_max_iter.
                     const double max_dP_eff = std::max(1.0e-3, params.max_dP);
                     double alpha = 1.0;
-                    for (int bi = 0; bi < totalBlocks; ++bi) {
+                    for (int bi = 0; bi < reservoirBlocks; ++bi) {
                         const int eqP = mgr.getEquationIndex(bi, 0);
                         if (eqP < 0 || eqP >= dx.size()) { fail_reason = "invalid_eq_index"; alpha = 0.0; break; }
                         alpha = std::min(alpha, max_dP_eff / (std::abs(dx[eqP]) + 1.0e-14));
@@ -1231,9 +1294,9 @@ namespace FIM_Engine {
                     int trial_limiter = 0;
                     double trial_rel_update = std::numeric_limits<double>::infinity();
                     if (!ApplyTrialUpdate<1>(
-                        state, alpha, dx, mgr, totalBlocks, params,
+                        state, alpha, dx, mgr, reservoirBlocks, params,
                         p_floor, p_ceil, t_floor, t_ceil,
-                        trial_state, trial_limiter, trial_rel_update, 0)) {
+                        trial_state, trial_limiter, trial_rel_update, well_mgr.NumWells())) {
                         fail_reason = "state_nan_inf";
                         break;
                     }

@@ -348,9 +348,16 @@ private:
             if (grad_idx == 2) return 2; // T
             return -1;
         }
-        else {
+        else if constexpr (N == 2) {
             if (grad_idx == 0) return 0; // P
             if (grad_idx == 2) return 1; // T
+            return -1;
+        }
+        else if constexpr (N == 1) {
+            if (grad_idx == 0) return 0; // P
+            return -1;
+        }
+        else {
             return -1;
         }
     }

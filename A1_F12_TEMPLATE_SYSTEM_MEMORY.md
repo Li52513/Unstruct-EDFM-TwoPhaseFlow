@@ -26,7 +26,7 @@
 - Commit timing is governed by [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md); after each completed step, check this file before deciding whether to commit.
 
 ## Current Phase
-- Phase: `M3-S5` is complete in isolated worktree `codex/a1-f12-exec`; the structural no-well entry-point replacement is now finished, and the next mainline step is `M4-S1` while the `M3` milestone stays numerically open until `C0` closes the remaining B1/C1 reference-based acceptance.
+- Phase: `M4-S1` is complete in isolated worktree `codex/a1-f12-exec`; the `N=1 + wells` engine restriction has been lifted in the pressure-only route, `M4` is now in progress, and the next mainline step is `M4-S2` while the `M3` milestone stays numerically open until `C0` closes the remaining B1/C1 reference-based acceptance.
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
@@ -178,7 +178,7 @@
 - `F12` planned
 
 ## Blockers
-- `N=1 + wells` is still blocked in [RunGeneric_impl.hpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/FIM_TransientEngine/RunGeneric_impl.hpp) because the pressure-only AD route explicitly rejects wells.
+- `A7` is still a skeleton template, so `M4-S2` must wire [Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp) to the now-enabled `N=1 + wells` engine path before a real pressure-only injection/production smoke test exists.
 - `A2/A3/A4` still collapse `solve_only/prepare_reference/validate_only/full_workflow` onto one legacy execution path and do not yet use the unified five-directory artifact split; only `A1` has completed the staged-semantics split so far.
 - `A1` and `B1` now have explicit stage routing under the template-system case root, but both `validate_only` paths still rerun the engineering solve until engineering snapshot persistence is implemented.
 - `C1` is now implemented and honors the staged no-well artifact contract, but `validate_only/full_workflow` still rerun the engineering solve and terminate through `missing_reference` until COMSOL profile/monitor payloads are supplied.
@@ -189,10 +189,10 @@
 - The VS/MSBuild build in this worktree currently depends on local `.vcxproj` edits to include the new `Case2D_*` source files; those project-file edits remain local build support and are not part of the tracked branch payload.
 
 ## Next Steps
-- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M3-S5` now forms a coherent legacy-entry replacement checkpoint.
-- Start `M4-S1` by lifting the `N=1 + wells` restriction in [RunGeneric_impl.hpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/FIM_TransientEngine/RunGeneric_impl.hpp).
+- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M4-S1` now forms a coherent engine-layer checkpoint.
+- Start `M4-S2` by wiring [Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp) to the newly enabled `N=1 + wells` engine path and adding a real A7 solve-only smoke test.
 - In parallel, use `C0` to close the remaining `B1/C1` reference-based acceptance loop once COMSOL payload automation is ready.
-- Lift the N=1 well restriction and promote `A7` from `skeleton` to `implemented`.
+- Promote `A7` from `skeleton` to `implemented` once the solve-only route and first inj/prod acceptance outputs are stable.
 
 ## Key Files
 - [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md)
