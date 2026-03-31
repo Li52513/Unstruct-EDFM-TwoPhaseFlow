@@ -26,7 +26,7 @@
 - Commit timing is governed by [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md); after each completed step, check this file before deciding whether to commit.
 
 ## Current Phase
-- Phase: `M3-S3` is complete in isolated worktree `codex/a1-f12-exec`; the next step is `M3-S4`, freezing the no-well sample/output contract after promoting `C1` to an implemented staged template.
+- Phase: `M3-S4` is complete in isolated worktree `codex/a1-f12-exec`; the no-well sample/output contract is now frozen across `A1/B1/C1`, and the next step is `M3-S5`, replacing the remaining legacy primary entry points.
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
@@ -60,6 +60,7 @@
 - Completed `M3-S1` by splitting A1 into a real staged thin-template runner: added `RunStageByKeyImpl(...)`, analytical artifact-only `prepare_reference`, `solve_only` output under `engineering/`, and `validate_only/full_workflow` paths that now materialize `studies/grid_convergence.csv` plus `studies/time_sensitivity.csv` under the template-system case root; verified with a passing `check_m3_s1_a1_stage_split.ps1`, fresh `Debug|x64` MSBuild, and four staged smoke runs for `A1 --stage=prepare_reference`, `solve_only`, `validate_only`, and `full_workflow`.
 - Completed `M3-S2` by turning B1 into a real staged thin-template donor: added `RunStageByKeyImpl(...)`, `ConfigureSummaryPaths(...)`, template-system five-directory path wiring (`studies/`, `figures/`, `engineering/`, `reference/`, `report/`, plus `report/scripts/`), stage manifest/reference-contract/status writers, and a real `prepare_reference` path that emits property tables plus reference/COMSOL specs without running the transient solve; verified with a passing `check_m3_s2_b1_thin_template.ps1`, fresh `Debug|x64` MSBuild, a successful `B1 --stage=prepare_reference`, a successful `B1 --stage=solve_only`, and a `B1 --stage=validate_only` smoke run that now exits through `missing_reference` while correctly backfilling `stage_manifest.txt` and `template_status.md`.
 - Completed `M3-S3` by promoting C1 from `skeleton` to a real staged `implemented` no-well template: replaced the skeleton-only stage stubs with a real `RunStageByKeyImpl(...)`, wired `prepare_reference` to emit the C1 property/reference/profile/monitor contracts, wired `solve_only` to run the real 2D `N=3` CO2/H2O no-fracture/no-well transient solve, and wired `validate_only/full_workflow` to complete engineering output then stop through the expected weak-coupling `missing_reference` path when COMSOL payloads are absent; verified with a passing `check_m3_s3_c1_thin_template.ps1`, fresh `Debug|x64` MSBuild, a successful `C1 --stage=prepare_reference`, a successful `C1 --stage=solve_only`, and a `C1 --stage=validate_only` smoke run that now backfills `stage_manifest.txt`, `template_status.md`, `validation_summary.md`, and the engineering profile/monitor CSV payload under the template-system case root.
+- Completed `M3-S4` by freezing the no-well sample/output contract across `A1/B1/C1`: added [A1_F12_NoWell_Template_Contract.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_NoWell_Template_Contract.md) to lock five-directory responsibilities, stage semantics, mandatory profile/monitor payloads, frozen snapshot tags, and CSV schemas; added `tools/checks/check_m3_s4_nowell_contract.ps1` with long-path-safe existence checks; verified the contract with a passing worktree run of `check_m3_s4_nowell_contract.ps1`.
 
 ## Donor Templates
 - `A1`: donor for analytic validation, feature-line profiles, and grid/dt studies.
@@ -187,9 +188,9 @@
 - The VS/MSBuild build in this worktree currently depends on local `.vcxproj` edits to include the new `Case2D_*` source files; those project-file edits remain local build support and are not part of the tracked branch payload.
 
 ## Next Steps
-- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M3-S3` now forms a coherent C1 promotion checkpoint.
-- Start `M3-S4` by freezing the no-well sample/output contract across `A1/B1/C1`, including CSV naming, profile/monitor payload expectations, Matlab output placement, and report layout.
-- Continue `M3` by replacing the remaining legacy primary entry points after the no-well contract is frozen.
+- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M3-S4` now forms a coherent no-well contract-freeze checkpoint.
+- Start `M3-S5` by replacing the remaining legacy primary entry points after the no-well contract freeze.
+- Continue `M3` by closing the no-well milestone and then re-assessing whether `A1/B1/C1` can be marked as the single canonical no-well donor trio without additional legacy entry routing.
 - Lift the N=1 well restriction and promote `A7` from `skeleton` to `implemented`.
 
 ## Key Files
