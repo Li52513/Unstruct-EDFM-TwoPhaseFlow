@@ -1,9 +1,11 @@
 #include "CaseCommon_Catalog.h"
 
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.h"
+#include "Test_2D_EDFM_H_CO2_ConstPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h"
 #include "Test_2D_EDFM_H_CO2_ConstPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_CO2_VaryPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_InjProd.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
@@ -74,6 +76,26 @@ int RunA4(CaseStage stage) {
     case CaseStage::ValidateOnly: Test_H_CO2_VaryPP_SingleFrac::RunValidateOnly(); return 0;
     case CaseStage::FullWorkflow: Test_H_CO2_VaryPP_SingleFrac::RunFullWorkflow(); return 0;
     default: throw std::runtime_error("[CaseCatalog] unsupported stage for A4.");
+    }
+}
+
+int RunA5(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_CO2_ConstPP_ComplexFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_CO2_ConstPP_ComplexFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_CO2_ConstPP_ComplexFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for A5.");
+    }
+}
+
+int RunA6(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_CO2_VaryPP_ComplexFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_CO2_VaryPP_ComplexFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_CO2_VaryPP_ComplexFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_CO2_VaryPP_ComplexFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for A6.");
     }
 }
 
@@ -352,6 +374,8 @@ BindingInfo GetBinding(const std::string& caseCode) {
     if (caseCode == "A2") return BindingInfo{&RunA2, "implemented"};
     if (caseCode == "A3") return BindingInfo{&RunA3, "implemented"};
     if (caseCode == "A4") return BindingInfo{&RunA4, "implemented"};
+    if (caseCode == "A5") return BindingInfo{&RunA5, "implemented"};
+    if (caseCode == "A6") return BindingInfo{&RunA6, "implemented"};
     if (caseCode == "A7") return BindingInfo{&RunA7, "implemented"};
     if (caseCode == "B1") return BindingInfo{&RunB1, "implemented"};
     if (caseCode == "B3") return BindingInfo{&RunB3, "implemented"};

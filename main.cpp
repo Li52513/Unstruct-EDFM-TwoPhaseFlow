@@ -33,8 +33,10 @@
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_CO2_ConstPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_ConstPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_CO2_VaryPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
@@ -198,8 +200,10 @@ int main (int argc, char** argv) {
         {"test_h_t_co2_constpp_singlefrac_nowell_validate_reference", "Standalone validation-chain validate phase: compare the N=2 single-fracture CO2 P-T case against prepared reference data", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_validate_reference"); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_full_comsol", "Standalone validation-chain full COMSOL mode: auto-prepare and validate the N=2 single-fracture CO2 P-T case", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_full_comsol"); return 0; }},
         {"test_h_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property single-fracture no-well", []() { Test_H_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_co2_constpp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 const-property complex-fracture no-well", []() { Test_H_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) no-fracture no-well", []() { Test_H_CO2_VaryPP::RunFullWorkflow(); return 0; }},
         {"test_h_co2_varypp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) single-fracture no-well", []() { Test_H_CO2_VaryPP_SingleFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_co2_varypp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) complex-fracture no-well", []() { Test_H_CO2_VaryPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"2d_edfm_single", "2D EDFM single-fracture end-to-end test", []() { return EDFM_test_2D(); }},
         {"2d_edfm_dfn", "2D EDFM DFN end-to-end test", []() { return EDFM_DFN_test_2D(); }},
         {"2d_geom_benchmark_dfn", "2D EDFM geometry benchmark with fixed DFN seed", []() { return EDFM_DFN_Geomtest_2D(); }},

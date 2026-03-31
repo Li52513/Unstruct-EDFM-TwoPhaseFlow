@@ -109,6 +109,7 @@ struct TestCaseSpec {
     std::string case_name = "h_co2_varypp_singlefrac_nowell";
     std::string output_base_dir = "Test/Transient/FullCaseTest";
     std::string sub_dir = "H_CO2_VaryPP";
+    bool use_complex_fractures = false;
 
     double lx = 400.0;
     double ly = 40.0;
@@ -209,6 +210,22 @@ struct TestCasePlan {
     TestCaseSpec spec;
 };
 
+void AddConfiguredFractures(MeshManager& mgr, const TestCaseSpec& cfg) {
+    mgr.addFracture(Vector(cfg.frac_x_ratio * cfg.lx, cfg.frac_y0_ratio * cfg.ly, 0.0),
+                    Vector(cfg.frac_x_ratio * cfg.lx, cfg.frac_y1_ratio * cfg.ly, 0.0));
+    if (!cfg.use_complex_fractures) {
+        return;
+    }
+
+    // Keep one central barrier and add shorter deterministic branches so A6
+    // still exercises a nontrivial complex-fracture mesh without overloading
+    // the smoke-scale solve-only workflow.
+    mgr.addFracture(Vector(0.24 * cfg.lx, 0.28 * cfg.ly, 0.0),
+                    Vector(0.55 * cfg.lx, 0.68 * cfg.ly, 0.0));
+    mgr.addFracture(Vector(0.76 * cfg.lx, 0.30 * cfg.ly, 0.0),
+                    Vector(0.45 * cfg.lx, 0.64 * cfg.ly, 0.0));
+}
+
 BarrierProbeResult ComputeBarrierProbe(const MeshManager& mgr,
                                        const std::vector<double>& pMatrix,
                                        const TestCaseSpec& cfg) {
@@ -299,11 +316,27 @@ TestCasePlan BuildDefaultPlan() {
     return plan;
 }
 
+TestCasePlan BuildComplexPlan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_co2_varypp_complexfrac_nowell";
+    plan.spec.case_name = "h_co2_varypp_complexfrac_nowell";
+    plan.spec.use_complex_fractures = true;
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 600.0;
+    plan.spec.dt_max = 6000.0;
+    plan.spec.dt_relres_grow_factor = 1.15;
+    plan.spec.max_steps = 4000;
+    plan.spec.target_end_time_s = 2.0e4;
+    return plan;
+}
+
 using BuilderFn = TestCasePlan(*)();
 
 const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
     static const std::unordered_map<std::string, BuilderFn> registry = {
-        {"h_co2_varypp_singlefrac_nowell", &BuildDefaultPlan}
+        {"h_co2_varypp_singlefrac_nowell", &BuildDefaultPlan},
+        {"h_co2_varypp_complexfrac_nowell", &BuildComplexPlan}
     };
     return registry;
 }
@@ -325,8 +358,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
 
     MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
     mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
-    mgr.addFracture(Vector(cfg.frac_x_ratio * cfg.lx, cfg.frac_y0_ratio * cfg.ly, 0.0),
-                    Vector(cfg.frac_x_ratio * cfg.lx, cfg.frac_y1_ratio * cfg.ly, 0.0));
+    AddConfiguredFractures(mgr, cfg);
     mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
 
     mgr.BuildGlobalSystemIndexing();
