@@ -7,6 +7,8 @@
 
 #include "2D_PostProcess.h"
 #include "BoundaryConditionManager.h"
+#include "Case2D_Matlab.h"
+#include "Case2D_ReferenceIO.h"
 #include "FIM_TransientCaseKit.hpp"
 #include "Fracture.h"
 #include "FractureElement.h"
@@ -146,31 +148,10 @@ struct SweepStudyRow {
     double final_monitor_t_l2_norm = 0.0;
 };
 
-struct ProfileReferenceRow {
-    int station_id = -1;
-    double target_axis_m = 0.0;
-    double target_x = 0.0;
-    double target_y = 0.0;
-    double target_time_s = 0.0;
-    double p_ref = 0.0;
-    double t_ref = 0.0;
-};
-
-struct ProfileReferenceTable {
-    std::unordered_map<int, ProfileReferenceRow> rows_by_station_id;
-};
-
-struct MonitorReferenceRow {
-    int sample_id = -1;
-    double target_time_s = 0.0;
-    std::unordered_map<std::string, double> p_ref_by_label;
-    std::unordered_map<std::string, double> t_ref_by_label;
-};
-
-struct MonitorReferenceSeries {
-    std::vector<MonitorReferenceRow> rows;
-    std::unordered_map<int, std::size_t> sample_id_to_row;
-};
+using ProfileReferenceRow = Case2DReferenceIO::ProfileReferenceRow;
+using ProfileReferenceTable = Case2DReferenceIO::ProfileReferenceTable;
+using MonitorReferenceRow = Case2DReferenceIO::MonitorReferenceRow;
+using MonitorReferenceSeries = Case2DReferenceIO::MonitorReferenceSeries;
 
 struct FractureGeometry {
     Vector start;
@@ -824,98 +805,32 @@ void FinalizeMissingMonitorSamples(double finalTime,
 }
 
 void WriteProfileStationDefinitions(const std::vector<SpatialSamplePoint>& stations, const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write profile station definitions: " + path);
-    out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m\n";
-    for (const auto& station : stations) {
-        out << station.id << "," << station.label << "," << station.family << "," << station.location << ","
-            << std::setprecision(12) << station.target_axis_m << "," << station.target_x << "," << station.target_y << ","
-            << station.block_id << "," << station.actual_x << "," << station.actual_y << "\n";
-    }
+    Case2DReferenceIO::WriteProfileStationDefinitions(stations, path);
 }
 
 void WriteMonitorPointDefinitions(const std::vector<SpatialSamplePoint>& points, const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write monitor point definitions: " + path);
-    out << "point_id,label,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m\n";
-    for (const auto& point : points) {
-        out << point.id << "," << point.label << "," << point.location << ","
-            << std::setprecision(12) << point.target_axis_m << "," << point.target_x << "," << point.target_y << ","
-            << point.block_id << "," << point.actual_x << "," << point.actual_y << "\n";
-    }
+    Case2DReferenceIO::WriteMonitorPointDefinitions(points, path);
 }
 
 void WriteProfileSchedule(const std::vector<SnapshotState>& snapshots, const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write profile schedule: " + path);
-    out << "tag,requested_fraction,target_time_s,actual_time_s\n";
-    for (const auto& snapshot : snapshots) {
-        out << snapshot.tag << ","
-            << std::setprecision(12) << snapshot.requested_fraction << ","
-            << snapshot.target_time_s << "," << snapshot.actual_time_s << "\n";
-    }
+    Case2DReferenceIO::WriteProfileSchedule(snapshots, path);
 }
 
 void WriteMonitorSchedule(const std::vector<MonitorScheduleState>& schedule, const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write monitor schedule: " + path);
-    out << "sample_id,target_time_s,actual_time_s\n";
-    for (const auto& sample : schedule) {
-        out << sample.sample_id << ","
-            << std::setprecision(12) << sample.target_time_s << "," << sample.actual_time_s << "\n";
-    }
+    Case2DReferenceIO::WriteMonitorSchedule(schedule, path);
 }
 
 void WriteEngineeringProfileCsv(const std::vector<SpatialSamplePoint>& stations,
                                 const std::string& family,
                                 const SnapshotState& snapshot,
                                 const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write engineering profile csv: " + path);
-    out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m,"
-           "target_time_s,actual_time_s,p_num_pa,t_num_k\n";
-    for (const auto& station : stations) {
-        if (station.family != family) continue;
-        if (station.block_id < 0 ||
-            station.block_id >= static_cast<int>(snapshot.p_blocks.size()) ||
-            station.block_id >= static_cast<int>(snapshot.t_blocks.size())) {
-            throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] invalid block id during engineering profile export.");
-        }
-        out << station.id << "," << station.label << "," << station.family << "," << station.location << ","
-            << std::setprecision(12) << station.target_axis_m << "," << station.target_x << "," << station.target_y << ","
-            << station.block_id << "," << station.actual_x << "," << station.actual_y << ","
-            << snapshot.target_time_s << "," << snapshot.actual_time_s << ","
-            << snapshot.p_blocks[static_cast<std::size_t>(station.block_id)] << ","
-            << snapshot.t_blocks[static_cast<std::size_t>(station.block_id)] << "\n";
-    }
+    Case2DReferenceIO::WriteEngineeringProfileCsv(stations, family, snapshot, path);
 }
 
 void WriteEngineeringMonitorCsv(const std::vector<SpatialSamplePoint>& points,
                                 const std::vector<MonitorScheduleState>& schedule,
                                 const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write engineering monitor csv: " + path);
-    out << "sample_id,target_time_s,actual_time_s";
-    for (const auto& point : points) out << ",p_num_" << point.label;
-    for (const auto& point : points) out << ",t_num_" << point.label;
-    out << "\n";
-    for (const auto& sample : schedule) {
-        out << sample.sample_id << ","
-            << std::setprecision(12) << sample.target_time_s << "," << sample.actual_time_s;
-        for (const auto& point : points) {
-            if (point.block_id < 0 || point.block_id >= static_cast<int>(sample.p_blocks.size())) {
-                throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] invalid pressure block id during engineering monitor export.");
-            }
-            out << "," << sample.p_blocks[static_cast<std::size_t>(point.block_id)];
-        }
-        for (const auto& point : points) {
-            if (point.block_id < 0 || point.block_id >= static_cast<int>(sample.t_blocks.size())) {
-                throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] invalid temperature block id during engineering monitor export.");
-            }
-            out << "," << sample.t_blocks[static_cast<std::size_t>(point.block_id)];
-        }
-        out << "\n";
-    }
+    Case2DReferenceIO::WriteEngineeringMonitorCsv(points, schedule, path);
 }
 
 void WriteAnalyticalFeasibility(const TestCaseSpec& cfg, const std::string& path) {
@@ -1062,37 +977,11 @@ std::vector<SpatialSamplePoint> FilterStationsByFamily(const std::vector<Spatial
 }
 
 ProfileReferenceTable LoadProfileReference(const std::string& path) {
-    const CsvTable table = ReadCsvTable(path);
-    ProfileReferenceTable ref;
-    for (std::size_t row = 0; row < table.rows.size(); ++row) {
-        ProfileReferenceRow item;
-        item.station_id = static_cast<int>(std::llround(CsvGetDouble(table, row, "station_id")));
-        item.target_axis_m = CsvGetDouble(table, row, "target_axis_m");
-        item.target_x = CsvGetDouble(table, row, "target_x_m");
-        item.target_y = CsvGetDouble(table, row, "target_y_m");
-        item.target_time_s = CsvGetDouble(table, row, "target_time_s");
-        item.p_ref = CsvGetDouble(table, row, "p_ref_pa");
-        item.t_ref = CsvGetDouble(table, row, "t_ref_k");
-        ref.rows_by_station_id[item.station_id] = item;
-    }
-    return ref;
+    return Case2DReferenceIO::LoadProfileReference(path);
 }
 
 MonitorReferenceSeries LoadMonitorReference(const std::string& path, const std::vector<SpatialSamplePoint>& monitorPoints) {
-    const CsvTable table = ReadCsvTable(path);
-    MonitorReferenceSeries ref;
-    for (std::size_t row = 0; row < table.rows.size(); ++row) {
-        MonitorReferenceRow item;
-        item.sample_id = static_cast<int>(std::llround(CsvGetDouble(table, row, "sample_id")));
-        item.target_time_s = CsvGetDouble(table, row, "target_time_s");
-        for (const auto& point : monitorPoints) {
-            item.p_ref_by_label[point.label] = CsvGetDouble(table, row, "p_ref_" + point.label);
-            item.t_ref_by_label[point.label] = CsvGetDouble(table, row, "t_ref_" + point.label);
-        }
-        ref.sample_id_to_row[item.sample_id] = ref.rows.size();
-        ref.rows.push_back(item);
-    }
-    return ref;
+    return Case2DReferenceIO::LoadMonitorReference(path, monitorPoints);
 }
 
 ProfileCompareMetrics EvaluateProfileAgainstReference(const std::vector<SpatialSamplePoint>& stations,
@@ -1556,165 +1445,11 @@ void WriteValidationSummaryCsv(const TestCaseSpec& cfg, const TestCaseSummary& s
 }
 
 void WriteMatlabPlotScript(const TestCaseSummary& summary) {
-    std::ofstream out(summary.matlab_script_path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write MATLAB plot script: " + summary.matlab_script_path);
-    out <<
-"rootDir = fileparts(mfilename('fullpath'));\n"
-"if isempty(rootDir)\n"
-"    rootDir = pwd;\n"
-"end\n"
-"figDir = fullfile(rootDir, 'figures');\n"
-"if ~exist(figDir, 'dir')\n"
-"    mkdir(figDir);\n"
-"end\n"
-"\n"
-"requiredRoot = {\n"
-"    fullfile(rootDir, 'validation_summary.csv')\n"
-"    fullfile(rootDir, 'grid_convergence.csv')\n"
-"    fullfile(rootDir, 'time_sensitivity.csv')\n"
-"    fullfile(rootDir, 'compare_monitor_timeseries.csv')\n"
-"    fullfile(rootDir, 'boundary_diagnostics.csv')\n"
-"};\n"
-"for i = 1:numel(requiredRoot)\n"
-"    if ~isfile(requiredRoot{i})\n"
-"        error('Missing required input file: %s', requiredRoot{i});\n"
-"    end\n"
-"end\n"
-"\n"
-"families = {'matrix_horizontal', 'fracture_tangent', 'cross_normal'};\n"
-"tags = {'t010pct', 't050pct', 't100pct'};\n"
-"for iFam = 1:numel(families)\n"
-"    fam = families{iFam};\n"
-"    for iTag = 1:numel(tags)\n"
-"        cmpFile = fullfile(rootDir, ['compare_profile_' fam '_' tags{iTag} '.csv']);\n"
-"        if ~isfile(cmpFile)\n"
-"            error('Missing required profile compare file: %s', cmpFile);\n"
-"        end\n"
-"    end\n"
-"end\n"
-"\n"
-"for iFam = 1:numel(families)\n"
-"    fam = families{iFam};\n"
-"    cmpFile = fullfile(rootDir, ['compare_profile_' fam '_t100pct.csv']);\n"
-"    tbl = readtable(cmpFile);\n"
-"    f = figure('Color', 'w', 'Position', [100 100 1200 420]);\n"
-"    subplot(1,2,1);\n"
-"    plot(tbl.target_axis_m, tbl.p_num_pa, 'LineWidth', 1.6); hold on;\n"
-"    plot(tbl.target_axis_m, tbl.p_ref_pa, '--', 'LineWidth', 1.6);\n"
-"    xlabel('Target Axis (m)'); ylabel('Pressure (Pa)');\n"
-"    title(['Profile Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
-"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
-"    subplot(1,2,2);\n"
-"    plot(tbl.target_axis_m, tbl.t_num_k, 'LineWidth', 1.6); hold on;\n"
-"    plot(tbl.target_axis_m, tbl.t_ref_k, '--', 'LineWidth', 1.6);\n"
-"    xlabel('Target Axis (m)'); ylabel('Temperature (K)');\n"
-"    title(['Temperature Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
-"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
-"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.pdf']), 'ContentType', 'vector');\n"
-"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.png']), 'Resolution', 300);\n"
-"    close(f);\n"
-"end\n"
-"\n"
-"mon = readtable(fullfile(rootDir, 'compare_monitor_timeseries.csv'));\n"
-"labelsP = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 'p_num_'));\n"
-"labelsT = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 't_num_'));\n"
-"f = figure('Color', 'w', 'Position', [120 120 1200 460]);\n"
-"subplot(1,2,1); hold on;\n"
-"for i = 1:numel(labelsP)\n"
-"    refName = strrep(labelsP{i}, 'p_num_', 'p_ref_');\n"
-"    plot(mon.target_time_s, mon.(labelsP{i}), 'LineWidth', 1.2);\n"
-"    plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
-"end\n"
-"xlabel('Time (s)'); ylabel('Pressure (Pa)'); title('Monitor Compare: Pressure'); grid on; box on;\n"
-"subplot(1,2,2); hold on;\n"
-"for i = 1:numel(labelsT)\n"
-"    refName = strrep(labelsT{i}, 't_num_', 't_ref_');\n"
-"    plot(mon.target_time_s, mon.(labelsT{i}), 'LineWidth', 1.2);\n"
-"    plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
-"end\n"
-"xlabel('Time (s)'); ylabel('Temperature (K)'); title('Monitor Compare: Temperature'); grid on; box on;\n"
-"exportgraphics(f, fullfile(figDir, 'monitor_compare.pdf'), 'ContentType', 'vector');\n"
-"exportgraphics(f, fullfile(figDir, 'monitor_compare.png'), 'Resolution', 300);\n"
-"close(f);\n"
-"\n"
-"gridTbl = readtable(fullfile(rootDir, 'grid_convergence.csv'));\n"
-"f = figure('Color', 'w', 'Position', [140 140 1000 420]);\n"
-"subplot(1,2,1);\n"
-"plot(gridTbl.h_char, gridTbl.final_profile_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
-"plot(gridTbl.h_char, gridTbl.final_profile_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
-"set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Normalized L2');\n"
-"title('Grid Convergence: Profile'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"subplot(1,2,2);\n"
-"plot(gridTbl.h_char, gridTbl.final_monitor_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
-"plot(gridTbl.h_char, gridTbl.final_monitor_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
-"set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Normalized L2');\n"
-"title('Grid Convergence: Monitor'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"exportgraphics(f, fullfile(figDir, 'grid_convergence.pdf'), 'ContentType', 'vector');\n"
-"exportgraphics(f, fullfile(figDir, 'grid_convergence.png'), 'Resolution', 300);\n"
-"close(f);\n"
-"\n"
-"timeTbl = readtable(fullfile(rootDir, 'time_sensitivity.csv'));\n"
-"f = figure('Color', 'w', 'Position', [160 160 1000 420]);\n"
-"subplot(1,2,1);\n"
-"plot(timeTbl.dt_init, timeTbl.final_profile_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
-"plot(timeTbl.dt_init, timeTbl.final_profile_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
-"set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Normalized L2');\n"
-"title('Time Sensitivity: Profile'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"subplot(1,2,2);\n"
-"plot(timeTbl.dt_init, timeTbl.final_monitor_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
-"plot(timeTbl.dt_init, timeTbl.final_monitor_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
-"set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Normalized L2');\n"
-"title('Time Sensitivity: Monitor'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
-"exportgraphics(f, fullfile(figDir, 'time_sensitivity.pdf'), 'ContentType', 'vector');\n"
-"exportgraphics(f, fullfile(figDir, 'time_sensitivity.png'), 'Resolution', 300);\n"
-"close(f);\n"
-"\n"
-"diagTbl = readtable(fullfile(rootDir, 'boundary_diagnostics.csv'));\n"
-"f = figure('Color', 'w', 'Position', [170 170 1100 420]);\n"
-"subplot(1,2,1);\n"
-"plot(diagTbl.time_s, diagTbl.left_prescribed_t_avg_k, '-o', 'LineWidth', 1.4); hold on;\n"
-"plot(diagTbl.time_s, diagTbl.right_prescribed_t_avg_k, '-s', 'LineWidth', 1.4);\n"
-"plot(diagTbl.time_s, diagTbl.left_adjacent_t_avg_k, '--o', 'LineWidth', 1.2);\n"
-"plot(diagTbl.time_s, diagTbl.right_adjacent_t_avg_k, '--s', 'LineWidth', 1.2);\n"
-"xlabel('Time (s)'); ylabel('Temperature (K)'); title('Boundary Temperature Diagnostics');\n"
-"legend({'Left prescribed','Right prescribed','Left adjacent cells','Right adjacent cells'}, 'Location', 'best'); grid on; box on;\n"
-"subplot(1,2,2);\n"
-"plot(diagTbl.time_s, diagTbl.domain_t_span_k, '-d', 'LineWidth', 1.6); hold on;\n"
-"yline(10.0, 'k--', 'Threshold');\n"
-"xlabel('Time (s)'); ylabel('Temperature Span (K)'); title('Domain Temperature Span'); grid on; box on;\n"
-"exportgraphics(f, fullfile(figDir, 'boundary_temperature_diagnostics.pdf'), 'ContentType', 'vector');\n"
-"exportgraphics(f, fullfile(figDir, 'boundary_temperature_diagnostics.png'), 'Resolution', 300);\n"
-"close(f);\n"
-"\n"
-"finalProfiles = cellfun(@(fam) readtable(fullfile(rootDir, ['compare_profile_' fam '_t100pct.csv'])), families, 'UniformOutput', false);\n"
-"pNum = []; pRef = []; tNum = []; tRef = []; pErr = []; tErr = [];\n"
-"for i = 1:numel(finalProfiles)\n"
-"    pNum = [pNum; finalProfiles{i}.p_num_pa]; %#ok<AGROW>\n"
-"    pRef = [pRef; finalProfiles{i}.p_ref_pa]; %#ok<AGROW>\n"
-"    tNum = [tNum; finalProfiles{i}.t_num_k]; %#ok<AGROW>\n"
-"    tRef = [tRef; finalProfiles{i}.t_ref_k]; %#ok<AGROW>\n"
-"    pErr = [pErr; finalProfiles{i}.p_abs_err_over_dp]; %#ok<AGROW>\n"
-"    tErr = [tErr; finalProfiles{i}.t_abs_err_over_dt]; %#ok<AGROW>\n"
-"end\n"
-"f = figure('Color', 'w', 'Position', [180 180 1000 420]);\n"
-"subplot(1,2,1);\n"
-"scatter(pRef, pNum, 18, 'filled'); hold on;\n"
-"plot([min(pRef) max(pRef)], [min(pRef) max(pRef)], 'k--', 'LineWidth', 1.2);\n"
-"xlabel('Reference Pressure (Pa)'); ylabel('Engineering Pressure (Pa)'); title('Parity Plot: Pressure'); grid on; box on;\n"
-"subplot(1,2,2);\n"
-"scatter(tRef, tNum, 18, 'filled'); hold on;\n"
-"plot([min(tRef) max(tRef)], [min(tRef) max(tRef)], 'k--', 'LineWidth', 1.2);\n"
-"xlabel('Reference Temperature (K)'); ylabel('Engineering Temperature (K)'); title('Parity Plot: Temperature'); grid on; box on;\n"
-"exportgraphics(f, fullfile(figDir, 'parity.pdf'), 'ContentType', 'vector');\n"
-"exportgraphics(f, fullfile(figDir, 'parity.png'), 'Resolution', 300);\n"
-"close(f);\n"
-"\n"
-"f = figure('Color', 'w', 'Position', [200 200 1000 420]);\n"
-"subplot(1,2,1); histogram(pErr, 20); xlabel('Normalized Pressure Error'); ylabel('Count'); title('Error Histogram: Pressure'); grid on; box on;\n"
-"subplot(1,2,2); histogram(tErr, 20); xlabel('Normalized Temperature Error'); ylabel('Count'); title('Error Histogram: Temperature'); grid on; box on;\n"
-"exportgraphics(f, fullfile(figDir, 'error_histogram.pdf'), 'ContentType', 'vector');\n"
-"exportgraphics(f, fullfile(figDir, 'error_histogram.png'), 'Resolution', 300);\n"
-"close(f);\n";
+    Case2DMatlab::ValidationPlotScriptSpec spec;
+    spec.script_path = summary.matlab_script_path;
+    spec.profile_families = OrderedProfileFamilies();
+    spec.final_tag = "t100pct";
+    Case2DMatlab::WriteSingleFracPTValidationPlotScript(spec);
 }
 
 FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {

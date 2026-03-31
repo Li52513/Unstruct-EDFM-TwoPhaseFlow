@@ -12,5 +12,6 @@ struct ValidationPlotScriptSpec {
 };
 
 void WriteNoFracPTValidationPlotScript(const ValidationPlotScriptSpec& spec);
+void WriteSingleFracPTValidationPlotScript(const ValidationPlotScriptSpec& spec);
 
 } // namespace Case2DMatlab

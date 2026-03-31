@@ -1,17 +1,16 @@
 #include "Case2D_Matlab.h"
+#include "Case2D_ReferenceIO.h"
 
-#include <fstream>
 #include <stdexcept>
 
 namespace Case2DMatlab {
 
 void WriteNoFracPTValidationPlotScript(const ValidationPlotScriptSpec& spec) {
-    std::ofstream out(spec.script_path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) {
-        throw std::runtime_error("[Case2DMatlab] failed to write MATLAB plot script: " + spec.script_path);
-    }
-
-    out <<
+    Case2DReferenceIO::WriteAsciiFile(
+        spec.script_path,
+        "[Case2DMatlab] failed to write MATLAB plot script",
+        [&](std::ofstream& out) {
+            out <<
 "rootDir = fileparts(mfilename('fullpath'));\n"
 "if isempty(rootDir)\n"
 "    rootDir = pwd;\n"
@@ -172,6 +171,182 @@ void WriteNoFracPTValidationPlotScript(const ValidationPlotScriptSpec& spec) {
 "    exportgraphics(f, fullfile(figDir, ['parity_' families{iFam} '.png']), 'Resolution', 300);\n"
 "    close(f);\n"
 "end\n";
+        });
+}
+
+void WriteSingleFracPTValidationPlotScript(const ValidationPlotScriptSpec& spec) {
+    Case2DReferenceIO::WriteAsciiFile(
+        spec.script_path,
+        "[Case2DMatlab] failed to write single-fracture MATLAB plot script",
+        [&](std::ofstream& out) {
+            out <<
+"rootDir = fileparts(mfilename('fullpath'));\n"
+"if isempty(rootDir)\n"
+"    rootDir = pwd;\n"
+"end\n"
+"figDir = fullfile(rootDir, 'figures');\n"
+"if ~exist(figDir, 'dir')\n"
+"    mkdir(figDir);\n"
+"end\n"
+"\n"
+"requiredRoot = {\n"
+"    fullfile(rootDir, 'validation_summary.csv')\n"
+"    fullfile(rootDir, 'grid_convergence.csv')\n"
+"    fullfile(rootDir, 'time_sensitivity.csv')\n"
+"    fullfile(rootDir, 'compare_monitor_timeseries.csv')\n"
+"    fullfile(rootDir, 'boundary_diagnostics.csv')\n"
+"};\n"
+"for i = 1:numel(requiredRoot)\n"
+"    if ~isfile(requiredRoot{i})\n"
+"        error('Missing required input file: %s', requiredRoot{i});\n"
+"    end\n"
+"end\n"
+"\n"
+"families = {";
+
+            for (std::size_t i = 0; i < spec.profile_families.size(); ++i) {
+                if (i != 0) out << ", ";
+                out << "'" << spec.profile_families[i] << "'";
+            }
+
+            out <<
+"};\n"
+"tags = {'t010pct', 't050pct', 't100pct'};\n"
+"finalTag = '" << spec.final_tag << "';\n"
+"\n"
+"for iFam = 1:numel(families)\n"
+"    fam = families{iFam};\n"
+"    for iTag = 1:numel(tags)\n"
+"        cmpFile = fullfile(rootDir, ['compare_profile_' fam '_' tags{iTag} '.csv']);\n"
+"        if ~isfile(cmpFile)\n"
+"            error('Missing required profile compare file: %s', cmpFile);\n"
+"        end\n"
+"    end\n"
+"end\n"
+"\n"
+"for iFam = 1:numel(families)\n"
+"    fam = families{iFam};\n"
+"    cmpFile = fullfile(rootDir, ['compare_profile_' fam '_' finalTag '.csv']);\n"
+"    tbl = readtable(cmpFile);\n"
+"    f = figure('Color', 'w', 'Position', [100 100 1200 420]);\n"
+"    subplot(1,2,1);\n"
+"    plot(tbl.target_axis_m, tbl.p_num_pa, 'LineWidth', 1.6); hold on;\n"
+"    plot(tbl.target_axis_m, tbl.p_ref_pa, '--', 'LineWidth', 1.6);\n"
+"    xlabel('Target Axis (m)'); ylabel('Pressure (Pa)');\n"
+"    title(['Profile Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
+"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
+"    subplot(1,2,2);\n"
+"    plot(tbl.target_axis_m, tbl.t_num_k, 'LineWidth', 1.6); hold on;\n"
+"    plot(tbl.target_axis_m, tbl.t_ref_k, '--', 'LineWidth', 1.6);\n"
+"    xlabel('Target Axis (m)'); ylabel('Temperature (K)');\n"
+"    title(['Temperature Compare: ' strrep(fam, '_', ' ') ' (Final)']);\n"
+"    legend({'Engineering', 'Reference'}, 'Location', 'best'); grid on; box on;\n"
+"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.pdf']), 'ContentType', 'vector');\n"
+"    exportgraphics(f, fullfile(figDir, ['profile_compare_' fam '.png']), 'Resolution', 300);\n"
+"    close(f);\n"
+"end\n"
+"\n"
+"mon = readtable(fullfile(rootDir, 'compare_monitor_timeseries.csv'));\n"
+"labelsP = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 'p_num_'));\n"
+"labelsT = mon.Properties.VariableNames(startsWith(mon.Properties.VariableNames, 't_num_'));\n"
+"f = figure('Color', 'w', 'Position', [120 120 1200 460]);\n"
+"subplot(1,2,1); hold on;\n"
+"for i = 1:numel(labelsP)\n"
+"    refName = strrep(labelsP{i}, 'p_num_', 'p_ref_');\n"
+"    plot(mon.target_time_s, mon.(labelsP{i}), 'LineWidth', 1.2);\n"
+"    plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
+"end\n"
+"xlabel('Time (s)'); ylabel('Pressure (Pa)'); title('Monitor Compare: Pressure'); grid on; box on;\n"
+"subplot(1,2,2); hold on;\n"
+"for i = 1:numel(labelsT)\n"
+"    refName = strrep(labelsT{i}, 't_num_', 't_ref_');\n"
+"    plot(mon.target_time_s, mon.(labelsT{i}), 'LineWidth', 1.2);\n"
+"    plot(mon.target_time_s, mon.(refName), '--', 'LineWidth', 1.0);\n"
+"end\n"
+"xlabel('Time (s)'); ylabel('Temperature (K)'); title('Monitor Compare: Temperature'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'monitor_compare.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'monitor_compare.png'), 'Resolution', 300);\n"
+"close(f);\n"
+"\n"
+"gridTbl = readtable(fullfile(rootDir, 'grid_convergence.csv'));\n"
+"f = figure('Color', 'w', 'Position', [140 140 1000 420]);\n"
+"subplot(1,2,1);\n"
+"plot(gridTbl.h_char, gridTbl.final_profile_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
+"plot(gridTbl.h_char, gridTbl.final_profile_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
+"set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Normalized L2');\n"
+"title('Grid Convergence: Profile'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"subplot(1,2,2);\n"
+"plot(gridTbl.h_char, gridTbl.final_monitor_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
+"plot(gridTbl.h_char, gridTbl.final_monitor_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
+"set(gca, 'XDir', 'reverse'); xlabel('Characteristic Grid Size'); ylabel('Normalized L2');\n"
+"title('Grid Convergence: Monitor'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'grid_convergence.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'grid_convergence.png'), 'Resolution', 300);\n"
+"close(f);\n"
+"\n"
+"timeTbl = readtable(fullfile(rootDir, 'time_sensitivity.csv'));\n"
+"f = figure('Color', 'w', 'Position', [160 160 1000 420]);\n"
+"subplot(1,2,1);\n"
+"plot(timeTbl.dt_init, timeTbl.final_profile_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
+"plot(timeTbl.dt_init, timeTbl.final_profile_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
+"set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Normalized L2');\n"
+"title('Time Sensitivity: Profile'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"subplot(1,2,2);\n"
+"plot(timeTbl.dt_init, timeTbl.final_monitor_p_l2_norm, '-o', 'LineWidth', 1.6); hold on;\n"
+"plot(timeTbl.dt_init, timeTbl.final_monitor_t_l2_norm, '-s', 'LineWidth', 1.6);\n"
+"set(gca, 'XDir', 'reverse'); xlabel('Initial Time Step (s)'); ylabel('Normalized L2');\n"
+"title('Time Sensitivity: Monitor'); legend({'Pressure', 'Temperature'}, 'Location', 'best'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'time_sensitivity.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'time_sensitivity.png'), 'Resolution', 300);\n"
+"close(f);\n"
+"\n"
+"diagTbl = readtable(fullfile(rootDir, 'boundary_diagnostics.csv'));\n"
+"f = figure('Color', 'w', 'Position', [170 170 1100 420]);\n"
+"subplot(1,2,1);\n"
+"plot(diagTbl.time_s, diagTbl.left_prescribed_t_avg_k, '-o', 'LineWidth', 1.4); hold on;\n"
+"plot(diagTbl.time_s, diagTbl.right_prescribed_t_avg_k, '-s', 'LineWidth', 1.4);\n"
+"plot(diagTbl.time_s, diagTbl.left_adjacent_t_avg_k, '--o', 'LineWidth', 1.2);\n"
+"plot(diagTbl.time_s, diagTbl.right_adjacent_t_avg_k, '--s', 'LineWidth', 1.2);\n"
+"xlabel('Time (s)'); ylabel('Temperature (K)'); title('Boundary Temperature Diagnostics');\n"
+"legend({'Left prescribed','Right prescribed','Left adjacent cells','Right adjacent cells'}, 'Location', 'best'); grid on; box on;\n"
+"subplot(1,2,2);\n"
+"plot(diagTbl.time_s, diagTbl.domain_t_span_k, '-d', 'LineWidth', 1.6); hold on;\n"
+"yline(10.0, 'k--', 'Threshold');\n"
+"xlabel('Time (s)'); ylabel('Temperature Span (K)'); title('Domain Temperature Span'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'boundary_temperature_diagnostics.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'boundary_temperature_diagnostics.png'), 'Resolution', 300);\n"
+"close(f);\n"
+"\n"
+"finalProfiles = cellfun(@(fam) readtable(fullfile(rootDir, ['compare_profile_' fam '_' finalTag '.csv'])), families, 'UniformOutput', false);\n"
+"pNum = []; pRef = []; tNum = []; tRef = []; pErr = []; tErr = [];\n"
+"for i = 1:numel(finalProfiles)\n"
+"    pNum = [pNum; finalProfiles{i}.p_num_pa]; %#ok<AGROW>\n"
+"    pRef = [pRef; finalProfiles{i}.p_ref_pa]; %#ok<AGROW>\n"
+"    tNum = [tNum; finalProfiles{i}.t_num_k]; %#ok<AGROW>\n"
+"    tRef = [tRef; finalProfiles{i}.t_ref_k]; %#ok<AGROW>\n"
+"    pErr = [pErr; finalProfiles{i}.p_abs_err_over_dp]; %#ok<AGROW>\n"
+"    tErr = [tErr; finalProfiles{i}.t_abs_err_over_dt]; %#ok<AGROW>\n"
+"end\n"
+"f = figure('Color', 'w', 'Position', [180 180 1000 420]);\n"
+"subplot(1,2,1);\n"
+"scatter(pRef, pNum, 18, 'filled'); hold on;\n"
+"plot([min(pRef) max(pRef)], [min(pRef) max(pRef)], 'k--', 'LineWidth', 1.2);\n"
+"xlabel('Reference Pressure (Pa)'); ylabel('Engineering Pressure (Pa)'); title('Parity Plot: Pressure'); grid on; box on;\n"
+"subplot(1,2,2);\n"
+"scatter(tRef, tNum, 18, 'filled'); hold on;\n"
+"plot([min(tRef) max(tRef)], [min(tRef) max(tRef)], 'k--', 'LineWidth', 1.2);\n"
+"xlabel('Reference Temperature (K)'); ylabel('Engineering Temperature (K)'); title('Parity Plot: Temperature'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'parity.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'parity.png'), 'Resolution', 300);\n"
+"close(f);\n"
+"\n"
+"f = figure('Color', 'w', 'Position', [200 200 1000 420]);\n"
+"subplot(1,2,1); histogram(pErr, 20); xlabel('Normalized Pressure Error'); ylabel('Count'); title('Error Histogram: Pressure'); grid on; box on;\n"
+"subplot(1,2,2); histogram(tErr, 20); xlabel('Normalized Temperature Error'); ylabel('Count'); title('Error Histogram: Temperature'); grid on; box on;\n"
+"exportgraphics(f, fullfile(figDir, 'error_histogram.pdf'), 'ContentType', 'vector');\n"
+"exportgraphics(f, fullfile(figDir, 'error_histogram.png'), 'Resolution', 300);\n"
+"close(f);\n";
+        });
 }
 
 } // namespace Case2DMatlab

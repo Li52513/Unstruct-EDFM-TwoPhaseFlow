@@ -2,15 +2,15 @@
 
 ## Frozen Decisions
 - System title is `A1-F12`; 2D cases are `A1-C12` and 3D cases are `D1-F12`.
-- Keep descriptive `.h/.cpp` template filenames; `A1-F12` is provided through a central catalog/dispatcher mapping.
+- Keep descriptive `.h/.cpp` template filenames; `A1-F12` is exposed through a central catalog/dispatcher mapping.
 - Every catalog case exposes four staged entry points: `RunSolveOnly`, `RunPrepareReference`, `RunValidateOnly`, `RunFullWorkflow`.
-- All template artifacts follow the five-directory contract: `studies/`, `figures/`, `engineering/`, `reference/`, `report/`.
-- COMSOL remains weakly coupled: templates emit/consume reference artifacts, while external Java/PowerShell automation executes COMSOL.
+- All case artifacts follow the five-directory contract: `studies/`, `figures/`, `engineering/`, `reference/`, `report/`.
+- COMSOL remains weakly coupled: templates emit and consume reference artifacts, while external Java/PowerShell automation executes COMSOL.
 - Well defaults are frozen as injector-rate + producer-BHP; two-phase well cases inject CO2; thermal well cases use cold injection.
-- `CaseMetadata` is frozen to carry `case_code`, `dispatcher_key`, `case_slug`, `description`, `reference_mode`, `implementation_status`, `output_root`, `well_control_policy`, `injection_fluid`, `thermal_injection_policy`, plus the six enum axes `dimension/equation_mode/property_mode/fracture_mode/well_mode`.
+- `CaseMetadata` is frozen to carry `case_code`, `dispatcher_key`, `case_slug`, `description`, `reference_mode`, `implementation_status`, `output_root`, `well_control_policy`, `injection_fluid`, `thermal_injection_policy`, plus the six enum axes `dimension`, `equation_mode`, `property_mode`, `fracture_mode`, `well_mode`.
 - `CaseArtifactPaths` is frozen to carry the five-directory contract plus the derived file paths `engineering_stage_manifest_path`, `reference_contract_path`, and `report_status_markdown_path`.
 - `ValidationSpec2D/3D` is frozen as the shared contract for validation variables, profile snapshots, characteristic lines, observation points, grid-study tags, time-step study values, and required well-series outputs; 3D additionally carries characteristic slice definitions.
-- `WellTemplateSpec` is frozen as the shared contract for injector/producer naming, control policy, injection fluid, thermal policy, default quarter/three-quarter placement, control modes, target values, injection temperature, and the “avoid direct fracture completion” default.
+- `WellTemplateSpec` is frozen as the shared contract for injector/producer naming, control policy, injection fluid, thermal policy, default quarter/three-quarter placement, control modes, target values, injection temperature, and the default rule to avoid direct fracture completion.
 - Family default acceptance-policy placeholders are frozen by equation family:
   - `A/D`: pressure profile + pressure monitor; when wells exist, require `well_bhp` and `well_rate`.
   - `B/E`: pressure/temperature profile + pressure/temperature monitor; when wells exist, require `well_bhp`, `well_rate`, and `production_temperature`.
@@ -26,25 +26,28 @@
 - Commit timing is governed by [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md); after each completed step, check this file before deciding whether to commit.
 
 ## Current Phase
-- Phase: M2 in progress; `M2-S1` and `M2-S2` are complete, and the next step is `M2-S3` extraction of the B3 fracture-aware validation chain in isolated worktree `codex/a1-f12-exec`
+- Phase: `M2` in progress; `M2-S1` through `M2-S3` are complete, and the next step is `M2-S4` interface consolidation across the four 2D shared modules in isolated worktree `codex/a1-f12-exec`.
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
 - Added memory writer helper in [CaseCommon_Memory.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Memory.h) and [CaseCommon_Memory.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Memory.cpp).
 - Added 72-case central catalog in [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h) and [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp).
 - Added skeleton bootstrap helper in [CaseCommon_Skeleton.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Skeleton.h) and [CaseCommon_Skeleton.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Skeleton.cpp).
-- Retrofitted staged APIs into the currently implemented 2D no-well templates: A1, A2, A3, A4, B1, B3.
-- Disabled template-internal COMSOL autorun defaults for B1 and B3 to preserve weak coupling.
-- Bootstrapped staged skeleton templates for C1, A7, B7 and C7.
+- Retrofitted staged APIs into the currently implemented 2D no-well templates: `A1`, `A2`, `A3`, `A4`, `B1`, `B3`.
+- Disabled template-internal COMSOL autorun defaults for `B1` and `B3` to preserve weak coupling.
+- Bootstrapped staged skeleton templates for `C1`, `A7`, `B7`, and `C7`.
 - Updated [main.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/main.cpp) to support `--case=A1` and `--stage=...`.
 - Created the root-level execution tracker [A1_F12_进度记录.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_进度记录.md) in the isolated worktree and seeded M0 progress.
-- Verified the isolated worktree can build in `Debug|x64` and that `--list` enumerates the full A1-F12 catalog plus legacy/auxiliary cases.
+- Verified the isolated worktree can build in `Debug|x64` and that `--list` enumerates the full A1-F12 catalog plus legacy and auxiliary cases.
 - Added [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md) to govern when the branch should commit and which local support files should stay uncommitted.
-- Added 2D donor extraction helpers [Case2D_Validation.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Validation.h), [Case2D_Validation.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Validation.cpp), [Case2D_Studies.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Studies.h), and [Case2D_Studies.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Studies.cpp) and rewired A1 donor validation/study logic through them.
+- Added 2D donor extraction helpers [Case2D_Validation.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Validation.h), [Case2D_Validation.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Validation.cpp), [Case2D_Studies.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Studies.h), and [Case2D_Studies.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Studies.cpp), and rewired A1 donor validation/study logic through them.
 - Verified the `M2-S1` A1 donor extraction with fresh `Debug|x64` MSBuild and a full `--case=A1 --stage=solve_only` smoke run that completed successfully and regenerated the analytical summary plus grid/time study CSVs under `Test/Transient/FullCaseTest/H_CO2_ConstPP/h_co2_constpp_nofrac_nowell`.
 - Added shared B1 donor extraction helpers [Case2D_ReferenceIO.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_ReferenceIO.h), [Case2D_ReferenceIO.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_ReferenceIO.cpp), [Case2D_Matlab.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Matlab.h), and [Case2D_Matlab.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Matlab.cpp), then rewired B1 donor `engineering/reference` CSV export, validation summary output, and no-fracture PT Matlab script generation through them.
 - Hardened the shared `Case2DReferenceIO` output path against worktree-length regressions by adding the short-ASCII staging-file workflow and Win32 extended-path (`\\\\?\\`) commit fallback needed under `.worktrees\\codex\\a1-f12-exec`.
 - Verified the `M2-S2` B1 donor extraction with fresh `Debug|x64` MSBuild and a full `--case=B1 --stage=validate_only` smoke run that no longer fails during engineering export; it now reaches the expected `COMSOL temperature reference files are missing` branch after completing the legacy engineering solve.
+- Extended [Case2D_Matlab.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Matlab.h) and [Case2D_Matlab.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Matlab.cpp) with a fracture-aware single-fracture PT validation script writer that reuses the shared path-safe ASCII staging workflow for Matlab output under long worktree paths.
+- Rewired the B3 donor [Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.cpp) so fracture-aware profile/monitor engineering exports, station and schedule exports, profile reference loading, monitor reference loading, and Matlab script generation now route through `Case2DReferenceIO` and `Case2DMatlab` instead of donor-local file writers.
+- Verified the `M2-S3` B3 donor extraction with fresh `Debug|x64` MSBuild and a worktree-local `--case=B3 --stage=prepare_reference` smoke run that completed to `validation_status=prepared_reference_inputs`, emitted fracture-aware engineering outputs plus validation summary artifacts under `Test/Transient/FullCaseTest/H_T_CO2_ConstPP/h_t_co2_constpp_singlefrac_nowell`, and correctly reported missing COMSOL profile/monitor reference files instead of failing during engineering/profile export.
 - Completed `M1-S1` by freezing the `CaseMetadata` field set in [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h) and [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp), adding catalog-side defaults and metadata contract validation, then re-verifying `Debug|x64` build and `--list`.
 - Completed `M1-S2` by freezing `CaseArtifactPaths`, `ValidationSpec2D/3D`, and `WellTemplateSpec` in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp), then routing [CaseCommon_Skeleton.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Skeleton.cpp) through the unified artifact paths and re-verifying a full `Debug|x64` build.
 - Completed `M1-S3` by freezing family-level acceptance-policy placeholders in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h), wiring `A/D`, `B/E`, and `C/F` defaults in [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp), and re-verifying `Debug|x64` build while intentionally keeping numeric tolerances as placeholders.
@@ -57,43 +60,36 @@
 - `B3`: donor for fracture-aware validation, fracture sampling, and fracture figure generation.
 
 ## Replaced Legacy Entries
-- Legacy standalone entries for A1/B1/A3/A2/A4/B3 now route through `RunFullWorkflow()` instead of raw `RunTestCase()`.
+- Legacy standalone entries for `A1/B1/A3/A2/A4/B3` now route through `RunFullWorkflow()` instead of raw `RunTestCase()`.
 - Legacy descriptive `test_h_*` entries are still kept for backward compatibility during migration.
 
 ## How To Read Case Codes
 ### Family Prefix Meaning
-- `A`: 2D, 单相 CO2, N=1, 压力扩散
-- `B`: 2D, 单相 CO2, N=2, 渗流传热
-- `C`: 2D, 两相 CO2/H2O, N=3, 渗流传热
-- `D`: 3D, 单相 CO2, N=1, 压力扩散
-- `E`: 3D, 单相 CO2, N=2, 渗流传热
-- `F`: 3D, 两相 CO2/H2O, N=3, 渗流传热
+- `A`: 2D, single-phase CO2, `N=1`, pressure diffusion.
+- `B`: 2D, single-phase CO2, `N=2`, flow and heat transport.
+- `C`: 2D, two-phase CO2/H2O, `N=3`, flow and heat transport.
+- `D`: 3D, single-phase CO2, `N=1`, pressure diffusion.
+- `E`: 3D, single-phase CO2, `N=2`, flow and heat transport.
+- `F`: 3D, two-phase CO2/H2O, `N=3`, flow and heat transport.
 
 ### Index Meaning
-- `1`: 常物性, 无裂缝, 无井
-- `2`: 变物性, 无裂缝, 无井
-- `3`: 常物性, 单裂缝, 无井
-- `4`: 变物性, 单裂缝, 无井
-- `5`: 常物性, 复杂裂缝, 无井
-- `6`: 变物性, 复杂裂缝, 无井
-- `7`: 常物性, 无裂缝, 一注一采
-- `8`: 变物性, 无裂缝, 一注一采
-- `9`: 常物性, 单裂缝, 一注一采
-- `10`: 变物性, 单裂缝, 一注一采
-- `11`: 常物性, 复杂裂缝, 一注一采
-- `12`: 变物性, 复杂裂缝, 一注一采
-
-### Examples
-- `A1` = 2D, 单相 CO2, 常物性, 无裂缝, 无井, 压力扩散
-- `B7` = 2D, 单相 CO2, 常物性, 无裂缝, 一注一采, 渗流传热
-- `C10` = 2D, 两相 CO2/H2O, 变物性, 单裂缝, 一注一采, 渗流传热
-- `E3` = 3D, 单相 CO2, 常物性, 单裂缝, 无井, 渗流传热
-- `F12` = 3D, 两相 CO2/H2O, 变物性, 复杂裂缝, 一注一采, 渗流传热
+- `1`: constant properties, no fracture, no well.
+- `2`: variable properties, no fracture, no well.
+- `3`: constant properties, single fracture, no well.
+- `4`: variable properties, single fracture, no well.
+- `5`: constant properties, complex fracture, no well.
+- `6`: variable properties, complex fracture, no well.
+- `7`: constant properties, no fracture, one injector + one producer.
+- `8`: variable properties, no fracture, one injector + one producer.
+- `9`: constant properties, single fracture, one injector + one producer.
+- `10`: variable properties, single fracture, one injector + one producer.
+- `11`: constant properties, complex fracture, one injector + one producer.
+- `12`: variable properties, complex fracture, one injector + one producer.
 
 ### Status Legend
-- `implemented`: 已接入 catalog 且存在可调用实现
-- `skeleton`: 已有独立模板文件、阶段入口和 artifact 合同，但尚未完成真实求解/验证
-- `planned`: 已在 catalog 登记，但尚未建立对应模板实现
+- `implemented`: catalog-routable and backed by a callable implementation.
+- `skeleton`: has dedicated files, staged entry points, and artifact contract, but not yet a real solver/validation implementation.
+- `planned`: registered in the catalog, but no dedicated implementation yet.
 
 ## Case Status Matrix
 ### 2D: A1-C12
@@ -177,14 +173,15 @@
 - `A1/A2/A3/A4` still collapse `solve_only/prepare_reference/validate_only/full_workflow` onto one legacy execution path and do not yet use the unified five-directory artifact split; `M2-S1` only extracted A1 donor validation/study helpers, not the staged-semantics split.
 - `B1/B3` still keep large amounts of generic validation/reference/study/Matlab logic inside template files; `B1 validate_only` still replays a fresh engineering solve internally, and `B3 RunSolveOnly` currently routes through the prepare-reference plan.
 - `B1` now routes much of its `engineering/reference` I/O and Matlab generation through shared modules, but it still contains transitional dead bodies behind wrapper returns (`WriteValidationSummary`, `WriteMatlabPlotScript`) and still needs `M2-S5` / `M3` cleanup to become a genuinely thin template.
+- `B3` now routes fracture-aware engineering/reference I/O and Matlab generation through shared modules, but it still retains donor-local fracture geometry sampling, profile/monitor compare kernels, study aggregation, and summary/report bodies; `M2-S4/M2-S5` still need to extract or trim these remaining template-local validation pieces.
 - Most of the 72 catalog cases are registered but still have `planned` or `skeleton` status.
 - The VS/MSBuild build in this worktree currently depends on local `.vcxproj` edits to include the new `Case2D_*` source files; those project-file edits remain local build support and are not part of the tracked branch payload.
 
 ## Next Steps
-- Start `M2-S3` by extracting B3 fracture-aware sampling, reference I/O, and figure-generation logic into the shared 2D modules.
-- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M2-S1` now forms a coherent A1 donor-extraction checkpoint.
-- Continue thinning B1 so staged semantics are physically separated, not just API-separated.
-- Lift the N=1 well restriction and promote A7 from `skeleton` to `implemented`.
+- Start `M2-S4` by reconciling the four 2D shared modules as the formal public surface for the no-fracture and single-fracture donors, including any remaining fracture-aware helper boundaries.
+- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M2-S3` now forms a coherent B3 fracture-aware extraction checkpoint.
+- Continue thinning `B1/B3` so staged semantics are physically separated and donor-local dead bodies disappear, not just API-separated.
+- Lift the N=1 well restriction and promote `A7` from `skeleton` to `implemented`.
 
 ## Key Files
 - [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md)
@@ -197,6 +194,10 @@
 - [Case2D_Validation.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Validation.cpp)
 - [Case2D_Studies.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Studies.h)
 - [Case2D_Studies.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Studies.cpp)
+- [Case2D_ReferenceIO.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_ReferenceIO.h)
+- [Case2D_ReferenceIO.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_ReferenceIO.cpp)
+- [Case2D_Matlab.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Matlab.h)
+- [Case2D_Matlab.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Case2D_Matlab.cpp)
 - [Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.cpp)
 - [Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.cpp)
 - [Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.cpp)
