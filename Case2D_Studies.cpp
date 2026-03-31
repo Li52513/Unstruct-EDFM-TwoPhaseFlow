@@ -1,28 +1,27 @@
 #include "Case2D_Studies.h"
+#include "Case2D_ReferenceIO.h"
 
 #include <cmath>
-#include <fstream>
 #include <iomanip>
-#include <stdexcept>
 
 namespace Case2DStudies {
 
 void WriteStudyCSV(const std::vector<SweepStudyRow>& rows,
                    const std::string& csvPath,
                    const std::string& study) {
-    std::ofstream csv(csvPath.c_str(), std::ios::out | std::ios::trunc);
-    if (!csv.good()) {
-        throw std::runtime_error("[Case2D_Studies] failed to open study csv: " + csvPath);
-    }
-
-    csv << "study,label,case_dir,nx,ny,dt_init,h_char,t_end,steps,l1_norm,l2_norm,linf_norm\n";
-    for (const auto& row : rows) {
-        csv << study << "," << row.label << "," << row.case_dir << ","
-            << row.nx << "," << row.ny << ","
-            << std::setprecision(12) << row.dt_init << ","
-            << row.h_char << "," << row.t_end << "," << row.steps << ","
-            << row.l1_norm << "," << row.l2_norm << "," << row.linf_norm << "\n";
-    }
+    Case2DReferenceIO::WriteAsciiFile(
+        csvPath,
+        "[Case2D_Studies] failed to write study csv",
+        [&](std::ofstream& csv) {
+            csv << "study,label,case_dir,nx,ny,dt_init,h_char,t_end,steps,l1_norm,l2_norm,linf_norm\n";
+            for (const auto& row : rows) {
+                csv << study << "," << row.label << "," << row.case_dir << ","
+                    << row.nx << "," << row.ny << ","
+                    << std::setprecision(12) << row.dt_init << ","
+                    << row.h_char << "," << row.t_end << "," << row.steps << ","
+                    << row.l1_norm << "," << row.l2_norm << "," << row.linf_norm << "\n";
+            }
+        });
 }
 
 bool IsMonotonicNonIncreasingL2(const std::vector<SweepStudyRow>& rows) {

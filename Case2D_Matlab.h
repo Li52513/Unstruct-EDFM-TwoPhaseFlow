@@ -5,6 +5,8 @@
 
 namespace Case2DMatlab {
 
+// Shared Matlab-script emitters for 2D validation figure generation.
+
 struct ValidationPlotScriptSpec {
     std::string script_path;
     std::vector<std::string> profile_families;

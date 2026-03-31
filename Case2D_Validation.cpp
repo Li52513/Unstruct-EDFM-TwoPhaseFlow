@@ -1,10 +1,10 @@
 #include "Case2D_Validation.h"
 
+#include "Case2D_ReferenceIO.h"
 #include "MeshManager.h"
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -117,32 +117,38 @@ AnalyticalMetrics EvaluatePressureDiffusionAnalyticalMetrics(const MeshManager& 
     double maxAbs = 0.0;
     int maxErrCell = -1;
 
-    std::ofstream csv;
+    const auto accumulateMetrics = [&](std::ofstream* csv) {
+        if (csv != nullptr) {
+            (*csv) << "cell_id,x,y,p_num,p_ana,abs_err,abs_err_over_dP\n";
+        }
+
+        for (std::size_t i = 0; i < nUse; ++i) {
+            const double x = cells[i].center.m_x;
+            const double y = cells[i].center.m_y;
+            const double pNum = pBlocks[i];
+            const double pAna = EvaluatePressureDiffusionAnalyticalPressure(cfg, x, snapshot.actual_time_s);
+            const double absErr = std::abs(pNum - pAna);
+            sumAbs += absErr;
+            sumSq += absErr * absErr;
+            if (absErr > maxAbs) {
+                maxAbs = absErr;
+                maxErrCell = static_cast<int>(i);
+            }
+
+            if (csv != nullptr) {
+                (*csv) << i << "," << std::setprecision(12) << x << "," << y << ","
+                       << pNum << "," << pAna << "," << absErr << "," << (absErr / deltaPAbs) << "\n";
+            }
+        }
+    };
+
     if (writeCsv) {
-        csv.open(csvPath.c_str(), std::ios::out | std::ios::trunc);
-        if (!csv.good()) {
-            throw std::runtime_error("[Case2D_Validation] failed to open analytical csv: " + csvPath);
-        }
-        csv << "cell_id,x,y,p_num,p_ana,abs_err,abs_err_over_dP\n";
-    }
-
-    for (std::size_t i = 0; i < nUse; ++i) {
-        const double x = cells[i].center.m_x;
-        const double y = cells[i].center.m_y;
-        const double pNum = pBlocks[i];
-        const double pAna = EvaluatePressureDiffusionAnalyticalPressure(cfg, x, snapshot.actual_time_s);
-        const double absErr = std::abs(pNum - pAna);
-        sumAbs += absErr;
-        sumSq += absErr * absErr;
-        if (absErr > maxAbs) {
-            maxAbs = absErr;
-            maxErrCell = static_cast<int>(i);
-        }
-
-        if (writeCsv) {
-            csv << i << "," << std::setprecision(12) << x << "," << y << ","
-                << pNum << "," << pAna << "," << absErr << "," << (absErr / deltaPAbs) << "\n";
-        }
+        Case2DReferenceIO::WriteAsciiFile(
+            csvPath,
+            "[Case2D_Validation] failed to write analytical csv",
+            [&](std::ofstream& csv) { accumulateMetrics(&csv); });
+    } else {
+        accumulateMetrics(nullptr);
     }
 
     AnalyticalMetrics metrics;
@@ -193,75 +199,75 @@ void WritePressureProfileCSV(const MeshManager& mgr,
         bucket.count += 1;
     }
 
-    std::ofstream csv(csvPath.c_str(), std::ios::out | std::ios::trunc);
-    if (!csv.good()) {
-        throw std::runtime_error("[Case2D_Validation] failed to open profile csv: " + csvPath);
-    }
-
-    csv << "station_id,x,p_num_avg,p_ana,abs_err,abs_err_over_dP,n_cells\n";
     const double deltaPAbs = std::max(std::abs(cfg.p_left - cfg.p_right), 1.0);
-    for (int ix = 0; ix < xStationCount; ++ix) {
-        const Bucket& bucket = buckets[static_cast<std::size_t>(ix)];
-        if (bucket.count <= 0) {
-            continue;
-        }
-        const double xMean = bucket.x_sum / static_cast<double>(bucket.count);
-        const double pNumAvg = bucket.p_sum / static_cast<double>(bucket.count);
-        const double pAna = EvaluatePressureDiffusionAnalyticalPressure(cfg, xMean, snapshot.actual_time_s);
-        const double absErr = std::abs(pNumAvg - pAna);
-        csv << ix << "," << std::setprecision(12) << xMean << "," << pNumAvg << ","
-            << pAna << "," << absErr << "," << (absErr / deltaPAbs) << "," << bucket.count << "\n";
-    }
+    Case2DReferenceIO::WriteAsciiFile(
+        csvPath,
+        "[Case2D_Validation] failed to write profile csv",
+        [&](std::ofstream& csv) {
+            csv << "station_id,x,p_num_avg,p_ana,abs_err,abs_err_over_dP,n_cells\n";
+            for (int ix = 0; ix < xStationCount; ++ix) {
+                const Bucket& bucket = buckets[static_cast<std::size_t>(ix)];
+                if (bucket.count <= 0) {
+                    continue;
+                }
+                const double xMean = bucket.x_sum / static_cast<double>(bucket.count);
+                const double pNumAvg = bucket.p_sum / static_cast<double>(bucket.count);
+                const double pAna = EvaluatePressureDiffusionAnalyticalPressure(cfg, xMean, snapshot.actual_time_s);
+                const double absErr = std::abs(pNumAvg - pAna);
+                csv << ix << "," << std::setprecision(12) << xMean << "," << pNumAvg << ","
+                    << pAna << "," << absErr << "," << (absErr / deltaPAbs) << "," << bucket.count << "\n";
+            }
+        });
 }
 
 void WritePressureDiffusionSummaryReport(const PressureDiffusionSummaryReport& report,
                                          const std::string& path) {
-    std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-    if (!out.good()) {
-        throw std::runtime_error("[Case2D_Validation] failed to open analytical summary: " + path);
-    }
-
-    out << "case=" << report.case_name << "\n";
-    out << "output_dir=" << report.output_dir << "\n";
-    out << "mesh=" << report.nx << "x" << report.ny << "\n";
-    out << "cells=" << report.n_cells << "\n";
-    out << "h_char=" << std::setprecision(12) << report.h_char << "\n";
-    out << "t_end=" << report.t_end << "\n";
-    out << "steps=" << report.steps << "\n";
-    out << "pressure_diffusivity=" << report.pressure_diffusivity << "\n";
-    out << "gravity_vector=(" << report.gravity_x << "," << report.gravity_y << "," << report.gravity_z << ")\n";
-    out << "non_orthogonal_correction=" << BoolString(report.non_orthogonal_correction) << "\n";
-    out << "final_l1_norm=" << report.final_l1_norm << "\n";
-    out << "final_l2_norm=" << report.final_l2_norm << "\n";
-    out << "final_linf_norm=" << report.final_linf_norm << "\n";
-    out << "l2_threshold=" << report.l2_threshold << "\n";
-    out << "linf_threshold=" << report.linf_threshold << "\n";
-    out << "grid_convergence_ok=" << BoolString(report.grid_convergence_ok) << "\n";
-    out << "time_sensitivity_ok=" << BoolString(report.time_sensitivity_ok) << "\n";
-    out << "analytical_passed=" << BoolString(report.analytical_passed) << "\n";
-    if (!report.grid_convergence_csv_path.empty()) {
-        out << "grid_convergence_csv=" << report.grid_convergence_csv_path << "\n";
-    }
-    if (!report.time_sensitivity_csv_path.empty()) {
-        out << "time_sensitivity_csv=" << report.time_sensitivity_csv_path << "\n";
-    }
-    out << "\n[report_metrics]\n";
-    for (const auto& metrics : report.report_metrics) {
-        out << metrics.tag
-            << " requested_fraction=" << metrics.requested_fraction
-            << " target_time_s=" << metrics.target_time_s
-            << " actual_time_s=" << metrics.actual_time_s
-            << " l1_norm=" << metrics.l1_norm
-            << " l2_norm=" << metrics.l2_norm
-            << " linf_norm=" << metrics.linf_norm
-            << " max_err_cell=" << metrics.max_err_cell << "\n";
-        if (!metrics.compare_csv_path.empty()) {
-            out << "compare_csv=" << metrics.compare_csv_path << "\n";
-        }
-        if (!metrics.profile_csv_path.empty()) {
-            out << "profile_csv=" << metrics.profile_csv_path << "\n";
-        }
-    }
+    Case2DReferenceIO::WriteAsciiFile(
+        path,
+        "[Case2D_Validation] failed to write analytical summary",
+        [&](std::ofstream& out) {
+            out << "case=" << report.case_name << "\n";
+            out << "output_dir=" << report.output_dir << "\n";
+            out << "mesh=" << report.nx << "x" << report.ny << "\n";
+            out << "cells=" << report.n_cells << "\n";
+            out << "h_char=" << std::setprecision(12) << report.h_char << "\n";
+            out << "t_end=" << report.t_end << "\n";
+            out << "steps=" << report.steps << "\n";
+            out << "pressure_diffusivity=" << report.pressure_diffusivity << "\n";
+            out << "gravity_vector=(" << report.gravity_x << "," << report.gravity_y << "," << report.gravity_z << ")\n";
+            out << "non_orthogonal_correction=" << BoolString(report.non_orthogonal_correction) << "\n";
+            out << "final_l1_norm=" << report.final_l1_norm << "\n";
+            out << "final_l2_norm=" << report.final_l2_norm << "\n";
+            out << "final_linf_norm=" << report.final_linf_norm << "\n";
+            out << "l2_threshold=" << report.l2_threshold << "\n";
+            out << "linf_threshold=" << report.linf_threshold << "\n";
+            out << "grid_convergence_ok=" << BoolString(report.grid_convergence_ok) << "\n";
+            out << "time_sensitivity_ok=" << BoolString(report.time_sensitivity_ok) << "\n";
+            out << "analytical_passed=" << BoolString(report.analytical_passed) << "\n";
+            if (!report.grid_convergence_csv_path.empty()) {
+                out << "grid_convergence_csv=" << report.grid_convergence_csv_path << "\n";
+            }
+            if (!report.time_sensitivity_csv_path.empty()) {
+                out << "time_sensitivity_csv=" << report.time_sensitivity_csv_path << "\n";
+            }
+            out << "\n[report_metrics]\n";
+            for (const auto& metrics : report.report_metrics) {
+                out << metrics.tag
+                    << " requested_fraction=" << metrics.requested_fraction
+                    << " target_time_s=" << metrics.target_time_s
+                    << " actual_time_s=" << metrics.actual_time_s
+                    << " l1_norm=" << metrics.l1_norm
+                    << " l2_norm=" << metrics.l2_norm
+                    << " linf_norm=" << metrics.linf_norm
+                    << " max_err_cell=" << metrics.max_err_cell << "\n";
+                if (!metrics.compare_csv_path.empty()) {
+                    out << "compare_csv=" << metrics.compare_csv_path << "\n";
+                }
+                if (!metrics.profile_csv_path.empty()) {
+                    out << "profile_csv=" << metrics.profile_csv_path << "\n";
+                }
+            }
+        });
 }
 
 } // namespace Case2DValidation

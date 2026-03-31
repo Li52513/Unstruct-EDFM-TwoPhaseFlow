@@ -7,6 +7,8 @@ class MeshManager;
 
 namespace Case2DValidation {
 
+// Shared analytical-validation surface for 2D pressure-diffusion donors.
+
 struct PressureDiffusionAnalyticalConfig {
     double lx = 0.0;
     double p_init = 0.0;

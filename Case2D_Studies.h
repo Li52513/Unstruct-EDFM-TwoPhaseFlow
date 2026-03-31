@@ -5,6 +5,8 @@
 
 namespace Case2DStudies {
 
+// Shared sweep-study serialization helpers for 2D donors.
+
 struct SweepStudyRow {
     std::string label;
     std::string case_dir;

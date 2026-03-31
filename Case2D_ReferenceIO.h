@@ -15,6 +15,8 @@
 
 namespace Case2DReferenceIO {
 
+// Shared path-safe CSV/report I/O surface for 2D validation workflows.
+
 struct CsvTable {
     std::vector<std::string> headers;
     std::unordered_map<std::string, std::size_t> index_by_header;
