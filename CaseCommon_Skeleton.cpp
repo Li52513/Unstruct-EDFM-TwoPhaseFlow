@@ -52,20 +52,20 @@ CaseArtifactPaths PrepareSkeletonArtifacts(const SkeletonTemplateContext& ctx, C
     report += "- `engineering/` for solver-side raw outputs and reference specs\n";
     report += "- `reference/` for COMSOL or analytical reference payloads\n";
     report += "- `report/` for summaries and Matlab scripts\n";
-    WriteTextFile(artifacts.report_dir + "/template_status.md", report);
+    WriteTextFile(artifacts.report_status_markdown_path, report);
 
     std::string engineering;
     engineering += "stage=" + std::string(ToString(stage)) + "\n";
     engineering += "case_code=" + ctx.case_code + "\n";
     engineering += "case_slug=" + ctx.case_slug + "\n";
     engineering += "status=skeleton\n";
-    WriteTextFile(artifacts.engineering_dir + "/stage_manifest.txt", engineering);
+    WriteTextFile(artifacts.engineering_stage_manifest_path, engineering);
 
     std::string reference;
     reference += "reference_mode=external_weak_coupling\n";
     reference += "expected_writer=java_or_ps1_wrapper\n";
     reference += "status=pending\n";
-    WriteTextFile(artifacts.reference_dir + "/reference_contract.txt", reference);
+    WriteTextFile(artifacts.reference_contract_path, reference);
 
     std::string scriptStub;
     scriptStub += "% " + ctx.case_code + " Matlab script placeholder\n";

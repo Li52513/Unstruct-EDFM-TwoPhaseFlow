@@ -19,6 +19,16 @@
 namespace CaseCommon {
 namespace {
 
+bool IsAllowedToken(const std::string& value,
+                    std::initializer_list<const char*> allowed) {
+    for (const char* token : allowed) {
+        if (value == token) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::string NormalizeKey(const std::string& text) {
     std::string out = text;
     std::transform(out.begin(), out.end(), out.begin(),
@@ -191,10 +201,144 @@ std::string BuildReferenceMode(const std::string& caseCode,
     return "comsol";
 }
 
+std::string BuildOutputRoot() {
+    return "Test/Transient/A1_F12_TemplateSystem";
+}
+
+std::string BuildWellControlPolicy(CaseWellMode well) {
+    return (well == CaseWellMode::NoWell)
+        ? "none"
+        : "injector_rate_producer_bhp";
+}
+
+std::string BuildInjectionFluid(CaseWellMode well) {
+    return (well == CaseWellMode::NoWell)
+        ? "none"
+        : "co2";
+}
+
+std::string BuildThermalInjectionPolicy(CaseEquationMode eq, CaseWellMode well) {
+    if (well == CaseWellMode::NoWell) {
+        return "none";
+    }
+    return (eq == CaseEquationMode::N1)
+        ? "none"
+        : "cold_injection";
+}
+
+FamilyAcceptancePolicy BuildPressureDiffusionAcceptancePolicy() {
+    FamilyAcceptancePolicy policy;
+    policy.family_group_key = "A/D";
+    policy.required_profile_variables = {"pressure"};
+    policy.required_monitor_variables = {"pressure"};
+    policy.required_well_series_when_present = {"well_bhp", "well_rate"};
+    return policy;
+}
+
+FamilyAcceptancePolicy BuildSinglePhaseThermalAcceptancePolicy() {
+    FamilyAcceptancePolicy policy;
+    policy.family_group_key = "B/E";
+    policy.required_profile_variables = {"pressure", "temperature"};
+    policy.required_monitor_variables = {"pressure", "temperature"};
+    policy.required_well_series_when_present = {
+        "well_bhp",
+        "well_rate",
+        "production_temperature"
+    };
+    return policy;
+}
+
+FamilyAcceptancePolicy BuildTwoPhaseThermalAcceptancePolicy() {
+    FamilyAcceptancePolicy policy;
+    policy.family_group_key = "C/F";
+    policy.required_profile_variables = {"pressure", "temperature", "co2_saturation"};
+    policy.required_monitor_variables = {"pressure", "temperature", "co2_saturation"};
+    policy.required_well_series_when_present = {
+        "well_bhp",
+        "well_rate",
+        "production_temperature",
+        "phase_fraction",
+        "water_cut",
+        "co2_production_rate"
+    };
+    return policy;
+}
+
 struct BindingInfo {
     CaseStageRunner runner = nullptr;
     const char* implementation_status = "planned";
 };
+
+void ValidateMetadataContractOrThrow(const CaseCatalogEntry& entry) {
+    const CaseMetadata& meta = entry.metadata;
+    if (meta.case_code.empty()) {
+        throw std::runtime_error("[CaseCatalog] empty case_code.");
+    }
+    if (meta.dispatcher_key.empty()) {
+        throw std::runtime_error("[CaseCatalog] empty dispatcher_key for " + meta.case_code);
+    }
+    if (meta.case_slug.empty()) {
+        throw std::runtime_error("[CaseCatalog] empty case_slug for " + meta.case_code);
+    }
+    if (meta.description.empty()) {
+        throw std::runtime_error("[CaseCatalog] empty description for " + meta.case_code);
+    }
+    if (meta.output_root.empty()) {
+        throw std::runtime_error("[CaseCatalog] empty output_root for " + meta.case_code);
+    }
+    if (!IsAllowedToken(meta.reference_mode, {"analytical", "hybrid_analytical_comsol", "comsol"})) {
+        throw std::runtime_error("[CaseCatalog] invalid reference_mode for " + meta.case_code +
+                                 ": " + meta.reference_mode);
+    }
+    if (!IsAllowedToken(meta.implementation_status, {"planned", "skeleton", "implemented"})) {
+        throw std::runtime_error("[CaseCatalog] invalid implementation_status for " + meta.case_code +
+                                 ": " + meta.implementation_status);
+    }
+    if (!IsAllowedToken(meta.well_control_policy, {"none", "injector_rate_producer_bhp"})) {
+        throw std::runtime_error("[CaseCatalog] invalid well_control_policy for " + meta.case_code +
+                                 ": " + meta.well_control_policy);
+    }
+    if (!IsAllowedToken(meta.injection_fluid, {"none", "co2"})) {
+        throw std::runtime_error("[CaseCatalog] invalid injection_fluid for " + meta.case_code +
+                                 ": " + meta.injection_fluid);
+    }
+    if (!IsAllowedToken(meta.thermal_injection_policy, {"none", "cold_injection"})) {
+        throw std::runtime_error("[CaseCatalog] invalid thermal_injection_policy for " + meta.case_code +
+                                 ": " + meta.thermal_injection_policy);
+    }
+    if (meta.case_slug != meta.dispatcher_key) {
+        throw std::runtime_error("[CaseCatalog] case_slug must match dispatcher_key for " + meta.case_code);
+    }
+    if (meta.well_mode == CaseWellMode::NoWell) {
+        if (meta.well_control_policy != "none" ||
+            meta.injection_fluid != "none" ||
+            meta.thermal_injection_policy != "none") {
+            throw std::runtime_error("[CaseCatalog] no-well case must keep none-valued well policies: " +
+                                     meta.case_code);
+        }
+    }
+    else {
+        if (meta.well_control_policy != "injector_rate_producer_bhp") {
+            throw std::runtime_error("[CaseCatalog] inj-prod case must use injector_rate_producer_bhp: " +
+                                     meta.case_code);
+        }
+        if (meta.injection_fluid != "co2") {
+            throw std::runtime_error("[CaseCatalog] inj-prod case must inject co2: " + meta.case_code);
+        }
+        const std::string expected_thermal = (meta.equation_mode == CaseEquationMode::N1)
+            ? "none"
+            : "cold_injection";
+        if (meta.thermal_injection_policy != expected_thermal) {
+            throw std::runtime_error("[CaseCatalog] inconsistent thermal_injection_policy for " +
+                                     meta.case_code + ": expected " + expected_thermal +
+                                     ", got " + meta.thermal_injection_policy);
+        }
+    }
+    if ((entry.run_stage == nullptr) != (meta.implementation_status == "planned")) {
+        throw std::runtime_error("[CaseCatalog] implementation_status/run_stage mismatch for " +
+                                 meta.case_code);
+    }
+}
 
 BindingInfo GetBinding(const std::string& caseCode) {
     if (caseCode == "A1") return BindingInfo{&RunA1, "implemented"};
@@ -233,6 +377,12 @@ std::vector<CaseCatalogEntry> BuildCatalog() {
             entry.metadata.description = BuildDescription(entry.metadata);
             entry.metadata.reference_mode = BuildReferenceMode(
                 entry.metadata.case_code,
+                entry.metadata.equation_mode,
+                entry.metadata.well_mode);
+            entry.metadata.output_root = BuildOutputRoot();
+            entry.metadata.well_control_policy = BuildWellControlPolicy(entry.metadata.well_mode);
+            entry.metadata.injection_fluid = BuildInjectionFluid(entry.metadata.well_mode);
+            entry.metadata.thermal_injection_policy = BuildThermalInjectionPolicy(
                 entry.metadata.equation_mode,
                 entry.metadata.well_mode);
 
@@ -292,6 +442,7 @@ void ValidateCaseCatalogOrThrow() {
         if (!keys.insert(key).second) {
             throw std::runtime_error("[CaseCatalog] duplicate dispatcher key: " + entry.metadata.dispatcher_key);
         }
+        ValidateMetadataContractOrThrow(entry);
     }
 }
 
@@ -334,6 +485,19 @@ const char* ToString(CaseWellMode value) {
     case CaseWellMode::NoWell: return "nowell";
     case CaseWellMode::InjProd: return "injprod";
     default: return "unknown_well";
+    }
+}
+
+const FamilyAcceptancePolicy& GetFamilyAcceptancePolicy(CaseEquationMode value) {
+    static const FamilyAcceptancePolicy pressure_diffusion = BuildPressureDiffusionAcceptancePolicy();
+    static const FamilyAcceptancePolicy single_phase_thermal = BuildSinglePhaseThermalAcceptancePolicy();
+    static const FamilyAcceptancePolicy two_phase_thermal = BuildTwoPhaseThermalAcceptancePolicy();
+
+    switch (value) {
+    case CaseEquationMode::N1: return pressure_diffusion;
+    case CaseEquationMode::N2: return single_phase_thermal;
+    case CaseEquationMode::N3: return two_phase_thermal;
+    default: return pressure_diffusion;
     }
 }
 

@@ -41,6 +41,10 @@ struct CaseMetadata {
     std::string description;
     std::string reference_mode;
     std::string implementation_status;
+    std::string output_root;
+    std::string well_control_policy;
+    std::string injection_fluid;
+    std::string thermal_injection_policy;
     CaseDimension dimension = CaseDimension::Dim2D;
     CaseEquationMode equation_mode = CaseEquationMode::N1;
     CasePropertyMode property_mode = CasePropertyMode::ConstPP;
@@ -65,5 +69,6 @@ const char* ToString(CaseEquationMode value);
 const char* ToString(CasePropertyMode value);
 const char* ToString(CaseFractureMode value);
 const char* ToString(CaseWellMode value);
+const FamilyAcceptancePolicy& GetFamilyAcceptancePolicy(CaseEquationMode value);
 
 } // namespace CaseCommon

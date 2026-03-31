@@ -7,13 +7,22 @@
 - All template artifacts follow the five-directory contract: `studies/`, `figures/`, `engineering/`, `reference/`, `report/`.
 - COMSOL remains weakly coupled: templates emit/consume reference artifacts, while external Java/PowerShell automation executes COMSOL.
 - Well defaults are frozen as injector-rate + producer-BHP; two-phase well cases inject CO2; thermal well cases use cold injection.
+- `CaseMetadata` is frozen to carry `case_code`, `dispatcher_key`, `case_slug`, `description`, `reference_mode`, `implementation_status`, `output_root`, `well_control_policy`, `injection_fluid`, `thermal_injection_policy`, plus the six enum axes `dimension/equation_mode/property_mode/fracture_mode/well_mode`.
+- `CaseArtifactPaths` is frozen to carry the five-directory contract plus the derived file paths `engineering_stage_manifest_path`, `reference_contract_path`, and `report_status_markdown_path`.
+- `ValidationSpec2D/3D` is frozen as the shared contract for validation variables, profile snapshots, characteristic lines, observation points, grid-study tags, time-step study values, and required well-series outputs; 3D additionally carries characteristic slice definitions.
+- `WellTemplateSpec` is frozen as the shared contract for injector/producer naming, control policy, injection fluid, thermal policy, default quarter/three-quarter placement, control modes, target values, injection temperature, and the “avoid direct fracture completion” default.
+- Family default acceptance-policy placeholders are frozen by equation family:
+  - `A/D`: pressure profile + pressure monitor; when wells exist, require `well_bhp` and `well_rate`.
+  - `B/E`: pressure/temperature profile + pressure/temperature monitor; when wells exist, require `well_bhp`, `well_rate`, and `production_temperature`.
+  - `C/F`: pressure/temperature/CO2 saturation profile + monitor; when wells exist, require `well_bhp`, `well_rate`, `production_temperature`, `phase_fraction`, `water_cut`, and `co2_production_rate`.
+  - All three families require reference contour overlays, profile overlays, and monitor overlays; numeric tolerances remain placeholders (`-1.0`, `is_placeholder=true`) until later tightening.
 - Documentation follows a dual-file workflow:
   - [A1_F12_TEMPLATE_SYSTEM_MEMORY.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_TEMPLATE_SYSTEM_MEMORY.md) stores long-lived decisions, the 72-case status snapshot, blockers, and next steps.
   - [A1_F12_进度记录.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_进度记录.md) is the execution log of milestones, ordered steps, completion evidence, and recent updates.
 - Commit timing is governed by [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md); after each completed step, check this file before deciding whether to commit.
 
 ## Current Phase
-- Phase: M1 contract freeze kickoff after M0 gates passed in isolated worktree `codex/a1-f12-exec`
+- Phase: M1-S3 completed; next step is M1-S4 rule freeze for “no more template-internal common validation logic” in isolated worktree `codex/a1-f12-exec`
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
@@ -27,6 +36,9 @@
 - Created the root-level execution tracker [A1_F12_进度记录.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_进度记录.md) in the isolated worktree and seeded M0 progress.
 - Verified the isolated worktree can build in `Debug|x64` and that `--list` enumerates the full A1-F12 catalog plus legacy/auxiliary cases.
 - Added [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md) to govern when the branch should commit and which local support files should stay uncommitted.
+- Completed `M1-S1` by freezing the `CaseMetadata` field set in [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h) and [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp), adding catalog-side defaults and metadata contract validation, then re-verifying `Debug|x64` build and `--list`.
+- Completed `M1-S2` by freezing `CaseArtifactPaths`, `ValidationSpec2D/3D`, and `WellTemplateSpec` in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp), then routing [CaseCommon_Skeleton.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Skeleton.cpp) through the unified artifact paths and re-verifying a full `Debug|x64` build.
+- Completed `M1-S3` by freezing family-level acceptance-policy placeholders in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h), wiring `A/D`, `B/E`, and `C/F` defaults in [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp), and re-verifying `Debug|x64` build while intentionally keeping numeric tolerances as placeholders.
 
 ## Donor Templates
 - `A1`: donor for analytic validation, feature-line profiles, and grid/dt studies.
@@ -155,8 +167,8 @@
 - Most of the 72 catalog cases are registered but still have `planned` or `skeleton` status.
 
 ## Next Steps
-- Freeze `CaseMetadata`, `ValidationSpec2D/3D`, and `WellTemplateSpec` field sets as the first M1 deliverable.
-- Write the “no more template-internal common validation logic” rule into the execution documents and enforce it during subsequent edits.
+- Write the “no more template-internal common validation logic” rule into the execution documents as `M1-S4` and enforce it during subsequent edits.
+- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M1-S1 ~ M1-S3` now forms the planned contract-freeze closure.
 - Extract B1 validation/reference logic into shared 2D modules so staged semantics are physically separated, not just API-separated.
 - Lift the N=1 well restriction and promote A7 from `skeleton` to `implemented`.
 

@@ -41,6 +41,9 @@ CaseArtifactPaths BuildArtifactPaths(const std::string& rootDir,
     out.reference_dir = out.case_dir + "/reference";
     out.report_dir = out.case_dir + "/report";
     out.report_scripts_dir = out.report_dir + "/scripts";
+    out.engineering_stage_manifest_path = out.engineering_dir + "/stage_manifest.txt";
+    out.reference_contract_path = out.reference_dir + "/reference_contract.txt";
+    out.report_status_markdown_path = out.report_dir + "/template_status.md";
     return out;
 }
 
