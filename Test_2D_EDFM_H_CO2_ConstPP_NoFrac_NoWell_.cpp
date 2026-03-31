@@ -7,6 +7,9 @@
 
 #include "2D_PostProcess.h"
 #include "BoundaryConditionManager.h"
+#include "Case2D_Studies.h"
+#include "Case2D_Validation.h"
+#include "CaseCommon_Artifacts.h"
 #include "FIM_TransientCaseKit.hpp"
 #include "MeshDefinitions.h"
 #include "MeshManager.h"
@@ -28,31 +31,11 @@
 #include <utility>
 #include <vector>
 
-#ifdef _WIN32
-#include <direct.h>
-#define TEST_MKDIR(path) _mkdir(path)
-#else
-#include <sys/stat.h>
-#define TEST_MKDIR(path) mkdir(path, 0777)
-#endif
-
 namespace Test_H_CO2_ConstPP {
 namespace {
 
-constexpr double kPi = 3.1415926535897932384626433832795;
-
 void EnsureDirRecursive(const std::string& rawPath) {
-    if (rawPath.empty()) return;
-    std::string path = rawPath;
-    for (char& ch : path) if (ch == '\\') ch = '/';
-    std::stringstream ss(path);
-    std::string token, current;
-    while (std::getline(ss, token, '/')) {
-        if (token.empty() || token == ".") continue;
-        if (!current.empty()) current += "/";
-        current += token;
-        TEST_MKDIR(current.c_str());
-    }
+    CaseCommon::EnsureDirRecursive(rawPath);
 }
 
 void ApplyUniformScalarField(const std::shared_ptr<volScalarField>& field, double value) {
@@ -97,27 +80,14 @@ double ComputeMeshCharLength(const MeshManager& mgr) {
 }
 
 std::string BoolString(bool value) { return value ? "true" : "false"; }
-double ClampFraction(double f) { return std::max(0.0, std::min(1.0, f)); }
+double ClampFraction(double f) { return Case2DValidation::ClampFraction(f); }
 
 std::string MakeReportTag(double fraction) {
-    std::ostringstream oss;
-    oss << "t" << std::setw(3) << std::setfill('0')
-        << static_cast<int>(std::round(ClampFraction(fraction) * 100.0)) << "pct";
-    return oss.str();
+    return Case2DValidation::MakeReportTag(fraction);
 }
 
 std::vector<double> BuildSortedFractions(const std::vector<double>& raw) {
-    std::vector<double> out;
-    for (double f : raw) {
-        const double clamped = ClampFraction(f);
-        bool duplicate = false;
-        for (double existing : out) {
-            if (std::abs(existing - clamped) <= 1.0e-12) { duplicate = true; break; }
-        }
-        if (!duplicate) out.push_back(clamped);
-    }
-    std::sort(out.begin(), out.end());
-    return out;
+    return Case2DValidation::BuildSortedFractions(raw);
 }
 
 struct TestCaseSpec {
@@ -158,29 +128,9 @@ struct TestCaseSpec {
     bool emit_detailed_outputs = true;
 };
 
-struct AnalyticalSnapshot {
-    std::string tag;
-    double requested_fraction = 0.0, target_time_s = 0.0, actual_time_s = 0.0;
-    bool captured = false;
-    std::vector<double> p_blocks;
-};
-
-struct AnalyticalMetrics {
-    std::string tag;
-    double requested_fraction = 0.0, target_time_s = 0.0, actual_time_s = 0.0;
-    int sample_count = 0;
-    double l1_abs = 0.0, l2_abs = 0.0, linf_abs = 0.0;
-    double l1_norm = 0.0, l2_norm = 0.0, linf_norm = 0.0;
-    int max_err_cell = -1;
-    std::string compare_csv_path, profile_csv_path;
-};
-
-struct SweepStudyRow {
-    std::string label, case_dir;
-    int nx = 0, ny = 0, steps = 0;
-    double dt_init = 0.0, h_char = 0.0, t_end = 0.0;
-    double l1_norm = 0.0, l2_norm = 0.0, linf_norm = 0.0;
-};
+using AnalyticalSnapshot = Case2DValidation::AnalyticalSnapshot;
+using AnalyticalMetrics = Case2DValidation::AnalyticalMetrics;
+using SweepStudyRow = Case2DStudies::SweepStudyRow;
 
 struct TestCaseSummary {
     std::string case_dir, convergence_log_path, metrics_csv_path, analytical_summary_path;
@@ -195,186 +145,76 @@ struct TestCaseSummary {
 
 struct TestCasePlan { std::string plan_key; TestCaseSpec spec; };
 
+Case2DValidation::PressureDiffusionAnalyticalConfig BuildAnalyticalConfig(const TestCaseSpec& cfg) {
+    Case2DValidation::PressureDiffusionAnalyticalConfig out;
+    out.lx = cfg.lx;
+    out.p_init = cfg.p_init;
+    out.p_left = cfg.p_left;
+    out.p_right = cfg.p_right;
+    out.permeability = cfg.matrix_perm;
+    out.porosity = cfg.matrix_phi;
+    out.total_compressibility = cfg.matrix_ct;
+    out.viscosity = cfg.mu_const;
+    out.analytical_terms = cfg.analytical_terms;
+    return out;
+}
+
 double ComputePressureDiffusivity(const TestCaseSpec& cfg) {
-    const double denom = cfg.mu_const * cfg.matrix_phi * cfg.matrix_ct;
-    if (cfg.matrix_perm <= 0.0 || denom <= 0.0) {
-        throw std::runtime_error("[Test_H_CO2] invalid constant-property coefficients for analytical diffusivity.");
-    }
-    return cfg.matrix_perm / denom;
+    return Case2DValidation::ComputePressureDiffusivity(BuildAnalyticalConfig(cfg));
 }
 
 double EvaluateAnalyticalPressure(const TestCaseSpec& cfg, double x, double timeS) {
-    if (cfg.lx <= 0.0) throw std::runtime_error("[Test_H_CO2] invalid domain length.");
-    if (timeS <= 0.0) return cfg.p_init;
-    const double xClamped = std::max(0.0, std::min(cfg.lx, x));
-    const double deltaP = cfg.p_left - cfg.p_right;
-    const double pSteady = cfg.p_left - deltaP * (xClamped / cfg.lx);
-    const double a0 = cfg.p_init - cfg.p_left;
-    const double D = ComputePressureDiffusivity(cfg);
-    double transient = 0.0;
-    for (int n = 1; n <= cfg.analytical_terms; ++n) {
-        const double sign_n = (n % 2 == 0) ? 1.0 : -1.0;
-        const double bn = (2.0 / (static_cast<double>(n) * kPi))
-            * (a0 * (1.0 - sign_n) - deltaP * sign_n);
-        const double lambda = static_cast<double>(n) * kPi / cfg.lx;
-        transient += bn * std::sin(lambda * xClamped) * std::exp(-D * lambda * lambda * timeS);
-    }
-    return pSteady + transient;
+    return Case2DValidation::EvaluatePressureDiffusionAnalyticalPressure(BuildAnalyticalConfig(cfg), x, timeS);
 }
 
 std::vector<AnalyticalSnapshot> BuildSnapshots(const TestCaseSpec& cfg) {
-    std::vector<AnalyticalSnapshot> snapshots;
-    if (!cfg.enable_analytical_validation) return snapshots;
-    const std::vector<double> fractions = BuildSortedFractions(cfg.report_time_fractions);
-    for (double f : fractions) {
-        AnalyticalSnapshot s;
-        s.tag = MakeReportTag(f);
-        s.requested_fraction = f;
-        s.target_time_s = f * cfg.target_end_time_s;
-        snapshots.push_back(s);
-    }
-    return snapshots;
+    if (!cfg.enable_analytical_validation) return {};
+    return Case2DValidation::BuildAnalyticalSnapshots(cfg.target_end_time_s, cfg.report_time_fractions);
 }
 
 AnalyticalMetrics EvaluateAnalyticalMetrics(const MeshManager& mgr, const std::vector<double>& pBlocks,
                                             const TestCaseSpec& cfg, const AnalyticalSnapshot& snapshot,
                                             const std::string& csvPath, bool writeCsv) {
-    const auto& cells = mgr.mesh().getCells();
-    const std::size_t nUse = std::min(cells.size(), pBlocks.size());
-    if (nUse == 0) throw std::runtime_error("[Test_H_CO2] empty state for analytical comparison.");
-    const double deltaPAbs = std::max(std::abs(cfg.p_left - cfg.p_right), 1.0);
-    double sumAbs = 0.0, sumSq = 0.0, maxAbs = 0.0;
-    int maxErrCell = -1;
-    std::ofstream csv;
-    if (writeCsv) {
-        csv.open(csvPath, std::ios::out | std::ios::trunc);
-        if (!csv.good()) throw std::runtime_error("[Test_H_CO2] failed to open analytical csv: " + csvPath);
-        csv << "cell_id,x,y,p_num,p_ana,abs_err,abs_err_over_dP\n";
-    }
-    for (std::size_t i = 0; i < nUse; ++i) {
-        const double x = cells[i].center.m_x;
-        const double y = cells[i].center.m_y;
-        const double pNum = pBlocks[i];
-        const double pAna = EvaluateAnalyticalPressure(cfg, x, snapshot.actual_time_s);
-        const double absErr = std::abs(pNum - pAna);
-        sumAbs += absErr;
-        sumSq += absErr * absErr;
-        if (absErr > maxAbs) { maxAbs = absErr; maxErrCell = static_cast<int>(i); }
-        if (writeCsv) {
-            csv << i << "," << std::setprecision(12) << x << "," << y << ","
-                << pNum << "," << pAna << "," << absErr << "," << (absErr / deltaPAbs) << "\n";
-        }
-    }
-    AnalyticalMetrics m;
-    m.tag = snapshot.tag;
-    m.requested_fraction = snapshot.requested_fraction;
-    m.target_time_s = snapshot.target_time_s;
-    m.actual_time_s = snapshot.actual_time_s;
-    m.sample_count = static_cast<int>(nUse);
-    m.l1_abs = sumAbs / static_cast<double>(nUse);
-    m.l2_abs = std::sqrt(sumSq / static_cast<double>(nUse));
-    m.linf_abs = maxAbs;
-    m.l1_norm = m.l1_abs / deltaPAbs;
-    m.l2_norm = m.l2_abs / deltaPAbs;
-    m.linf_norm = m.linf_abs / deltaPAbs;
-    m.max_err_cell = maxErrCell;
-    m.compare_csv_path = writeCsv ? csvPath : "";
-    return m;
+    return Case2DValidation::EvaluatePressureDiffusionAnalyticalMetrics(
+        mgr, pBlocks, BuildAnalyticalConfig(cfg), snapshot, csvPath, writeCsv);
 }
 
 void WriteProfileCSV(const MeshManager& mgr, const std::vector<double>& pBlocks,
                      const TestCaseSpec& cfg, const AnalyticalSnapshot& snapshot,
                      const std::string& csvPath) {
-    if (cfg.nx <= 0) return;
-    struct Bucket { double x_sum = 0.0, p_sum = 0.0; int count = 0; };
-    const auto& cells = mgr.mesh().getCells();
-    const std::size_t nUse = std::min(cells.size(), pBlocks.size());
-    std::vector<Bucket> buckets(static_cast<std::size_t>(cfg.nx));
-    for (std::size_t i = 0; i < nUse; ++i) {
-        int ix = (cfg.lx > 0.0)
-            ? static_cast<int>(std::floor((cells[i].center.m_x / cfg.lx) * static_cast<double>(cfg.nx)))
-            : 0;
-        ix = std::max(0, std::min(cfg.nx - 1, ix));
-        Bucket& b = buckets[static_cast<std::size_t>(ix)];
-        b.x_sum += cells[i].center.m_x;
-        b.p_sum += pBlocks[i];
-        b.count += 1;
-    }
-    std::ofstream csv(csvPath, std::ios::out | std::ios::trunc);
-    if (!csv.good()) throw std::runtime_error("[Test_H_CO2] failed to open profile csv: " + csvPath);
-    csv << "station_id,x,p_num_avg,p_ana,abs_err,abs_err_over_dP,n_cells\n";
-    const double deltaPAbs = std::max(std::abs(cfg.p_left - cfg.p_right), 1.0);
-    for (int ix = 0; ix < cfg.nx; ++ix) {
-        const Bucket& b = buckets[static_cast<std::size_t>(ix)];
-        if (b.count <= 0) continue;
-        const double xMean = b.x_sum / static_cast<double>(b.count);
-        const double pNumAvg = b.p_sum / static_cast<double>(b.count);
-        const double pAna = EvaluateAnalyticalPressure(cfg, xMean, snapshot.actual_time_s);
-        const double absErr = std::abs(pNumAvg - pAna);
-        csv << ix << "," << std::setprecision(12) << xMean << "," << pNumAvg << ","
-            << pAna << "," << absErr << "," << (absErr / deltaPAbs) << "," << b.count << "\n";
-    }
-}
-
-void WriteStudyCSV(const std::vector<SweepStudyRow>& rows, const std::string& csvPath, const std::string& study) {
-    std::ofstream csv(csvPath, std::ios::out | std::ios::trunc);
-    if (!csv.good()) throw std::runtime_error("[Test_H_CO2] failed to open study csv: " + csvPath);
-    csv << "study,label,case_dir,nx,ny,dt_init,h_char,t_end,steps,l1_norm,l2_norm,linf_norm\n";
-    for (const auto& row : rows) {
-        csv << study << "," << row.label << "," << row.case_dir << "," << row.nx << "," << row.ny << ","
-            << std::setprecision(12) << row.dt_init << "," << row.h_char << "," << row.t_end << ","
-            << row.steps << "," << row.l1_norm << "," << row.l2_norm << "," << row.linf_norm << "\n";
-    }
-}
-
-bool IsMonotonicNonIncreasingL2(const std::vector<SweepStudyRow>& rows) {
-    const double absTol = 1.0e-10;
-    const double relTol = 1.0e-6;
-    for (std::size_t i = 1; i < rows.size(); ++i) {
-        const double prev = rows[i - 1].l2_norm;
-        const double allowed = std::max(absTol, relTol * std::max(prev, 1.0));
-        if (rows[i].l2_norm > prev + allowed) return false;
-    }
-    return true;
+    Case2DValidation::WritePressureProfileCSV(
+        mgr, pBlocks, cfg.nx, BuildAnalyticalConfig(cfg), snapshot, csvPath);
 }
 
 void WriteAnalyticalSummary(const TestCaseSpec& cfg, const TestCaseSummary& summary) {
     if (summary.case_dir.empty()) return;
-    const std::string path = summary.case_dir + "/analytical_summary.txt";
-    std::ofstream out(path, std::ios::out | std::ios::trunc);
-    if (!out.good()) throw std::runtime_error("[Test_H_CO2] failed to open analytical summary: " + path);
-    out << "case=" << cfg.case_name << "\n";
-    out << "output_dir=" << summary.case_dir << "\n";
-    out << "mesh=" << cfg.nx << "x" << cfg.ny << "\n";
-    out << "cells=" << summary.n_cells << "\n";
-    out << "h_char=" << std::setprecision(12) << summary.h_char << "\n";
-    out << "t_end=" << summary.t_end << "\n";
-    out << "steps=" << summary.steps << "\n";
-    out << "pressure_diffusivity=" << ComputePressureDiffusivity(cfg) << "\n";
-    out << "gravity_vector=(" << cfg.gravity_vector.m_x << "," << cfg.gravity_vector.m_y << "," << cfg.gravity_vector.m_z << ")\n";
-    out << "non_orthogonal_correction=" << BoolString(cfg.enable_non_orthogonal_correction) << "\n";
-    out << "final_l1_norm=" << summary.final_l1_norm << "\n";
-    out << "final_l2_norm=" << summary.final_l2_norm << "\n";
-    out << "final_linf_norm=" << summary.final_linf_norm << "\n";
-    out << "l2_threshold=" << cfg.analytical_l2_threshold << "\n";
-    out << "linf_threshold=" << cfg.analytical_linf_threshold << "\n";
-    out << "grid_convergence_ok=" << BoolString(summary.grid_convergence_ok) << "\n";
-    out << "time_sensitivity_ok=" << BoolString(summary.time_sensitivity_ok) << "\n";
-    out << "analytical_passed=" << BoolString(summary.analytical_passed) << "\n";
-    if (!summary.grid_convergence_csv_path.empty()) out << "grid_convergence_csv=" << summary.grid_convergence_csv_path << "\n";
-    if (!summary.time_sensitivity_csv_path.empty()) out << "time_sensitivity_csv=" << summary.time_sensitivity_csv_path << "\n";
-    out << "\n[report_metrics]\n";
-    for (const auto& m : summary.report_metrics) {
-        out << m.tag << " requested_fraction=" << m.requested_fraction
-            << " target_time_s=" << m.target_time_s
-            << " actual_time_s=" << m.actual_time_s
-            << " l1_norm=" << m.l1_norm
-            << " l2_norm=" << m.l2_norm
-            << " linf_norm=" << m.linf_norm
-            << " max_err_cell=" << m.max_err_cell << "\n";
-        if (!m.compare_csv_path.empty()) out << "compare_csv=" << m.compare_csv_path << "\n";
-        if (!m.profile_csv_path.empty()) out << "profile_csv=" << m.profile_csv_path << "\n";
-    }
+    Case2DValidation::PressureDiffusionSummaryReport report;
+    report.case_name = cfg.case_name;
+    report.output_dir = summary.case_dir;
+    report.nx = cfg.nx;
+    report.ny = cfg.ny;
+    report.n_cells = summary.n_cells;
+    report.steps = summary.steps;
+    report.total_rollbacks = summary.total_rollbacks;
+    report.h_char = summary.h_char;
+    report.t_end = summary.t_end;
+    report.pressure_diffusivity = ComputePressureDiffusivity(cfg);
+    report.gravity_x = cfg.gravity_vector.m_x;
+    report.gravity_y = cfg.gravity_vector.m_y;
+    report.gravity_z = cfg.gravity_vector.m_z;
+    report.non_orthogonal_correction = cfg.enable_non_orthogonal_correction;
+    report.final_l1_norm = summary.final_l1_norm;
+    report.final_l2_norm = summary.final_l2_norm;
+    report.final_linf_norm = summary.final_linf_norm;
+    report.l2_threshold = cfg.analytical_l2_threshold;
+    report.linf_threshold = cfg.analytical_linf_threshold;
+    report.grid_convergence_ok = summary.grid_convergence_ok;
+    report.time_sensitivity_ok = summary.time_sensitivity_ok;
+    report.analytical_passed = summary.analytical_passed;
+    report.grid_convergence_csv_path = summary.grid_convergence_csv_path;
+    report.time_sensitivity_csv_path = summary.time_sensitivity_csv_path;
+    report.report_metrics = summary.report_metrics;
+    Case2DValidation::WritePressureDiffusionSummaryReport(report, summary.case_dir + "/analytical_summary.txt");
 }
 
 FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {
@@ -638,9 +478,9 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
             row.linf_norm = sweepSummary.final_linf_norm;
             gridRows.push_back(row);
         }
-        summary.grid_convergence_ok = IsMonotonicNonIncreasingL2(gridRows);
+    summary.grid_convergence_ok = Case2DStudies::IsMonotonicNonIncreasingL2(gridRows);
         summary.grid_convergence_csv_path = summary.case_dir + "/grid_convergence.csv";
-        WriteStudyCSV(gridRows, summary.grid_convergence_csv_path, "grid");
+    Case2DStudies::WriteStudyCSV(gridRows, summary.grid_convergence_csv_path, "grid");
     }
 
     if (cfg.enable_time_sensitivity_study) {
@@ -669,9 +509,9 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
             row.linf_norm = sweepSummary.final_linf_norm;
             timeRows.push_back(row);
         }
-        summary.time_sensitivity_ok = IsMonotonicNonIncreasingL2(timeRows);
+    summary.time_sensitivity_ok = Case2DStudies::IsMonotonicNonIncreasingL2(timeRows);
         summary.time_sensitivity_csv_path = summary.case_dir + "/time_sensitivity.csv";
-        WriteStudyCSV(timeRows, summary.time_sensitivity_csv_path, "time");
+    Case2DStudies::WriteStudyCSV(timeRows, summary.time_sensitivity_csv_path, "time");
     }
 
     summary.analytical_passed =
