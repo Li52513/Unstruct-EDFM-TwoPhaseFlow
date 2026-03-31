@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -202,7 +203,13 @@ std::string BuildReferenceMode(const std::string& caseCode,
 }
 
 std::string BuildOutputRoot() {
-    return "Test/Transient/A1_F12_TemplateSystem";
+    const std::filesystem::path source_root = std::filesystem::path(__FILE__).parent_path();
+    std::error_code ec;
+    const std::filesystem::path normalized_root =
+        std::filesystem::weakly_canonical(source_root, ec);
+    const std::filesystem::path output_root =
+        (ec ? source_root : normalized_root) / "Test" / "Transient" / "A1_F12_TemplateSystem";
+    return output_root.lexically_normal().string();
 }
 
 std::string BuildWellControlPolicy(CaseWellMode well) {
@@ -345,7 +352,7 @@ BindingInfo GetBinding(const std::string& caseCode) {
     if (caseCode == "A2") return BindingInfo{&RunA2, "implemented"};
     if (caseCode == "A3") return BindingInfo{&RunA3, "implemented"};
     if (caseCode == "A4") return BindingInfo{&RunA4, "implemented"};
-    if (caseCode == "A7") return BindingInfo{&RunA7, "skeleton"};
+    if (caseCode == "A7") return BindingInfo{&RunA7, "implemented"};
     if (caseCode == "B1") return BindingInfo{&RunB1, "implemented"};
     if (caseCode == "B3") return BindingInfo{&RunB3, "implemented"};
     if (caseCode == "B7") return BindingInfo{&RunB7, "skeleton"};

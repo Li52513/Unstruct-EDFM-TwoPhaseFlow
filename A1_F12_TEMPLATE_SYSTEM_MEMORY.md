@@ -26,7 +26,7 @@
 - Commit timing is governed by [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md); after each completed step, check this file before deciding whether to commit.
 
 ## Current Phase
-- Phase: `M4-S1` is complete in isolated worktree `codex/a1-f12-exec`; the `N=1 + wells` engine restriction has been lifted in the pressure-only route, `M4` is now in progress, and the next mainline step is `M4-S2` while the `M3` milestone stays numerically open until `C0` closes the remaining B1/C1 reference-based acceptance.
+- Phase: `M4-S2` is complete in isolated worktree `codex/a1-f12-exec`; `A7` has been promoted from `skeleton` to a real staged `implemented` N=1 injector-producer template, `M4` remains in progress, and the next mainline step is `M4-S3` while the `M3` milestone stays numerically open until `C0` closes the remaining B1/C1 reference-based acceptance.
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
@@ -62,6 +62,9 @@
 - Completed `M3-S3` by promoting C1 from `skeleton` to a real staged `implemented` no-well template: replaced the skeleton-only stage stubs with a real `RunStageByKeyImpl(...)`, wired `prepare_reference` to emit the C1 property/reference/profile/monitor contracts, wired `solve_only` to run the real 2D `N=3` CO2/H2O no-fracture/no-well transient solve, and wired `validate_only/full_workflow` to complete engineering output then stop through the expected weak-coupling `missing_reference` path when COMSOL payloads are absent; verified with a passing `check_m3_s3_c1_thin_template.ps1`, fresh `Debug|x64` MSBuild, a successful `C1 --stage=prepare_reference`, a successful `C1 --stage=solve_only`, and a `C1 --stage=validate_only` smoke run that now backfills `stage_manifest.txt`, `template_status.md`, `validation_summary.md`, and the engineering profile/monitor CSV payload under the template-system case root.
 - Completed `M3-S4` by freezing the no-well sample/output contract across `A1/B1/C1`: added [A1_F12_NoWell_Template_Contract.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_NoWell_Template_Contract.md) to lock five-directory responsibilities, stage semantics, mandatory profile/monitor payloads, frozen snapshot tags, and CSV schemas; added `tools/checks/check_m3_s4_nowell_contract.ps1` with long-path-safe existence checks; verified the contract with a passing worktree run of `check_m3_s4_nowell_contract.ps1`.
 - Completed `M3-S5` by replacing the remaining legacy primary no-well entry points in [main.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/main.cpp): introduced `CatalogAliasEntry`, `legacyCatalogAliases`, `PrintCatalogAliases(...)`, and `ResolveCatalogCaseAlias(...)`, removed the direct `A1/B1` primary case lambdas from the legacy case table, and redirected the compatibility names `test_h_co2_constpp_nofrac_nowell`, `test_h_t_co2_constpp_nofrac_nowell`, and `test_h_tp_co2h2o_constpp_nofrac_nowell` through the central A1/B1/C1 catalog path; verified with a passing `check_m3_s5_catalog_aliases.ps1`, fresh `Debug|x64` MSBuild, `--list`, and three alias-based `prepare_reference` smoke runs.
+- Completed `M4-S1` by enabling `N=1 + wells` in the pressure-only transient engine: [RunGeneric_impl.hpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/FIM_TransientEngine/RunGeneric_impl.hpp) now accepts normalized well schedules, instantiates `WellDOFManager<1>`, assembles well equations, and updates well-block pressures; [WellDOFManager.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/WellDOFManager.h) now exposes the explicit `N==1` gradient mapping; verified with `check_m4_s1_n1_well_support.ps1` and fresh `Debug|x64` MSBuild.
+- Completed `M4-S2` by promoting [Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp) from `skeleton` to a real staged `implemented` A7 template: the file now owns a real `RunStageByKeyImpl(...)`, weak-coupling `prepare_reference` artifact generation, a real `solve_only` N=1 inj/prod run, and `validate_only/full_workflow` paths that stop through `missing_reference` when COMSOL payloads are absent; verified with `check_m4_s2_a7_thin_template.ps1`, fresh `Debug|x64` MSBuild, and a successful `--case=A7 --stage=solve_only` smoke run that completed 146 steps with two active well blocks and wrote engineering VTK plus run-summary artifacts under the template-system case root.
+- Fixed the template-system output-root drift uncovered during `M4-S2`: [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/CaseCommon_Catalog.cpp) now anchors `BuildOutputRoot()` to the real worktree/repo root via `weakly_canonical(__FILE__.parent_path())`, so staged runs no longer depend on the launch working directory; verified with `check_m4_s2_output_root_anchor.ps1`, fresh `Debug|x64` MSBuild, and a repeat `A7 --stage=solve_only` launched from the main repository root that now reports and writes the output directory under the real `a1-f12-exec` worktree path.
 
 ## Donor Templates
 - `A1`: donor for analytic validation, feature-line profiles, and grid/dt studies.
@@ -108,7 +111,7 @@
 - `A4` implemented
 - `A5` planned
 - `A6` planned
-- `A7` skeleton
+- `A7` implemented
 - `A8` planned
 - `A9` planned
 - `A10` planned
@@ -178,7 +181,7 @@
 - `F12` planned
 
 ## Blockers
-- `A7` is still a skeleton template, so `M4-S2` must wire [Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp) to the now-enabled `N=1 + wells` engine path before a real pressure-only injection/production smoke test exists.
+- `A7` is now a real staged template, but `validate_only/full_workflow` still rerun the engineering solve and then stop through `missing_reference` until COMSOL pressure reference payloads and persistent engineering snapshots are available.
 - `A2/A3/A4` still collapse `solve_only/prepare_reference/validate_only/full_workflow` onto one legacy execution path and do not yet use the unified five-directory artifact split; only `A1` has completed the staged-semantics split so far.
 - `A1` and `B1` now have explicit stage routing under the template-system case root, but both `validate_only` paths still rerun the engineering solve until engineering snapshot persistence is implemented.
 - `C1` is now implemented and honors the staged no-well artifact contract, but `validate_only/full_workflow` still rerun the engineering solve and terminate through `missing_reference` until COMSOL profile/monitor payloads are supplied.
@@ -189,10 +192,9 @@
 - The VS/MSBuild build in this worktree currently depends on local `.vcxproj` edits to include the new `Case2D_*` source files; those project-file edits remain local build support and are not part of the tracked branch payload.
 
 ## Next Steps
-- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M4-S1` now forms a coherent engine-layer checkpoint.
-- Start `M4-S2` by wiring [Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_CO2_ConstPP_NoFrac_InjProd.cpp) to the newly enabled `N=1 + wells` engine path and adding a real A7 solve-only smoke test.
-- In parallel, use `C0` to close the remaining `B1/C1` reference-based acceptance loop once COMSOL payload automation is ready.
-- Promote `A7` from `skeleton` to `implemented` once the solve-only route and first inj/prod acceptance outputs are stable.
+- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M4-S2` now forms a coherent A7 case-promotion checkpoint.
+- Start `M4-S3` by turning [Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_InjProd.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_InjProd.cpp) into a real staged `B7` template and wiring it to the existing single-phase thermal well route.
+- Use the parallel `C0` branch to close the remaining reference-based acceptance loop for `B1/C1`, while mainline `M4` continues with `B7/C7`.
 
 ## Key Files
 - [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md)
