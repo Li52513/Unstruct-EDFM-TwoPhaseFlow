@@ -26,7 +26,7 @@
 - Commit timing is governed by [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md); after each completed step, check this file before deciding whether to commit.
 
 ## Current Phase
-- Phase: `M2` is complete in isolated worktree `codex/a1-f12-exec`; the next step is `M3-S1`, starting the true thin-template conversion for `A1`.
+- Phase: `M3-S1` is complete in isolated worktree `codex/a1-f12-exec`; the next step is `M3-S2`, thinning `B1` into a true thin template.
 
 ## Completed Items
 - Added shared artifact helpers in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Artifacts.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.cpp).
@@ -57,6 +57,7 @@
 - Completed `M1-S3` by freezing family-level acceptance-policy placeholders in [CaseCommon_Artifacts.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Artifacts.h) and [CaseCommon_Catalog.h](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.h), wiring `A/D`, `B/E`, and `C/F` defaults in [CaseCommon_Catalog.cpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/CaseCommon_Catalog.cpp), and re-verifying `Debug|x64` build while intentionally keeping numeric tolerances as placeholders.
 - Completed `M1-S4` by freezing the template/common-module boundary in the execution documents: case templates must remain thin and may no longer absorb generic validation, reference I/O, study loops, Matlab generation, or report aggregation logic; those responsibilities are reserved for the planned `Case2D_*` and `Case3D_*` modules.
 - Completed `M1-S5` by auditing `A1/A2/A3/A4/B1/B3/A7/B7/C1/C7` against the staged-entry and five-directory contracts: all ten cases are catalog-routable with four staged entry points; the four skeleton cases honor the unified artifact contract via `CaseCommon_Skeleton`; the implemented templates still contain the expected legacy drift that M2 must remove, including collapsed stage semantics in `A1/A2/A3/A4`, retained template-internal validation/reference logic in `B1/B3`, and the known `B1 validate_only` / `B3 RunSolveOnly` semantic deviations.
+- Completed `M3-S1` by splitting A1 into a real staged thin-template runner: added `RunStageByKeyImpl(...)`, analytical artifact-only `prepare_reference`, `solve_only` output under `engineering/`, and `validate_only/full_workflow` paths that now materialize `studies/grid_convergence.csv` plus `studies/time_sensitivity.csv` under the template-system case root; verified with a passing `check_m3_s1_a1_stage_split.ps1`, fresh `Debug|x64` MSBuild, and four staged smoke runs for `A1 --stage=prepare_reference`, `solve_only`, `validate_only`, and `full_workflow`.
 
 ## Donor Templates
 - `A1`: donor for analytic validation, feature-line profiles, and grid/dt studies.
@@ -174,17 +175,17 @@
 
 ## Blockers
 - `N=1 + wells` is still blocked in [RunGeneric_impl.hpp](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/FIM_TransientEngine/RunGeneric_impl.hpp) because the pressure-only AD route explicitly rejects wells.
-- `A1/A2/A3/A4` still collapse `solve_only/prepare_reference/validate_only/full_workflow` onto one legacy execution path and do not yet use the unified five-directory artifact split; `M2-S1` only extracted A1 donor validation/study helpers, not the staged-semantics split.
+- `A2/A3/A4` still collapse `solve_only/prepare_reference/validate_only/full_workflow` onto one legacy execution path and do not yet use the unified five-directory artifact split; only `A1` has completed the staged-semantics split so far.
 - `B1/B3` still keep large amounts of generic validation/reference/study/Matlab logic inside template files; `B1 validate_only` still replays a fresh engineering solve internally, and `B3 RunSolveOnly` currently routes through the prepare-reference plan.
-- `A1/B1/B3` are thinner after `M2-S5`, but they are not yet true thin templates: the staged entry semantics still collapse onto legacy execution paths, so `A1 solve_only`, `B1 validate_only`, and `B3 prepare_reference` still run full engineering chains instead of fully isolated stage-specific flows.
+- `B1/B3` are thinner after `M2-S5`, but they are not yet true thin templates: `B1 validate_only` and `B3 prepare_reference` still route through legacy engineering chains. `A1` now has explicit stage routing, but `validate_only` still reruns the solver until engineering snapshot persistence is added.
 - `B3` now routes fracture-aware engineering/reference I/O and Matlab generation through shared modules, but it still retains donor-local fracture geometry sampling, profile/monitor compare kernels, study aggregation, and summary/report bodies; those remaining validation kernels are deferred to `M3`.
 - The four 2D shared modules now have stable roles and a unified path-safe output contract; the remaining 2D no-well work is template thinning and staged-semantics separation, not another public-module reshuffle.
 - Most of the 72 catalog cases are registered but still have `planned` or `skeleton` status.
 - The VS/MSBuild build in this worktree currently depends on local `.vcxproj` edits to include the new `Case2D_*` source files; those project-file edits remain local build support and are not part of the tracked branch payload.
 
 ## Next Steps
-- Start `M3-S1` by turning `A1` into a true thin template, with explicit separation between `solve_only/prepare_reference/validate_only/full_workflow` instead of the current legacy collapsed path.
-- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M2-S4` now forms a coherent module-surface-freeze checkpoint.
+- Start `M3-S2` by turning `B1` into a true thin template, with the remaining reference/validation/Matlab bodies lifted out of the donor and the staged semantics made explicit.
+- Re-evaluate the branch against [A1_F12_提交策略.md](/D:/Yongwei/博士生涯/100-Research/110Code/111-2D_EDFM_FVM_CO2PlumingSystem/B-Code/2D-Unstr-Quadrilateral-EDFM/.worktrees/codex/a1-f12-exec/A1_F12_提交策略.md), because `M3-S1` now forms a coherent A1 thin-template checkpoint.
 - Continue `M3` by thinning `B1` and then promoting `C1` from `skeleton` to `implemented`.
 - Lift the N=1 well restriction and promote `A7` from `skeleton` to `implemented`.
 

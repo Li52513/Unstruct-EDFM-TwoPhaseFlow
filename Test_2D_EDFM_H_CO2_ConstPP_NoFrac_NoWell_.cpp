@@ -7,9 +7,11 @@
 
 #include "2D_PostProcess.h"
 #include "BoundaryConditionManager.h"
+#include "Case2D_ReferenceIO.h"
 #include "Case2D_Studies.h"
 #include "Case2D_Validation.h"
 #include "CaseCommon_Artifacts.h"
+#include "CaseCommon_Catalog.h"
 #include "FIM_TransientCaseKit.hpp"
 #include "MeshDefinitions.h"
 #include "MeshManager.h"
@@ -240,6 +242,173 @@ FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {
 TestCasePlan BuildDefaultPlan() { TestCasePlan plan; plan.plan_key = "h_co2_constpp_nofrac_nowell"; return plan; }
 using BuilderFn = TestCasePlan(*)();
 
+const CaseCommon::CaseCatalogEntry& GetA1CatalogEntryOrThrow() {
+    const CaseCommon::CaseCatalogEntry* entry = CaseCommon::FindCaseCatalogEntry("A1");
+    if (!entry) throw std::runtime_error("[Test_H_CO2] failed to resolve A1 catalog entry.");
+    return *entry;
+}
+
+CaseCommon::CaseArtifactPaths BuildA1ArtifactPaths() {
+    const CaseCommon::CaseCatalogEntry& entry = GetA1CatalogEntryOrThrow();
+    return CaseCommon::BuildArtifactPaths(
+        entry.metadata.output_root,
+        entry.metadata.case_code,
+        entry.metadata.case_slug);
+}
+
+void EnsureA1ArtifactContractDirs(const CaseCommon::CaseArtifactPaths& artifacts) {
+    EnsureDirRecursive(artifacts.case_dir);
+    EnsureDirRecursive(artifacts.studies_dir);
+    EnsureDirRecursive(artifacts.figures_dir);
+    EnsureDirRecursive(artifacts.engineering_dir);
+    EnsureDirRecursive(artifacts.reference_dir);
+    EnsureDirRecursive(artifacts.report_dir);
+    EnsureDirRecursive(artifacts.report_scripts_dir);
+}
+
+std::string JoinFractions(const std::vector<double>& values) {
+    std::ostringstream oss;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) oss << ",";
+        oss << std::setprecision(12) << values[i];
+    }
+    return oss.str();
+}
+
+void WriteA1StageManifest(const CaseCommon::CaseArtifactPaths& artifacts,
+                          CaseCommon::CaseStage stage,
+                          const std::string& status,
+                          const std::string& primaryOutputDir) {
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.engineering_stage_manifest_path,
+        "[Test_H_CO2] failed to write A1 stage manifest",
+        [&](std::ofstream& out) {
+            out << "case_code=A1\n";
+            out << "case_slug=" << GetA1CatalogEntryOrThrow().metadata.case_slug << "\n";
+            out << "stage=" << CaseCommon::ToString(stage) << "\n";
+            out << "status=" << status << "\n";
+            out << "reference_mode=analytical\n";
+            out << "primary_output_dir=" << primaryOutputDir << "\n";
+        });
+}
+
+void WriteA1ReferenceContract(const TestCaseSpec& cfg,
+                              const CaseCommon::CaseArtifactPaths& artifacts,
+                              CaseCommon::CaseStage stage) {
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.reference_contract_path,
+        "[Test_H_CO2] failed to write A1 reference contract",
+        [&](std::ofstream& out) {
+            out << "reference_mode=analytical\n";
+            out << "case_code=A1\n";
+            out << "case_slug=" << GetA1CatalogEntryOrThrow().metadata.case_slug << "\n";
+            out << "stage=" << CaseCommon::ToString(stage) << "\n";
+            out << "family=pressure_diffusion\n";
+            out << "variables=pressure\n";
+            out << "report_time_fractions=" << JoinFractions(cfg.report_time_fractions) << "\n";
+            out << "target_end_time_s=" << std::setprecision(12) << cfg.target_end_time_s << "\n";
+            out << "analytical_terms=" << cfg.analytical_terms << "\n";
+            out << "pressure_diffusivity=" << ComputePressureDiffusivity(cfg) << "\n";
+            out << "prepare_reference_behavior=artifact_only\n";
+            out << "validate_only_behavior=rerun_solver_until_engineering_snapshot_cache_exists\n";
+        });
+}
+
+void WriteA1StageStatus(const TestCaseSpec& cfg,
+                        const CaseCommon::CaseArtifactPaths& artifacts,
+                        CaseCommon::CaseStage stage,
+                        const std::string& status,
+                        const std::string& primaryOutputDir) {
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.report_status_markdown_path,
+        "[Test_H_CO2] failed to write A1 status markdown",
+        [&](std::ofstream& out) {
+            out << "# A1 Thin Template Status\n\n";
+            out << "- Stage: `" << CaseCommon::ToString(stage) << "`\n";
+            out << "- Status: `" << status << "`\n";
+            out << "- Reference mode: `analytical`\n";
+            out << "- Primary output dir: `" << primaryOutputDir << "`\n";
+            out << "- Case dir: `" << artifacts.case_dir << "`\n\n";
+            out << "## Stage semantics\n";
+            out << "- `solve_only`: run core solve without grid/time studies.\n";
+            out << "- `prepare_reference`: materialize analytical-reference contract only.\n";
+            out << "- `validate_only`: rerun validation workflow until engineering snapshot persistence exists.\n";
+            out << "- `full_workflow`: run the full legacy analytical workflow under the template-system case root.\n\n";
+            out << "## Numerical settings\n";
+            out << "- Grid: `" << cfg.nx << "x" << cfg.ny << "`\n";
+            out << "- End time: `" << std::setprecision(12) << cfg.target_end_time_s << " s`\n";
+            out << "- Report fractions: `" << JoinFractions(cfg.report_time_fractions) << "`\n";
+        });
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.report_scripts_dir + "/README.m",
+        "[Test_H_CO2] failed to write A1 Matlab stub",
+        [&](std::ofstream& out) {
+            out << "% A1 Matlab script placeholder\n";
+            out << "% Stage: " << CaseCommon::ToString(stage) << "\n";
+            out << "% Output root: " << artifacts.case_dir << "\n";
+        });
+}
+
+TestCaseSpec BuildStageSpec(const TestCaseSpec& base, CaseCommon::CaseStage stage) {
+    TestCaseSpec cfg = base;
+    switch (stage) {
+    case CaseCommon::CaseStage::SolveOnly:
+        cfg.enable_grid_convergence_study = false;
+        cfg.enable_time_sensitivity_study = false;
+        cfg.enable_profile_output = false;
+        cfg.emit_detailed_outputs = false;
+        break;
+    case CaseCommon::CaseStage::ValidateOnly:
+        cfg.export_vtk = false;
+        cfg.enable_grid_convergence_study = true;
+        cfg.enable_time_sensitivity_study = true;
+        cfg.enable_profile_output = true;
+        cfg.emit_detailed_outputs = true;
+        break;
+    case CaseCommon::CaseStage::PrepareReference:
+    case CaseCommon::CaseStage::FullWorkflow:
+        break;
+    default:
+        throw std::runtime_error("[Test_H_CO2] unsupported stage in BuildStageSpec.");
+    }
+    return cfg;
+}
+
+void PrintRunSummary(const std::string& banner, const TestCaseSummary& summary) {
+    std::cout << "\n============================================\n";
+    std::cout << "[Test_H_CO2] " << banner << "\n";
+    std::cout << "  output_dir: " << summary.case_dir << "\n";
+    std::cout << "  grid: " << summary.nx << " x " << summary.ny << " (" << summary.n_cells << " cells)\n";
+    std::cout << "  steps: " << summary.steps << "  rollbacks: " << summary.total_rollbacks << "\n";
+    std::cout << "  Newton iters: avg=" << std::fixed << std::setprecision(2) << summary.avg_iters
+              << "  max=" << summary.max_iters << "\n";
+    std::cout << "  final_time: " << std::scientific << std::setprecision(4) << summary.t_end << " s\n";
+    std::cout << "  final errors: L1=" << summary.final_l1_norm
+              << "  L2=" << summary.final_l2_norm
+              << "  Linf=" << summary.final_linf_norm << "\n";
+    std::cout << "  analytical_summary: " << summary.analytical_summary_path << "\n";
+    if (!summary.grid_convergence_csv_path.empty()) {
+        std::cout << "  grid_convergence_csv: " << summary.grid_convergence_csv_path
+                  << "  monotonic=" << BoolString(summary.grid_convergence_ok) << "\n";
+    }
+    if (!summary.time_sensitivity_csv_path.empty()) {
+        std::cout << "  time_sensitivity_csv: " << summary.time_sensitivity_csv_path
+                  << "  monotonic=" << BoolString(summary.time_sensitivity_ok) << "\n";
+    }
+    std::cout << "  pass: " << BoolString(summary.analytical_passed) << "\n";
+    std::cout << "============================================\n";
+}
+
+void PrintPrepareReferenceSummary(const CaseCommon::CaseArtifactPaths& artifacts) {
+    std::cout << "\n============================================\n";
+    std::cout << "[Test_H_CO2] prepared analytical reference artifacts\n";
+    std::cout << "  case_dir: " << artifacts.case_dir << "\n";
+    std::cout << "  stage_manifest: " << artifacts.engineering_stage_manifest_path << "\n";
+    std::cout << "  reference_contract: " << artifacts.reference_contract_path << "\n";
+    std::cout << "  status_report: " << artifacts.report_status_markdown_path << "\n";
+    std::cout << "============================================\n";
+}
+
 const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
     static const std::unordered_map<std::string, BuilderFn> registry = {
         {"h_co2_constpp_nofrac_nowell", &BuildDefaultPlan}
@@ -438,9 +607,11 @@ TestCaseSummary RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& ou
     return summary;
 }
 
-TestCaseSummary RunCase(const TestCaseSpec& cfg) {
-    TestCaseSummary summary = RunSingleCaseCore(cfg, "");
+TestCaseSummary RunCase(const TestCaseSpec& cfg, const std::string& outputDirOverride) {
+    TestCaseSummary summary = RunSingleCaseCore(cfg, outputDirOverride);
     std::vector<SweepStudyRow> gridRows, timeRows;
+    const std::string studiesDir = summary.case_dir + "/studies";
+    EnsureDirRecursive(studiesDir);
 
     if (cfg.enable_grid_convergence_study) {
         for (const auto& gridCase : cfg.grid_sweep_cases) {
@@ -469,9 +640,9 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
             row.linf_norm = sweepSummary.final_linf_norm;
             gridRows.push_back(row);
         }
-    summary.grid_convergence_ok = Case2DStudies::IsMonotonicNonIncreasingL2(gridRows);
-        summary.grid_convergence_csv_path = summary.case_dir + "/grid_convergence.csv";
-    Case2DStudies::WriteStudyCSV(gridRows, summary.grid_convergence_csv_path, "grid");
+        summary.grid_convergence_ok = Case2DStudies::IsMonotonicNonIncreasingL2(gridRows);
+        summary.grid_convergence_csv_path = studiesDir + "/grid_convergence.csv";
+        Case2DStudies::WriteStudyCSV(gridRows, summary.grid_convergence_csv_path, "grid");
     }
 
     if (cfg.enable_time_sensitivity_study) {
@@ -500,9 +671,9 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
             row.linf_norm = sweepSummary.final_linf_norm;
             timeRows.push_back(row);
         }
-    summary.time_sensitivity_ok = Case2DStudies::IsMonotonicNonIncreasingL2(timeRows);
-        summary.time_sensitivity_csv_path = summary.case_dir + "/time_sensitivity.csv";
-    Case2DStudies::WriteStudyCSV(timeRows, summary.time_sensitivity_csv_path, "time");
+        summary.time_sensitivity_ok = Case2DStudies::IsMonotonicNonIncreasingL2(timeRows);
+        summary.time_sensitivity_csv_path = studiesDir + "/time_sensitivity.csv";
+        Case2DStudies::WriteStudyCSV(timeRows, summary.time_sensitivity_csv_path, "time");
     }
 
     summary.analytical_passed =
@@ -530,34 +701,52 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
     return summary;
 }
 
-void ExecutePlanByKeyImpl(const std::string& key) {
+void RunStageByKeyImpl(const std::string& key, CaseCommon::CaseStage stage) {
     const auto& registry = GetRegistry();
     const auto it = registry.find(key);
     if (it == registry.end()) throw std::runtime_error("[Test_H_CO2] unknown registry key: " + key);
     const TestCasePlan plan = it->second();
-    const TestCaseSummary summary = RunCase(plan.spec);
-    std::cout << "\n============================================\n";
-    std::cout << "[Test_H_CO2] run completed\n";
-    std::cout << "  output_dir: " << summary.case_dir << "\n";
-    std::cout << "  grid: " << summary.nx << " x " << summary.ny << " (" << summary.n_cells << " cells)\n";
-    std::cout << "  steps: " << summary.steps << "  rollbacks: " << summary.total_rollbacks << "\n";
-    std::cout << "  Newton iters: avg=" << std::fixed << std::setprecision(2) << summary.avg_iters
-              << "  max=" << summary.max_iters << "\n";
-    std::cout << "  final_time: " << std::scientific << std::setprecision(4) << summary.t_end << " s\n";
-    std::cout << "  final errors: L1=" << summary.final_l1_norm
-              << "  L2=" << summary.final_l2_norm
-              << "  Linf=" << summary.final_linf_norm << "\n";
-    std::cout << "  analytical_summary: " << summary.analytical_summary_path << "\n";
-    if (!summary.grid_convergence_csv_path.empty()) {
-        std::cout << "  grid_convergence_csv: " << summary.grid_convergence_csv_path
-                  << "  monotonic=" << BoolString(summary.grid_convergence_ok) << "\n";
+    const CaseCommon::CaseArtifactPaths artifacts = BuildA1ArtifactPaths();
+    EnsureA1ArtifactContractDirs(artifacts);
+    WriteA1StageManifest(artifacts, stage, "started", artifacts.case_dir);
+    WriteA1ReferenceContract(plan.spec, artifacts, stage);
+    WriteA1StageStatus(plan.spec, artifacts, stage, "started", artifacts.case_dir);
+
+    if (stage == CaseCommon::CaseStage::PrepareReference) {
+        WriteA1StageManifest(artifacts, stage, "prepared_reference_inputs", artifacts.reference_dir);
+        WriteA1StageStatus(plan.spec, artifacts, stage, "prepared_reference_inputs", artifacts.reference_dir);
+        PrintPrepareReferenceSummary(artifacts);
+        return;
     }
-    if (!summary.time_sensitivity_csv_path.empty()) {
-        std::cout << "  time_sensitivity_csv: " << summary.time_sensitivity_csv_path
-                  << "  monotonic=" << BoolString(summary.time_sensitivity_ok) << "\n";
+
+    const TestCaseSpec stageSpec = BuildStageSpec(plan.spec, stage);
+    TestCaseSummary summary;
+    switch (stage) {
+    case CaseCommon::CaseStage::SolveOnly:
+        summary = RunSingleCaseCore(stageSpec, artifacts.engineering_dir);
+        WriteA1StageManifest(artifacts, stage, "completed", artifacts.engineering_dir);
+        WriteA1StageStatus(stageSpec, artifacts, stage, "completed", artifacts.engineering_dir);
+        PrintRunSummary("solve_only completed", summary);
+        return;
+    case CaseCommon::CaseStage::ValidateOnly:
+        summary = RunCase(stageSpec, artifacts.case_dir);
+        WriteA1StageManifest(artifacts, stage, "completed", artifacts.case_dir);
+        WriteA1StageStatus(stageSpec, artifacts, stage, "completed", artifacts.case_dir);
+        PrintRunSummary("validate_only completed", summary);
+        return;
+    case CaseCommon::CaseStage::FullWorkflow:
+        summary = RunCase(stageSpec, artifacts.case_dir);
+        WriteA1StageManifest(artifacts, stage, "completed", artifacts.case_dir);
+        WriteA1StageStatus(stageSpec, artifacts, stage, "completed", artifacts.case_dir);
+        PrintRunSummary("full_workflow completed", summary);
+        return;
+    default:
+        throw std::runtime_error("[Test_H_CO2] unsupported stage in RunStageByKeyImpl.");
     }
-    std::cout << "  pass: " << BoolString(summary.analytical_passed) << "\n";
-    std::cout << "============================================\n";
+}
+
+void ExecutePlanByKeyImpl(const std::string& key) {
+    RunStageByKeyImpl(key, CaseCommon::CaseStage::FullWorkflow);
 }
 
 } // namespace
@@ -571,19 +760,19 @@ void ExecutePlanByKey(const std::string& key) {
 }
 
 void RunSolveOnly() {
-    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+    RunStageByKeyImpl("h_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::SolveOnly);
 }
 
 void RunPrepareReference() {
-    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+    RunStageByKeyImpl("h_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::PrepareReference);
 }
 
 void RunValidateOnly() {
-    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+    RunStageByKeyImpl("h_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::ValidateOnly);
 }
 
 void RunFullWorkflow() {
-    ExecutePlanByKeyImpl("h_co2_constpp_nofrac_nowell");
+    RunStageByKeyImpl("h_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::FullWorkflow);
 }
 
 } // namespace Test_H_CO2_ConstPP
