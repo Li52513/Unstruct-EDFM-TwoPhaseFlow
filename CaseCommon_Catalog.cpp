@@ -355,7 +355,7 @@ BindingInfo GetBinding(const std::string& caseCode) {
     if (caseCode == "A7") return BindingInfo{&RunA7, "implemented"};
     if (caseCode == "B1") return BindingInfo{&RunB1, "implemented"};
     if (caseCode == "B3") return BindingInfo{&RunB3, "implemented"};
-    if (caseCode == "B7") return BindingInfo{&RunB7, "skeleton"};
+    if (caseCode == "B7") return BindingInfo{&RunB7, "implemented"};
     if (caseCode == "C1") return BindingInfo{&RunC1, "implemented"};
     if (caseCode == "C7") return BindingInfo{&RunC7, "skeleton"};
     return BindingInfo{};
