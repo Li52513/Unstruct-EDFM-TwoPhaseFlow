@@ -16,6 +16,11 @@
 #include "Test_2D_EDFM_H_T_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_NoFrac_InjProd.h"
 #include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_ComplexFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_VaryPP_ComplexFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_VaryPP_SingleFrac_NoWell.h"
 
 #include <algorithm>
 #include <cctype>
@@ -190,6 +195,56 @@ int RunC1(CaseStage stage) {
     case CaseStage::ValidateOnly: Test_H_TP_CO2H2O_ConstPP_NoFrac::RunValidateOnly(); return 0;
     case CaseStage::FullWorkflow: Test_H_TP_CO2H2O_ConstPP_NoFrac::RunFullWorkflow(); return 0;
     default: throw std::runtime_error("[CaseCatalog] unsupported stage for C1.");
+    }
+}
+
+int RunC2(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_TP_CO2H2O_VaryPP_NoFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_TP_CO2H2O_VaryPP_NoFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_TP_CO2H2O_VaryPP_NoFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_TP_CO2H2O_VaryPP_NoFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for C2.");
+    }
+}
+
+int RunC3(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_TP_CO2H2O_ConstPP_SingleFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_TP_CO2H2O_ConstPP_SingleFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_TP_CO2H2O_ConstPP_SingleFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_TP_CO2H2O_ConstPP_SingleFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for C3.");
+    }
+}
+
+int RunC4(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_TP_CO2H2O_VaryPP_SingleFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_TP_CO2H2O_VaryPP_SingleFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_TP_CO2H2O_VaryPP_SingleFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_TP_CO2H2O_VaryPP_SingleFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for C4.");
+    }
+}
+
+int RunC5(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_TP_CO2H2O_ConstPP_ComplexFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_TP_CO2H2O_ConstPP_ComplexFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_TP_CO2H2O_ConstPP_ComplexFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_TP_CO2H2O_ConstPP_ComplexFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for C5.");
+    }
+}
+
+int RunC6(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_TP_CO2H2O_VaryPP_ComplexFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_TP_CO2H2O_VaryPP_ComplexFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_TP_CO2H2O_VaryPP_ComplexFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_TP_CO2H2O_VaryPP_ComplexFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for C6.");
     }
 }
 
@@ -429,6 +484,11 @@ BindingInfo GetBinding(const std::string& caseCode) {
     if (caseCode == "B6") return BindingInfo{&RunB6, "implemented"};
     if (caseCode == "B7") return BindingInfo{&RunB7, "implemented"};
     if (caseCode == "C1") return BindingInfo{&RunC1, "implemented"};
+    if (caseCode == "C2") return BindingInfo{&RunC2, "implemented"};
+    if (caseCode == "C3") return BindingInfo{&RunC3, "implemented"};
+    if (caseCode == "C4") return BindingInfo{&RunC4, "implemented"};
+    if (caseCode == "C5") return BindingInfo{&RunC5, "implemented"};
+    if (caseCode == "C6") return BindingInfo{&RunC6, "implemented"};
     if (caseCode == "C7") return BindingInfo{&RunC7, "implemented"};
     return BindingInfo{};
 }

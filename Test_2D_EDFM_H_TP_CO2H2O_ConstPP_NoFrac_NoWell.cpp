@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -23,10 +24,28 @@ namespace Test_H_TP_CO2H2O_ConstPP_NoFrac {
 namespace {
 
 constexpr double kPendingTimeTolerance = 1.0e-9;
-constexpr const char* kPlanKey = "h_tp_co2h2o_constpp_nofrac_nowell";
+constexpr const char* kCaseCodeC1 = "C1";
+constexpr const char* kCaseCodeC2 = "C2";
+constexpr const char* kCaseCodeC3 = "C3";
+constexpr const char* kCaseCodeC4 = "C4";
+constexpr const char* kCaseCodeC5 = "C5";
+constexpr const char* kCaseCodeC6 = "C6";
+constexpr const char* kPlanKeyC1 = "h_tp_co2h2o_constpp_nofrac_nowell";
+constexpr const char* kPlanKeyC2 = "h_tp_co2h2o_varypp_nofrac_nowell";
+constexpr const char* kPlanKeyC2Smoke = "h_tp_co2h2o_varypp_nofrac_nowell_smoke";
+constexpr const char* kPlanKeyC3 = "h_tp_co2h2o_constpp_singlefrac_nowell";
+constexpr const char* kPlanKeyC3Smoke = "h_tp_co2h2o_constpp_singlefrac_nowell_smoke";
+constexpr const char* kPlanKeyC4 = "h_tp_co2h2o_varypp_singlefrac_nowell";
+constexpr const char* kPlanKeyC4Smoke = "h_tp_co2h2o_varypp_singlefrac_nowell_smoke";
+constexpr const char* kPlanKeyC5 = "h_tp_co2h2o_constpp_complexfrac_nowell";
+constexpr const char* kPlanKeyC5Smoke = "h_tp_co2h2o_constpp_complexfrac_nowell_smoke";
+constexpr const char* kPlanKeyC6 = "h_tp_co2h2o_varypp_complexfrac_nowell";
+constexpr const char* kPlanKeyC6Smoke = "h_tp_co2h2o_varypp_complexfrac_nowell_smoke";
 constexpr const char* kFamilyMatrixHorizontal = "matrix_horizontal";
 constexpr const char* kFamilyMatrixVerticalMidline = "matrix_vertical_midline";
 constexpr const char* kLocationMatrix = "matrix";
+
+enum class FractureVariant { None, Single, Complex };
 
 struct SpatialSamplePoint {
     int id = -1;
@@ -63,17 +82,31 @@ struct MonitorScheduleState {
 };
 
 struct TestCaseSpec {
-    std::string case_name = kPlanKey;
+    std::string case_code = kCaseCodeC1;
+    std::string case_name = kPlanKeyC1;
+    bool use_variable_properties = false;
+    FractureVariant fracture_variant = FractureVariant::None;
     double lx = 400.0;
     double ly = 40.0;
     int nx = 48;
     int ny = 6;
+    double frac_x0_ratio = 0.2;
+    double frac_y0_ratio = 0.1;
+    double frac_x1_ratio = 0.8;
+    double frac_y1_ratio = 0.9;
     double matrix_phi = 0.10;
     double matrix_perm = 1.0e-13;
     double matrix_ct = 5.0e-9;
     double matrix_rho_r = 2600.0;
     double matrix_cp_r = 800.0;
     double matrix_lambda_r = 3.0;
+    double fracture_phi = 0.15;
+    double fracture_kt = 5.0e-12;
+    double fracture_kn = 5.0e-13;
+    double fracture_ct = 5.0e-9;
+    double fracture_rho_r = 2600.0;
+    double fracture_cp_r = 800.0;
+    double fracture_lambda_r = 6.0;
     FluidConstantProperties water_props = FluidConstantProperties{1000.0, 1.0e-3, 4200.0, 4180.0, 0.6};
     FluidConstantProperties gas_props = FluidConstantProperties{700.0, 6.0e-5, 1100.0, 850.0, 0.03};
     double p_init = 10.0e6;
@@ -116,7 +149,7 @@ struct TestCasePlan {
     TestCaseSpec spec;
 };
 
-struct C1OutputPaths {
+struct CaseOutputPaths {
     std::string output_dir;
     std::string property_table_path;
     std::string reference_spec_path;
@@ -133,6 +166,7 @@ struct C1OutputPaths {
 };
 
 struct CaseRunSummary {
+    std::string case_code;
     std::string output_dir;
     int n_cells = 0;
     int steps = 0;
@@ -155,18 +189,39 @@ std::string BoolString(bool value) {
     return value ? "true" : "false";
 }
 
-const CaseCommon::CaseCatalogEntry& GetC1CatalogEntryOrThrow() {
-    const CaseCommon::CaseCatalogEntry* entry = CaseCommon::FindCaseCatalogEntry("C1");
-    if (!entry) throw std::runtime_error("[Test_H_TP_CO2H2O_ConstPP_NoFrac] missing C1 catalog entry.");
+std::string FractureVariantString(FractureVariant value) {
+    switch (value) {
+    case FractureVariant::None: return "nofrac";
+    case FractureVariant::Single: return "singlefrac";
+    case FractureVariant::Complex: return "complexfrac";
+    default: return "unknown";
+    }
+}
+
+std::string PropertyModeString(const TestCaseSpec& cfg) {
+    return cfg.use_variable_properties ? "varypp" : "constpp";
+}
+
+std::string CaseBanner(const std::string& caseCode) {
+    return "[" + caseCode + "]";
+}
+
+std::string FailurePrefix(const std::string& caseCode) {
+    return "[Test_H_TP_CO2H2O_" + caseCode + "]";
+}
+
+const CaseCommon::CaseCatalogEntry& GetCatalogEntryOrThrow(const std::string& caseCode) {
+    const CaseCommon::CaseCatalogEntry* entry = CaseCommon::FindCaseCatalogEntry(caseCode);
+    if (!entry) throw std::runtime_error(FailurePrefix(caseCode) + " missing catalog entry.");
     return *entry;
 }
 
-CaseCommon::CaseArtifactPaths BuildC1ArtifactPaths() {
-    const CaseCommon::CaseCatalogEntry& entry = GetC1CatalogEntryOrThrow();
+CaseCommon::CaseArtifactPaths BuildArtifactPathsForCase(const std::string& caseCode) {
+    const CaseCommon::CaseCatalogEntry& entry = GetCatalogEntryOrThrow(caseCode);
     return CaseCommon::BuildArtifactPaths(entry.metadata.output_root, entry.metadata.case_code, entry.metadata.case_slug);
 }
 
-void EnsureC1ArtifactContractDirs(const CaseCommon::CaseArtifactPaths& artifacts) {
+void EnsureArtifactContractDirs(const CaseCommon::CaseArtifactPaths& artifacts) {
     CaseCommon::EnsureDirRecursive(artifacts.root_dir);
     CaseCommon::EnsureDirRecursive(artifacts.case_dir);
     CaseCommon::EnsureDirRecursive(artifacts.studies_dir);
@@ -178,9 +233,9 @@ void EnsureC1ArtifactContractDirs(const CaseCommon::CaseArtifactPaths& artifacts
     CaseCommon::EnsureDirRecursive(artifacts.reference_dir + "/comsol");
 }
 
-C1OutputPaths BuildC1OutputPaths(const CaseCommon::CaseArtifactPaths& artifacts,
+CaseOutputPaths BuildOutputPaths(const CaseCommon::CaseArtifactPaths& artifacts,
                                  const std::string& outputDir) {
-    C1OutputPaths paths;
+    CaseOutputPaths paths;
     paths.output_dir = outputDir;
     paths.property_table_path = artifacts.engineering_dir + "/property_table.csv";
     paths.reference_spec_path = artifacts.engineering_dir + "/reference_spec.md";
@@ -201,14 +256,130 @@ TestCaseSpec BuildBaseSpec() {
     return TestCaseSpec();
 }
 
-TestCasePlan BuildPlanByKey(const std::string& key) {
-    if (key != kPlanKey) {
-        throw std::runtime_error("[Test_H_TP_CO2H2O_ConstPP_NoFrac] unknown plan key: " + key);
-    }
+TestCasePlan BuildVariantPlan(const std::string& planKey,
+                              const std::string& caseCode,
+                              const std::string& caseName,
+                              bool useVariableProperties,
+                              FractureVariant fractureVariant) {
     TestCasePlan plan;
-    plan.plan_key = key;
+    plan.plan_key = planKey;
     plan.spec = BuildBaseSpec();
+    plan.spec.case_code = caseCode;
+    plan.spec.case_name = caseName;
+    plan.spec.use_variable_properties = useVariableProperties;
+    plan.spec.fracture_variant = fractureVariant;
     return plan;
+}
+
+TestCasePlan BuildC1Plan() {
+    return BuildVariantPlan(kPlanKeyC1, kCaseCodeC1, kPlanKeyC1, false, FractureVariant::None);
+}
+
+TestCasePlan BuildC2Plan() {
+    return BuildVariantPlan(kPlanKeyC2, kCaseCodeC2, "c2_varypp_nofrac", true, FractureVariant::None);
+}
+
+TestCasePlan BuildC2SmokePlan() {
+    TestCasePlan plan = BuildC2Plan();
+    plan.plan_key = kPlanKeyC2Smoke;
+    plan.spec.case_name = "c2_smoke";
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 5.0e2;
+    plan.spec.dt_max = 5.0e3;
+    plan.spec.target_end_time_s = 2.0e4;
+    plan.spec.max_steps = 300;
+    return plan;
+}
+
+TestCasePlan BuildC3Plan() {
+    return BuildVariantPlan(kPlanKeyC3, kCaseCodeC3, "c3_constpp_singlefrac", false, FractureVariant::Single);
+}
+
+TestCasePlan BuildC3SmokePlan() {
+    TestCasePlan plan = BuildC3Plan();
+    plan.plan_key = kPlanKeyC3Smoke;
+    plan.spec.case_name = "c3_smoke";
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 5.0e2;
+    plan.spec.dt_max = 5.0e3;
+    plan.spec.target_end_time_s = 2.0e4;
+    plan.spec.max_steps = 300;
+    return plan;
+}
+
+TestCasePlan BuildC4Plan() {
+    return BuildVariantPlan(kPlanKeyC4, kCaseCodeC4, "c4_varypp_singlefrac", true, FractureVariant::Single);
+}
+
+TestCasePlan BuildC4SmokePlan() {
+    TestCasePlan plan = BuildC4Plan();
+    plan.plan_key = kPlanKeyC4Smoke;
+    plan.spec.case_name = "c4_smoke";
+    plan.spec.nx = 16;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 1.0e2;
+    plan.spec.dt_max = 1.0e3;
+    plan.spec.target_end_time_s = 5.0e3;
+    plan.spec.max_steps = 160;
+    return plan;
+}
+
+TestCasePlan BuildC5Plan() {
+    return BuildVariantPlan(kPlanKeyC5, kCaseCodeC5, "c5_constpp_complexfrac", false, FractureVariant::Complex);
+}
+
+TestCasePlan BuildC5SmokePlan() {
+    TestCasePlan plan = BuildC5Plan();
+    plan.plan_key = kPlanKeyC5Smoke;
+    plan.spec.case_name = "c5_smoke";
+    plan.spec.nx = 16;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 1.0e2;
+    plan.spec.dt_max = 1.0e3;
+    plan.spec.target_end_time_s = 5.0e3;
+    plan.spec.max_steps = 160;
+    return plan;
+}
+
+TestCasePlan BuildC6Plan() {
+    return BuildVariantPlan(kPlanKeyC6, kCaseCodeC6, "c6_varypp_complexfrac", true, FractureVariant::Complex);
+}
+
+TestCasePlan BuildC6SmokePlan() {
+    TestCasePlan plan = BuildC6Plan();
+    plan.plan_key = kPlanKeyC6Smoke;
+    plan.spec.case_name = "c6_smoke";
+    plan.spec.nx = 8;
+    plan.spec.ny = 2;
+    plan.spec.dt_init = 5.0e1;
+    plan.spec.dt_max = 2.0e2;
+    plan.spec.target_end_time_s = 1.0e3;
+    plan.spec.max_steps = 120;
+    return plan;
+}
+
+TestCasePlan BuildPlanByKey(const std::string& key) {
+    using BuilderFn = TestCasePlan(*)();
+    static const std::unordered_map<std::string, BuilderFn> registry = {
+        {kPlanKeyC1, &BuildC1Plan},
+        {kPlanKeyC2, &BuildC2Plan},
+        {kPlanKeyC2Smoke, &BuildC2SmokePlan},
+        {kPlanKeyC3, &BuildC3Plan},
+        {kPlanKeyC3Smoke, &BuildC3SmokePlan},
+        {kPlanKeyC4, &BuildC4Plan},
+        {kPlanKeyC4Smoke, &BuildC4SmokePlan},
+        {kPlanKeyC5, &BuildC5Plan},
+        {kPlanKeyC5Smoke, &BuildC5SmokePlan},
+        {kPlanKeyC6, &BuildC6Plan},
+        {kPlanKeyC6Smoke, &BuildC6SmokePlan}
+    };
+    const auto it = registry.find(key);
+    if (it == registry.end()) {
+        throw std::runtime_error("[Test_H_TP_CO2H2O] unknown plan key: " + key);
+    }
+    return it->second();
 }
 
 TestCaseSpec BuildStageSpec(const TestCaseSpec& base, CaseCommon::CaseStage stage) {
@@ -293,6 +464,39 @@ std::vector<MonitorScheduleState> BuildMonitorSchedule(const TestCaseSpec& cfg) 
         schedule.push_back(sample);
     }
     return schedule;
+}
+
+Vector BuildPrimaryFractureStart(const TestCaseSpec& cfg) {
+    return Vector(cfg.frac_x0_ratio * cfg.lx, cfg.frac_y0_ratio * cfg.ly, 0.0);
+}
+
+Vector BuildPrimaryFractureEnd(const TestCaseSpec& cfg) {
+    return Vector(cfg.frac_x1_ratio * cfg.lx, cfg.frac_y1_ratio * cfg.ly, 0.0);
+}
+
+void AddConfiguredFractures(MeshManager& mgr, const TestCaseSpec& cfg) {
+    if (cfg.fracture_variant == FractureVariant::None) return;
+
+    mgr.addFracture(BuildPrimaryFractureStart(cfg), BuildPrimaryFractureEnd(cfg));
+    if (cfg.fracture_variant != FractureVariant::Complex) return;
+
+    mgr.addFracture(
+        Vector(0.18 * cfg.lx, 0.80 * cfg.ly, 0.0),
+        Vector(0.52 * cfg.lx, 0.38 * cfg.ly, 0.0));
+    mgr.addFracture(
+        Vector(0.58 * cfg.lx, 0.82 * cfg.ly, 0.0),
+        Vector(0.88 * cfg.lx, 0.58 * cfg.ly, 0.0));
+}
+
+void ConfigureMeshForCase(MeshManager& mgr, const TestCaseSpec& cfg) {
+    mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
+    if (cfg.fracture_variant != FractureVariant::None) {
+        AddConfiguredFractures(mgr, cfg);
+        mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
+    }
+    mgr.BuildGlobalSystemIndexing();
+    mgr.BuildFracturetoFractureTopology();
+    mgr.setNumDOFs(3);
 }
 
 double DistanceSq(const Vector& a, double x, double y) {
@@ -393,59 +597,68 @@ std::vector<SpatialSamplePoint> BuildMonitorPoints(const MeshManager& mgr, const
     return points;
 }
 
-void WriteC1StageManifest(const CaseCommon::CaseArtifactPaths& artifacts,
-                          CaseCommon::CaseStage stage,
-                          const std::string& status,
-                          const std::string& outputDir) {
+void WriteStageManifest(const std::string& caseCode,
+                        const CaseCommon::CaseArtifactPaths& artifacts,
+                        CaseCommon::CaseStage stage,
+                        const std::string& status,
+                        const std::string& outputDir) {
+    const std::string context = FailurePrefix(caseCode) + " failed to write stage manifest";
     Case2DReferenceIO::WriteAsciiFile(
         artifacts.engineering_stage_manifest_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 stage manifest",
+        context.c_str(),
         [&](std::ofstream& out) {
-            out << "case_code=C1\n";
+            out << "case_code=" << caseCode << "\n";
             out << "stage=" << CaseCommon::ToString(stage) << "\n";
             out << "status=" << status << "\n";
             out << "output_dir=" << outputDir << "\n";
         });
 }
 
-void WriteC1ReferenceContract(const TestCaseSpec& cfg,
-                              const CaseCommon::CaseArtifactPaths& artifacts,
-                              CaseCommon::CaseStage stage) {
+void WriteReferenceContract(const TestCaseSpec& cfg,
+                            const CaseCommon::CaseArtifactPaths& artifacts,
+                            CaseCommon::CaseStage stage) {
+    const std::string context = FailurePrefix(cfg.case_code) + " failed to write reference contract";
     Case2DReferenceIO::WriteAsciiFile(
         artifacts.reference_contract_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 reference contract",
+        context.c_str(),
         [&](std::ofstream& out) {
-            out << "# C1 Reference Contract\n\n";
+            out << "# " << cfg.case_code << " Reference Contract\n\n";
             out << "- Stage: `" << CaseCommon::ToString(stage) << "`\n";
             out << "- Case dir: `" << artifacts.case_dir << "`\n";
             out << "- Reference mode: `comsol`\n";
+            out << "- Property mode: `" << PropertyModeString(cfg) << "`\n";
+            out << "- Fracture mode: `" << FractureVariantString(cfg.fracture_variant) << "`\n";
             out << "- Validation variables: `pressure`, `temperature`, `co2_saturation`\n";
             out << "- End time: `" << std::setprecision(12) << cfg.target_end_time_s << " s`\n";
         });
 }
 
-void WriteC1StageStatus(const TestCaseSpec& cfg,
-                        const CaseCommon::CaseArtifactPaths& artifacts,
-                        CaseCommon::CaseStage stage,
-                        const std::string& status,
-                        const std::string& outputDir) {
+void WriteStageStatus(const TestCaseSpec& cfg,
+                      const CaseCommon::CaseArtifactPaths& artifacts,
+                      CaseCommon::CaseStage stage,
+                      const std::string& status,
+                      const std::string& outputDir) {
+    const std::string context = FailurePrefix(cfg.case_code) + " failed to write stage status";
     Case2DReferenceIO::WriteAsciiFile(
         artifacts.report_status_markdown_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 stage status",
+        context.c_str(),
         [&](std::ofstream& out) {
-            out << "# C1 Template Status\n\n";
+            out << "# " << cfg.case_code << " Template Status\n\n";
             out << "- Stage: `" << CaseCommon::ToString(stage) << "`\n";
             out << "- Status: `" << status << "`\n";
             out << "- Output dir: `" << outputDir << "`\n";
             out << "- Grid: `" << cfg.nx << "x" << cfg.ny << "`\n";
+            out << "- Property mode: `" << PropertyModeString(cfg) << "`\n";
+            out << "- Fracture mode: `" << FractureVariantString(cfg.fracture_variant) << "`\n";
             out << "- End time: `" << std::setprecision(12) << cfg.target_end_time_s << " s`\n";
         });
 }
 
-void WriteC1PropertyTable(const TestCaseSpec& cfg, const C1OutputPaths& paths) {
+void WritePropertyTable(const TestCaseSpec& cfg, const CaseOutputPaths& paths) {
+    const std::string context = FailurePrefix(cfg.case_code) + " failed to write property table";
     Case2DReferenceIO::WriteAsciiFile(
         paths.property_table_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 property table",
+        context.c_str(),
         [&](std::ofstream& out) {
             out << "phase,rho,mu,cp,cv,k\n";
             out << "water," << cfg.water_props.rho << "," << cfg.water_props.mu << "," << cfg.water_props.cp << ","
@@ -455,19 +668,22 @@ void WriteC1PropertyTable(const TestCaseSpec& cfg, const C1OutputPaths& paths) {
         });
 }
 
-void WriteC1ReferenceSpec(const TestCaseSpec& cfg,
-                          const C1OutputPaths& paths,
-                          const std::vector<SpatialSamplePoint>& profileStations,
-                          const std::vector<SpatialSamplePoint>& monitorPoints,
-                          const std::vector<SnapshotState>& snapshots,
-                          const std::vector<MonitorScheduleState>& monitorSchedule) {
+void WriteReferenceSpec(const TestCaseSpec& cfg,
+                        const CaseOutputPaths& paths,
+                        const std::vector<SpatialSamplePoint>& profileStations,
+                        const std::vector<SpatialSamplePoint>& monitorPoints,
+                        const std::vector<SnapshotState>& snapshots,
+                        const std::vector<MonitorScheduleState>& monitorSchedule) {
+    const std::string context = FailurePrefix(cfg.case_code) + " failed to write reference spec";
     Case2DReferenceIO::WriteAsciiFile(
         paths.reference_spec_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 reference spec",
+        context.c_str(),
         [&](std::ofstream& out) {
-            out << "# C1 Reference Input Spec\n\n";
+            out << "# " << cfg.case_code << " Reference Input Spec\n\n";
             out << "- Grid: `" << cfg.nx << "x" << cfg.ny << "`\n";
             out << "- Domain: `" << cfg.lx << " m x " << cfg.ly << " m`\n";
+            out << "- Property mode: `" << PropertyModeString(cfg) << "`\n";
+            out << "- Fracture mode: `" << FractureVariantString(cfg.fracture_variant) << "`\n";
             out << "- Variables: `pressure`, `temperature`, `co2_saturation`\n";
             out << "- Stored transported saturation: `water_saturation`\n";
             out << "- Engineering profile stations: `" << profileStations.size() << "`\n";
@@ -477,14 +693,16 @@ void WriteC1ReferenceSpec(const TestCaseSpec& cfg,
         });
 }
 
-void WriteC1MatlabStub(const C1OutputPaths& paths,
-                       const CaseCommon::CaseStage stage,
-                       const CaseCommon::CaseArtifactPaths& artifacts) {
+void WriteMatlabStub(const TestCaseSpec& cfg,
+                     const CaseOutputPaths& paths,
+                     const CaseCommon::CaseStage stage,
+                     const CaseCommon::CaseArtifactPaths& artifacts) {
+    const std::string context = FailurePrefix(cfg.case_code) + " failed to write Matlab stub";
     Case2DReferenceIO::WriteAsciiFile(
         paths.matlab_script_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 Matlab stub",
+        context.c_str(),
         [&](std::ofstream& out) {
-            out << "% C1 Matlab plotting placeholder\n";
+            out << "% " << cfg.case_code << " Matlab plotting placeholder\n";
             out << "% Stage: " << CaseCommon::ToString(stage) << "\n";
             out << "% Case root: " << artifacts.case_dir << "\n";
             out << "% Shared C/F two-phase plotting module is pending.\n";
@@ -494,10 +712,12 @@ void WriteC1MatlabStub(const C1OutputPaths& paths,
 void WriteEngineeringProfileCsvN3(const std::vector<SpatialSamplePoint>& stations,
                                   const std::string& family,
                                   const SnapshotState& snapshot,
-                                  const std::string& path) {
+                                  const std::string& path,
+                                  const std::string& caseCode) {
+    const std::string context = FailurePrefix(caseCode) + " failed to write engineering profile csv";
     Case2DReferenceIO::WriteAsciiFile(
         path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 engineering profile csv",
+        context.c_str(),
         [&](std::ofstream& out) {
             out << "station_id,label,family,location,target_axis_m,target_x_m,target_y_m,block_id,actual_x_m,actual_y_m,target_time_s,actual_time_s,p_num_pa,t_num_k,sw_num\n";
             for (const auto& station : stations) {
@@ -514,10 +734,12 @@ void WriteEngineeringProfileCsvN3(const std::vector<SpatialSamplePoint>& station
 
 void WriteEngineeringMonitorCsvN3(const std::vector<SpatialSamplePoint>& points,
                                   const std::vector<MonitorScheduleState>& schedule,
-                                  const std::string& path) {
+                                  const std::string& path,
+                                  const std::string& caseCode) {
+    const std::string context = FailurePrefix(caseCode) + " failed to write engineering monitor csv";
     Case2DReferenceIO::WriteAsciiFile(
         path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 engineering monitor csv",
+        context.c_str(),
         [&](std::ofstream& out) {
             out << "sample_id,target_time_s,actual_time_s";
             for (const auto& point : points) out << ",p_num_" << point.label;
@@ -545,7 +767,7 @@ std::vector<std::string> BuildExpectedReferenceFiles(const std::vector<SnapshotS
 }
 
 void ValidateReferencePayloadOrThrow(const CaseCommon::CaseArtifactPaths& artifacts,
-                                     const C1OutputPaths& paths,
+                                     const CaseOutputPaths& paths,
                                      CaseRunSummary& summary,
                                      const std::vector<SnapshotState>& snapshots) {
     std::vector<std::string> missingFiles;
@@ -559,35 +781,39 @@ void ValidateReferencePayloadOrThrow(const CaseCommon::CaseArtifactPaths& artifa
         summary.reference_ready = false;
         summary.validation_status = "missing_reference";
         summary.missing_reference_files = missingFiles;
+        const std::string context = FailurePrefix(summary.case_code) + " failed to write validation summary";
         Case2DReferenceIO::WriteAsciiFile(
             paths.validation_summary_path,
-            "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 validation summary",
+            context.c_str(),
             [&](std::ofstream& out) {
-                out << "# C1 Validation Summary\n\n";
+                out << "# " << summary.case_code << " Validation Summary\n\n";
                 out << "- Status: `missing_reference`\n";
                 out << "- Missing files:\n";
                 for (const auto& file : missingFiles) out << "  - `" << file << "`\n";
             });
-        throw std::runtime_error("[Test_H_TP_CO2H2O_ConstPP_NoFrac] C1 reference files are missing.");
+        throw std::runtime_error(FailurePrefix(summary.case_code) + " reference files are missing.");
     }
 
     summary.reference_ready = true;
     summary.validation_status = "reference_payload_ready_metrics_pending";
+    const std::string context = FailurePrefix(summary.case_code) + " failed to write validation summary";
     Case2DReferenceIO::WriteAsciiFile(
         paths.validation_summary_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 validation summary",
+        context.c_str(),
         [&](std::ofstream& out) {
-            out << "# C1 Validation Summary\n\n";
+            out << "# " << summary.case_code << " Validation Summary\n\n";
             out << "- Status: `reference_payload_ready_metrics_pending`\n";
             out << "- Note: quantitative `C/F` reference comparison is the next shared-module extraction target.\n";
         });
 }
 
-void WriteRunSummary(const CaseRunSummary& summary, const C1OutputPaths& paths) {
+void WriteRunSummary(const CaseRunSummary& summary, const CaseOutputPaths& paths) {
+    const std::string context = FailurePrefix(summary.case_code) + " failed to write run summary";
     Case2DReferenceIO::WriteAsciiFile(
         paths.run_summary_path,
-        "[Test_H_TP_CO2H2O_ConstPP_NoFrac] failed to write C1 run summary",
+        context.c_str(),
         [&](std::ofstream& out) {
+            out << "case_code=" << summary.case_code << "\n";
             out << "output_dir=" << summary.output_dir << "\n";
             out << "n_cells=" << summary.n_cells << "\n";
             out << "steps=" << summary.steps << "\n";
@@ -599,25 +825,22 @@ void WriteRunSummary(const CaseRunSummary& summary, const C1OutputPaths& paths) 
         });
 }
 
-void MaterializeC1ReferenceInputs(const TestCaseSpec& cfg,
-                                  const CaseCommon::CaseArtifactPaths& artifacts,
-                                  CaseCommon::CaseStage stage) {
-    const C1OutputPaths paths = BuildC1OutputPaths(artifacts, artifacts.case_dir);
+void MaterializeReferenceInputs(const TestCaseSpec& cfg,
+                                const CaseCommon::CaseArtifactPaths& artifacts,
+                                CaseCommon::CaseStage stage) {
+    const CaseOutputPaths paths = BuildOutputPaths(artifacts, artifacts.case_dir);
 
     MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
-    mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
-    mgr.BuildGlobalSystemIndexing();
-    mgr.BuildFracturetoFractureTopology();
-    mgr.setNumDOFs(3);
+    ConfigureMeshForCase(mgr, cfg);
 
     const std::vector<SpatialSamplePoint> profileStations = BuildProfileStations(mgr, cfg);
     const std::vector<SpatialSamplePoint> monitorPoints = BuildMonitorPoints(mgr, cfg);
     const std::vector<SnapshotState> snapshots = BuildSnapshots(cfg);
     const std::vector<MonitorScheduleState> monitorSchedule = BuildMonitorSchedule(cfg);
 
-    WriteC1PropertyTable(cfg, paths);
-    WriteC1ReferenceSpec(cfg, paths, profileStations, monitorPoints, snapshots, monitorSchedule);
-    WriteC1MatlabStub(paths, stage, artifacts);
+    WritePropertyTable(cfg, paths);
+    WriteReferenceSpec(cfg, paths, profileStations, monitorPoints, snapshots, monitorSchedule);
+    WriteMatlabStub(cfg, paths, stage, artifacts);
     Case2DReferenceIO::WriteProfileStationDefinitions(profileStations, paths.profile_station_definitions_path);
     Case2DReferenceIO::WriteMonitorPointDefinitions(monitorPoints, paths.monitor_point_definitions_path);
     Case2DReferenceIO::WriteProfileSchedule(snapshots, paths.profile_schedule_path);
@@ -628,16 +851,14 @@ CaseRunArtifacts RunCase(const TestCaseSpec& cfg,
                          const CaseCommon::CaseArtifactPaths& artifacts,
                          const std::string& outputDir) {
     CaseRunArtifacts result;
+    result.summary.case_code = cfg.case_code;
     result.summary.output_dir = outputDir;
 
-    const C1OutputPaths paths = BuildC1OutputPaths(artifacts, outputDir);
+    const CaseOutputPaths paths = BuildOutputPaths(artifacts, outputDir);
     CaseCommon::EnsureDirRecursive(outputDir);
 
     MeshManager mgr(cfg.lx, cfg.ly, 0.0, cfg.nx, cfg.ny, 0, true, false);
-    mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
-    mgr.BuildGlobalSystemIndexing();
-    mgr.BuildFracturetoFractureTopology();
-    mgr.setNumDOFs(3);
+    ConfigureMeshForCase(mgr, cfg);
 
     FieldManager_2D fm;
     FIM_CaseKit::InitFieldManager(mgr, fm);
@@ -690,14 +911,18 @@ CaseRunArtifacts RunCase(const TestCaseSpec& cfg,
     preset.rock_bg.rho_r = cfg.matrix_rho_r;
     preset.rock_bg.cp_r = cfg.matrix_cp_r;
     preset.rock_bg.k_r = cfg.matrix_lambda_r;
-    preset.frac.phi_f = cfg.matrix_phi;
-    preset.frac.permeability = cfg.matrix_perm;
-    preset.frac.compressibility = cfg.matrix_ct;
-    preset.frac.k_f = cfg.matrix_lambda_r;
+    preset.frac.phi_f = cfg.fracture_phi;
+    preset.frac.permeability = cfg.fracture_kt;
+    preset.frac.compressibility = cfg.fracture_ct;
+    preset.frac.k_f = cfg.fracture_lambda_r;
     preset.use_unified_fluid_model = true;
-    preset.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeTwoPhaseWaterCO2Constant(
-        cfg.water_props,
-        cfg.gas_props);
+    if (cfg.use_variable_properties) {
+        preset.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeTwoPhaseWaterCO2EOS();
+    } else {
+        preset.fluid_model = FIM_Engine::UnifiedFluidModelConfig::MakeTwoPhaseWaterCO2Constant(
+            cfg.water_props,
+            cfg.gas_props);
+    }
 
     auto modules = FIM_CaseKit::BuildModules2D(preset, &bcP, &bcT, &bcS);
     modules.disable_default_vtk_output = true;
@@ -767,29 +992,36 @@ CaseRunArtifacts RunCase(const TestCaseSpec& cfg,
                 result.profile_stations,
                 kFamilyMatrixHorizontal,
                 snapshot,
-                paths.engineering_profile_prefix + kFamilyMatrixHorizontal + "_" + snapshot.tag + ".csv");
+                paths.engineering_profile_prefix + kFamilyMatrixHorizontal + "_" + snapshot.tag + ".csv",
+                cfg.case_code);
             WriteEngineeringProfileCsvN3(
                 result.profile_stations,
                 kFamilyMatrixVerticalMidline,
                 snapshot,
-                paths.engineering_profile_prefix + kFamilyMatrixVerticalMidline + "_" + snapshot.tag + ".csv");
+                paths.engineering_profile_prefix + kFamilyMatrixVerticalMidline + "_" + snapshot.tag + ".csv",
+                cfg.case_code);
         }
-        WriteEngineeringMonitorCsvN3(result.monitor_points, result.monitor_schedule, paths.engineering_monitor_path);
+        WriteEngineeringMonitorCsvN3(
+            result.monitor_points,
+            result.monitor_schedule,
+            paths.engineering_monitor_path,
+            cfg.case_code);
     }
 
     WriteRunSummary(result.summary, paths);
     return result;
 }
 
-void PrintPrepareReferenceSummary(const CaseCommon::CaseArtifactPaths& artifacts) {
-    std::cout << "[C1] prepare_reference completed\n";
+void PrintPrepareReferenceSummary(const std::string& caseCode,
+                                  const CaseCommon::CaseArtifactPaths& artifacts) {
+    std::cout << CaseBanner(caseCode) << " prepare_reference completed\n";
     std::cout << "  case_dir      : " << artifacts.case_dir << "\n";
     std::cout << "  engineering   : " << artifacts.engineering_dir << "\n";
     std::cout << "  reference_dir : " << artifacts.reference_dir << "\n";
 }
 
 void PrintRunSummary(const std::string& banner, const CaseRunSummary& summary) {
-    std::cout << "[C1] " << banner << "\n";
+    std::cout << CaseBanner(summary.case_code) << " " << banner << "\n";
     std::cout << "  output_dir : " << summary.output_dir << "\n";
     std::cout << "  n_cells    : " << summary.n_cells << "\n";
     std::cout << "  steps      : " << summary.steps << "\n";
@@ -799,17 +1031,17 @@ void PrintRunSummary(const std::string& banner, const CaseRunSummary& summary) {
 
 void RunStageByKeyImpl(const std::string& key, CaseCommon::CaseStage stage) {
     const TestCasePlan plan = BuildPlanByKey(key);
-    const CaseCommon::CaseArtifactPaths artifacts = BuildC1ArtifactPaths();
-    EnsureC1ArtifactContractDirs(artifacts);
-    WriteC1StageManifest(artifacts, stage, "started", artifacts.case_dir);
-    WriteC1ReferenceContract(plan.spec, artifacts, stage);
-    WriteC1StageStatus(plan.spec, artifacts, stage, "started", artifacts.case_dir);
-    MaterializeC1ReferenceInputs(plan.spec, artifacts, stage);
+    const CaseCommon::CaseArtifactPaths artifacts = BuildArtifactPathsForCase(plan.spec.case_code);
+    EnsureArtifactContractDirs(artifacts);
+    WriteStageManifest(plan.spec.case_code, artifacts, stage, "started", artifacts.case_dir);
+    WriteReferenceContract(plan.spec, artifacts, stage);
+    WriteStageStatus(plan.spec, artifacts, stage, "started", artifacts.case_dir);
+    MaterializeReferenceInputs(plan.spec, artifacts, stage);
 
     if (stage == CaseCommon::CaseStage::PrepareReference) {
-        WriteC1StageManifest(artifacts, stage, "prepared_reference_inputs", artifacts.reference_dir);
-        WriteC1StageStatus(plan.spec, artifacts, stage, "prepared_reference_inputs", artifacts.reference_dir);
-        PrintPrepareReferenceSummary(artifacts);
+        WriteStageManifest(plan.spec.case_code, artifacts, stage, "prepared_reference_inputs", artifacts.reference_dir);
+        WriteStageStatus(plan.spec, artifacts, stage, "prepared_reference_inputs", artifacts.reference_dir);
+        PrintPrepareReferenceSummary(plan.spec.case_code, artifacts);
         return;
     }
 
@@ -822,37 +1054,37 @@ void RunStageByKeyImpl(const std::string& key, CaseCommon::CaseStage stage) {
         case CaseCommon::CaseStage::SolveOnly:
             result = RunCase(stageSpec, artifacts, artifacts.engineering_dir);
             result.summary.validation_status = "not_run";
-            WriteRunSummary(result.summary, BuildC1OutputPaths(artifacts, artifacts.engineering_dir));
-            WriteC1StageManifest(artifacts, stage, "completed", artifacts.engineering_dir);
-            WriteC1StageStatus(stageSpec, artifacts, stage, "completed", artifacts.engineering_dir);
+            WriteRunSummary(result.summary, BuildOutputPaths(artifacts, artifacts.engineering_dir));
+            WriteStageManifest(plan.spec.case_code, artifacts, stage, "completed", artifacts.engineering_dir);
+            WriteStageStatus(stageSpec, artifacts, stage, "completed", artifacts.engineering_dir);
             PrintRunSummary("solve_only completed", result.summary);
             return;
         case CaseCommon::CaseStage::ValidateOnly:
             result = RunCase(stageSpec, artifacts, artifacts.case_dir);
             ValidateReferencePayloadOrThrow(
                 artifacts,
-                BuildC1OutputPaths(artifacts, artifacts.case_dir),
+                BuildOutputPaths(artifacts, artifacts.case_dir),
                 result.summary,
                 result.snapshots);
-            WriteRunSummary(result.summary, BuildC1OutputPaths(artifacts, artifacts.case_dir));
-            WriteC1StageManifest(artifacts, stage, "completed", artifacts.case_dir);
-            WriteC1StageStatus(stageSpec, artifacts, stage, "completed", artifacts.case_dir);
+            WriteRunSummary(result.summary, BuildOutputPaths(artifacts, artifacts.case_dir));
+            WriteStageManifest(plan.spec.case_code, artifacts, stage, "completed", artifacts.case_dir);
+            WriteStageStatus(stageSpec, artifacts, stage, "completed", artifacts.case_dir);
             PrintRunSummary("validate_only completed", result.summary);
             return;
         case CaseCommon::CaseStage::FullWorkflow:
             result = RunCase(stageSpec, artifacts, artifacts.case_dir);
             ValidateReferencePayloadOrThrow(
                 artifacts,
-                BuildC1OutputPaths(artifacts, artifacts.case_dir),
+                BuildOutputPaths(artifacts, artifacts.case_dir),
                 result.summary,
                 result.snapshots);
-            WriteRunSummary(result.summary, BuildC1OutputPaths(artifacts, artifacts.case_dir));
-            WriteC1StageManifest(artifacts, stage, "completed", artifacts.case_dir);
-            WriteC1StageStatus(stageSpec, artifacts, stage, "completed", artifacts.case_dir);
+            WriteRunSummary(result.summary, BuildOutputPaths(artifacts, artifacts.case_dir));
+            WriteStageManifest(plan.spec.case_code, artifacts, stage, "completed", artifacts.case_dir);
+            WriteStageStatus(stageSpec, artifacts, stage, "completed", artifacts.case_dir);
             PrintRunSummary("full_workflow completed", result.summary);
             return;
         default:
-            throw std::runtime_error("[Test_H_TP_CO2H2O_ConstPP_NoFrac] unsupported stage in RunStageByKeyImpl.");
+            throw std::runtime_error(FailurePrefix(plan.spec.case_code) + " unsupported stage in RunStageByKeyImpl.");
         }
     } catch (const std::exception& ex) {
         const std::string message = ex.what();
@@ -860,8 +1092,8 @@ void RunStageByKeyImpl(const std::string& key, CaseCommon::CaseStage stage) {
             message.find("missing") != std::string::npos &&
             message.find("reference") != std::string::npos;
         const std::string failureStatus = missingReference ? "missing_reference" : "failed";
-        WriteC1StageManifest(artifacts, stage, failureStatus, defaultOutputDir);
-        WriteC1StageStatus(stageSpec, artifacts, stage, failureStatus, defaultOutputDir);
+        WriteStageManifest(plan.spec.case_code, artifacts, stage, failureStatus, defaultOutputDir);
+        WriteStageStatus(stageSpec, artifacts, stage, failureStatus, defaultOutputDir);
         throw;
     }
 }
@@ -873,23 +1105,31 @@ void ExecutePlanByKeyImpl(const std::string& key) {
 } // namespace
 
 void RunTestCase() {
-    ExecutePlanByKeyImpl(kPlanKey);
+    ExecutePlanByKeyImpl(kPlanKeyC1);
+}
+
+void ExecutePlanByKey(const std::string& key) {
+    ExecutePlanByKeyImpl(key);
+}
+
+void RunStageByKey(const std::string& key, CaseCommon::CaseStage stage) {
+    RunStageByKeyImpl(key, stage);
 }
 
 void RunSolveOnly() {
-    RunStageByKeyImpl("h_tp_co2h2o_constpp_nofrac_nowell", CaseCommon::CaseStage::SolveOnly);
+    RunStageByKeyImpl(kPlanKeyC1, CaseCommon::CaseStage::SolveOnly);
 }
 
 void RunPrepareReference() {
-    RunStageByKeyImpl("h_tp_co2h2o_constpp_nofrac_nowell", CaseCommon::CaseStage::PrepareReference);
+    RunStageByKeyImpl(kPlanKeyC1, CaseCommon::CaseStage::PrepareReference);
 }
 
 void RunValidateOnly() {
-    RunStageByKeyImpl("h_tp_co2h2o_constpp_nofrac_nowell", CaseCommon::CaseStage::ValidateOnly);
+    RunStageByKeyImpl(kPlanKeyC1, CaseCommon::CaseStage::ValidateOnly);
 }
 
 void RunFullWorkflow() {
-    RunStageByKeyImpl("h_tp_co2h2o_constpp_nofrac_nowell", CaseCommon::CaseStage::FullWorkflow);
+    RunStageByKeyImpl(kPlanKeyC1, CaseCommon::CaseStage::FullWorkflow);
 }
 
 } // namespace Test_H_TP_CO2H2O_ConstPP_NoFrac

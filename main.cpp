@@ -42,6 +42,11 @@
 #include "Test_2D_EDFM_H_CO2_VaryPP_NoFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_VaryPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_ComplexFrac_NoWell.h"
+#include "Test_2D_EDFM_H_TP_CO2H2O_VaryPP_ComplexFrac_NoWell.h"
 #include "Test_Issue11_FrozenMatrix.h"
 #include "Test_Issue12_LinearSolverMemory.h"
 #include "CaseCommon_Catalog.h"
@@ -207,6 +212,11 @@ int main (int argc, char** argv) {
         {"test_h_t_co2_varypp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) P-T coupled single-fracture no-well", []() { Test_H_T_CO2_VaryPP_SingleFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_constpp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled complex-fracture no-well", []() { Test_H_T_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_varypp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) P-T coupled complex-fracture no-well", []() { Test_H_T_CO2_VaryPP_ComplexFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_tp_co2h2o_varypp_nofrac_nowell", "Standalone test: 2D two-phase CO2/H2O variable-property (EOS) P-T coupled no-fracture no-well", []() { Test_H_TP_CO2H2O_VaryPP_NoFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_tp_co2h2o_constpp_singlefrac_nowell", "Standalone test: 2D two-phase CO2/H2O const-property P-T coupled single-fracture no-well", []() { Test_H_TP_CO2H2O_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_tp_co2h2o_varypp_singlefrac_nowell", "Standalone test: 2D two-phase CO2/H2O variable-property (EOS) P-T coupled single-fracture no-well", []() { Test_H_TP_CO2H2O_VaryPP_SingleFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_tp_co2h2o_constpp_complexfrac_nowell", "Standalone test: 2D two-phase CO2/H2O const-property P-T coupled complex-fracture no-well", []() { Test_H_TP_CO2H2O_ConstPP_ComplexFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_tp_co2h2o_varypp_complexfrac_nowell", "Standalone test: 2D two-phase CO2/H2O variable-property (EOS) P-T coupled complex-fracture no-well", []() { Test_H_TP_CO2H2O_VaryPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property single-fracture no-well", []() { Test_H_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_constpp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 const-property complex-fracture no-well", []() { Test_H_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) no-fracture no-well", []() { Test_H_CO2_VaryPP::RunFullWorkflow(); return 0; }},

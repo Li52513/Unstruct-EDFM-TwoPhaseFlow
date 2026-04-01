@@ -1,17 +1,14 @@
 #pragma once
 
-#include "CaseCommon_Catalog.h"
-
 #include <string>
 
-namespace Test_H_TP_CO2H2O_ConstPP_NoFrac {
+namespace Test_H_TP_CO2H2O_VaryPP_SingleFrac {
 
 void RunTestCase();
 void ExecutePlanByKey(const std::string& key);
-void RunStageByKey(const std::string& key, CaseCommon::CaseStage stage);
 void RunSolveOnly();
 void RunPrepareReference();
 void RunValidateOnly();
 void RunFullWorkflow();
 
-} // namespace Test_H_TP_CO2H2O_ConstPP_NoFrac
+} // namespace Test_H_TP_CO2H2O_VaryPP_SingleFrac
