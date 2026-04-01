@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CaseCommon_Catalog.h"
+
 #include <string>
 
 /**
@@ -11,6 +13,7 @@ namespace Test_H_T_CO2_ConstPP_NoFrac {
 
 void RunTestCase();
 void ExecutePlanByKey(const std::string& key);
+void RunStageByKey(const std::string& key, CaseCommon::CaseStage stage);
 void RunSolveOnly();
 void RunPrepareReference();
 void RunValidateOnly();

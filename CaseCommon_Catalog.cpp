@@ -9,7 +9,11 @@
 #include "Test_2D_EDFM_H_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_InjProd.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_ConstPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_VaryPP_ComplexFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_VaryPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_NoFrac_InjProd.h"
 #include "Test_2D_EDFM_H_TP_CO2H2O_ConstPP_NoFrac_NoWell.h"
 
@@ -119,6 +123,16 @@ int RunB1(CaseStage stage) {
     }
 }
 
+int RunB2(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_T_CO2_VaryPP_NoFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_T_CO2_VaryPP_NoFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_T_CO2_VaryPP_NoFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_T_CO2_VaryPP_NoFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for B2.");
+    }
+}
+
 int RunB3(CaseStage stage) {
     switch (stage) {
     case CaseStage::SolveOnly: Test_H_T_CO2_ConstPP_SingleFrac::RunSolveOnly(); return 0;
@@ -126,6 +140,36 @@ int RunB3(CaseStage stage) {
     case CaseStage::ValidateOnly: Test_H_T_CO2_ConstPP_SingleFrac::RunValidateOnly(); return 0;
     case CaseStage::FullWorkflow: Test_H_T_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0;
     default: throw std::runtime_error("[CaseCatalog] unsupported stage for B3.");
+    }
+}
+
+int RunB4(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_T_CO2_VaryPP_SingleFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_T_CO2_VaryPP_SingleFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_T_CO2_VaryPP_SingleFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_T_CO2_VaryPP_SingleFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for B4.");
+    }
+}
+
+int RunB5(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_T_CO2_ConstPP_ComplexFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_T_CO2_ConstPP_ComplexFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_T_CO2_ConstPP_ComplexFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_T_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for B5.");
+    }
+}
+
+int RunB6(CaseStage stage) {
+    switch (stage) {
+    case CaseStage::SolveOnly: Test_H_T_CO2_VaryPP_ComplexFrac::RunSolveOnly(); return 0;
+    case CaseStage::PrepareReference: Test_H_T_CO2_VaryPP_ComplexFrac::RunPrepareReference(); return 0;
+    case CaseStage::ValidateOnly: Test_H_T_CO2_VaryPP_ComplexFrac::RunValidateOnly(); return 0;
+    case CaseStage::FullWorkflow: Test_H_T_CO2_VaryPP_ComplexFrac::RunFullWorkflow(); return 0;
+    default: throw std::runtime_error("[CaseCatalog] unsupported stage for B6.");
     }
 }
 
@@ -378,7 +422,11 @@ BindingInfo GetBinding(const std::string& caseCode) {
     if (caseCode == "A6") return BindingInfo{&RunA6, "implemented"};
     if (caseCode == "A7") return BindingInfo{&RunA7, "implemented"};
     if (caseCode == "B1") return BindingInfo{&RunB1, "implemented"};
+    if (caseCode == "B2") return BindingInfo{&RunB2, "implemented"};
     if (caseCode == "B3") return BindingInfo{&RunB3, "implemented"};
+    if (caseCode == "B4") return BindingInfo{&RunB4, "implemented"};
+    if (caseCode == "B5") return BindingInfo{&RunB5, "implemented"};
+    if (caseCode == "B6") return BindingInfo{&RunB6, "implemented"};
     if (caseCode == "B7") return BindingInfo{&RunB7, "implemented"};
     if (caseCode == "C1") return BindingInfo{&RunC1, "implemented"};
     if (caseCode == "C7") return BindingInfo{&RunC7, "implemented"};

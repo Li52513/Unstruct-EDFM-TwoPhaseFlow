@@ -9,6 +9,8 @@
 #include "BoundaryConditionManager.h"
 #include "Case2D_Matlab.h"
 #include "Case2D_ReferenceIO.h"
+#include "CaseCommon_Artifacts.h"
+#include "CaseCommon_Catalog.h"
 #include "FVM_Grad.h"
 #include "FIM_TransientCaseKit.hpp"
 #include "MeshDefinitions.h"
@@ -180,6 +182,7 @@ struct TestCaseSpec {
     std::string output_base_dir = "Test/Transient/FullCaseTest";
     std::string sub_dir = "H_T_CO2_ConstPP";
     std::string comsol_reference_case_name;
+    bool use_variable_properties = false;
     double lx = 400.0;
     double ly = 40.0;
     int nx = 48;
@@ -253,12 +256,15 @@ struct TestCaseSpec {
 
 struct TestCaseSummary {
     std::string case_dir;
+    std::string studies_dir;
+    std::string figures_dir;
     std::string engineering_dir;
     std::string reference_dir;
     std::string analytic_dir;
     std::string comsol_input_dir;
     std::string comsol_output_dir;
     std::string report_dir;
+    std::string report_scripts_dir;
     std::string convergence_log_path;
     std::string run_log_path;
     std::string metrics_csv_path;
@@ -354,6 +360,245 @@ void EnsureDirRecursive(const std::string& rawPath) {
         current += token;
         TEST_MKDIR(current.c_str());
     }
+}
+
+std::string GetNoFracTemplateCaseCode(const TestCaseSpec& cfg) {
+    return cfg.use_variable_properties ? "B2" : "B1";
+}
+
+const CaseCommon::CaseCatalogEntry& GetNoFracCatalogEntryOrThrow(const TestCaseSpec& cfg) {
+    const std::string caseCode = GetNoFracTemplateCaseCode(cfg);
+    const CaseCommon::CaseCatalogEntry* entry = CaseCommon::FindCaseCatalogEntry(caseCode);
+    if (!entry) {
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] missing " + caseCode + " catalog entry.");
+    }
+    return *entry;
+}
+
+void ConfigureSummaryPaths(TestCaseSummary& summary,
+                           const TestCaseSpec& cfg,
+                           const std::string& caseDir) {
+    summary.case_dir = caseDir;
+    summary.studies_dir = summary.case_dir + "/studies";
+    summary.figures_dir = summary.case_dir + "/figures";
+    summary.engineering_dir = summary.case_dir + "/engineering";
+    summary.reference_dir = summary.case_dir + "/reference";
+    summary.analytic_dir = summary.reference_dir + "/analytic";
+    summary.comsol_input_dir = summary.reference_dir + "/comsol_input";
+    summary.comsol_output_dir = summary.reference_dir + "/comsol";
+    if (!cfg.comsol_reference_case_name.empty()) {
+        summary.comsol_output_dir =
+            cfg.output_base_dir + "/" + cfg.sub_dir + "/" + cfg.comsol_reference_case_name + "/reference/comsol";
+    }
+    summary.report_dir = summary.case_dir + "/report";
+    summary.report_scripts_dir = summary.report_dir + "/scripts";
+    summary.convergence_log_path = summary.case_dir + "/convergence.log";
+    summary.run_log_path = summary.case_dir + "/run.log";
+    summary.metrics_csv_path = summary.report_dir + "/metrics.csv";
+    summary.validation_summary_path = summary.report_dir + "/validation_summary.md";
+    summary.validation_summary_csv_path = summary.report_dir + "/validation_summary.csv";
+    summary.reference_spec_path = summary.engineering_dir + "/reference_spec.md";
+    summary.analytical_note_path = summary.analytic_dir + "/pressure_analytical_note.md";
+    summary.comsol_reference_spec_path = summary.reference_dir + "/comsol_reference_spec.md";
+    summary.matlab_script_path = summary.report_scripts_dir + "/plot_validation_results.m";
+    summary.property_table_path = summary.engineering_dir + "/property_table.csv";
+    summary.comsol_property_table_path = summary.comsol_input_dir + "/property_table.csv";
+    summary.profile_station_definitions_path = summary.engineering_dir + "/profile_station_definitions.csv";
+    summary.monitor_point_definitions_path = summary.engineering_dir + "/monitor_point_definitions.csv";
+    summary.profile_schedule_path = summary.engineering_dir + "/profile_report_schedule.csv";
+    summary.monitor_schedule_path = summary.engineering_dir + "/monitor_sample_schedule.csv";
+    summary.eng_monitor_timeseries_path = summary.engineering_dir + "/eng_monitor_timeseries.csv";
+    summary.grid_convergence_csv_path = summary.studies_dir + "/grid_convergence.csv";
+    summary.time_sensitivity_csv_path = summary.studies_dir + "/time_sensitivity.csv";
+    summary.nx = cfg.nx;
+    summary.ny = cfg.ny;
+}
+
+void EnsureSummaryDirs(const TestCaseSummary& summary) {
+    EnsureDirRecursive(summary.case_dir);
+    EnsureDirRecursive(summary.studies_dir);
+    EnsureDirRecursive(summary.figures_dir);
+    EnsureDirRecursive(summary.engineering_dir);
+    EnsureDirRecursive(summary.reference_dir);
+    EnsureDirRecursive(summary.analytic_dir);
+    EnsureDirRecursive(summary.comsol_input_dir);
+    EnsureDirRecursive(summary.comsol_output_dir);
+    EnsureDirRecursive(summary.report_dir);
+    EnsureDirRecursive(summary.report_scripts_dir);
+}
+
+std::string JoinFractions(const std::vector<double>& values) {
+    std::ostringstream oss;
+    oss << std::setprecision(6);
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) oss << ", ";
+        oss << values[i];
+    }
+    return oss.str();
+}
+
+CaseCommon::CaseArtifactPaths BuildB1ArtifactPaths(const TestCaseSpec& cfg) {
+    const CaseCommon::CaseCatalogEntry& entry = GetNoFracCatalogEntryOrThrow(cfg);
+    return CaseCommon::BuildArtifactPaths(
+        entry.metadata.output_root,
+        entry.metadata.case_code,
+        entry.metadata.case_slug);
+}
+
+void EnsureB1ArtifactContractDirs(const CaseCommon::CaseArtifactPaths& artifacts) {
+    EnsureDirRecursive(artifacts.root_dir);
+    EnsureDirRecursive(artifacts.case_dir);
+    EnsureDirRecursive(artifacts.studies_dir);
+    EnsureDirRecursive(artifacts.figures_dir);
+    EnsureDirRecursive(artifacts.engineering_dir);
+    EnsureDirRecursive(artifacts.reference_dir);
+    EnsureDirRecursive(artifacts.report_dir);
+    EnsureDirRecursive(artifacts.report_scripts_dir);
+}
+
+void WriteB1StageManifest(const CaseCommon::CaseArtifactPaths& artifacts,
+                          const std::string& caseCode,
+                          CaseCommon::CaseStage stage,
+                          const std::string& status,
+                          const std::string& outputDir) {
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.engineering_stage_manifest_path,
+        ("[Test_H_T_CO2_ConstPP_NoFrac] failed to write " + caseCode + " stage manifest").c_str(),
+        [&](std::ofstream& out) {
+            out << "case_code=" << caseCode << "\n";
+            out << "stage=" << CaseCommon::ToString(stage) << "\n";
+            out << "status=" << status << "\n";
+            out << "output_dir=" << outputDir << "\n";
+            out << "case_dir=" << artifacts.case_dir << "\n";
+            out << "studies_dir=" << artifacts.studies_dir << "\n";
+            out << "engineering_dir=" << artifacts.engineering_dir << "\n";
+            out << "reference_dir=" << artifacts.reference_dir << "\n";
+            out << "report_dir=" << artifacts.report_dir << "\n";
+            out << "report_scripts_dir=" << artifacts.report_scripts_dir << "\n";
+        });
+}
+
+void WriteB1ReferenceContract(const TestCaseSpec& cfg,
+                              const CaseCommon::CaseArtifactPaths& artifacts,
+                              const std::string& caseCode,
+                              CaseCommon::CaseStage stage) {
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.reference_contract_path,
+        ("[Test_H_T_CO2_ConstPP_NoFrac] failed to write " + caseCode + " reference contract").c_str(),
+        [&](std::ofstream& out) {
+            out << "# " << caseCode << " Reference Contract\n\n";
+            out << "- Stage: `" << CaseCommon::ToString(stage) << "`\n";
+            out << "- Case dir: `" << artifacts.case_dir << "`\n";
+            if (cfg.use_variable_properties) {
+                out << "- Reference mode: `COMSOL`\n";
+                out << "- Fluid model: `single-phase CO2 EOS`\n";
+            } else {
+                out << "- Reference mode: `pressure analytical + temperature COMSOL`\n";
+                out << "- Fluid model: `single-phase CO2 constant-property`\n";
+            }
+            out << "- Temperature COMSOL wrapper: `" << cfg.comsol_wrapper_relpath << "`\n\n";
+            out << "## Required directories\n";
+            out << "- `engineering/`\n";
+            out << "- `reference/`\n";
+            out << "- `studies/`\n";
+            out << "- `report/`\n";
+            out << "- `report/scripts/`\n\n";
+            out << "## Notes\n";
+            out << "- `prepare_reference` writes property tables and COMSOL/reference specs without running the transient solve.\n";
+            out << "- Profile and monitor engineering CSVs still materialize during solve/validate until a mesh-only prep path exists.\n";
+        });
+}
+
+void WriteB1StageStatus(const TestCaseSpec& cfg,
+                        const CaseCommon::CaseArtifactPaths& artifacts,
+                        const std::string& caseCode,
+                        CaseCommon::CaseStage stage,
+                        const std::string& status,
+                        const std::string& outputDir) {
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.report_status_markdown_path,
+        ("[Test_H_T_CO2_ConstPP_NoFrac] failed to write " + caseCode + " stage status").c_str(),
+        [&](std::ofstream& out) {
+            out << "# " << caseCode << " Template Status\n\n";
+            out << "- Stage: `" << CaseCommon::ToString(stage) << "`\n";
+            out << "- Status: `" << status << "`\n";
+            out << "- Output dir: `" << outputDir << "`\n";
+            out << "- Case dir: `" << artifacts.case_dir << "`\n\n";
+            out << "## Stage semantics\n";
+            out << "- `solve_only`: run the coupled single-case solve without grid/time sweep studies.\n";
+            out << "- `prepare_reference`: emit COMSOL/reference contract files and property tables only.\n";
+            out << "- `validate_only`: rerun validation workflow until engineering snapshot persistence exists.\n";
+            out << "- `full_workflow`: run the legacy B1 validation chain under the template-system case root.\n\n";
+            out << "## Numerical settings\n";
+            out << "- Grid: `" << cfg.nx << "x" << cfg.ny << "`\n";
+            out << "- End time: `" << std::setprecision(12) << cfg.target_end_time_s << " s`\n";
+            out << "- Report fractions: `" << JoinFractions(cfg.report_time_fractions) << "`\n";
+            out << "- Property mode: `" << (cfg.use_variable_properties ? "varypp" : "constpp") << "`\n";
+        });
+    Case2DReferenceIO::WriteAsciiFile(
+        artifacts.report_scripts_dir + "/README.m",
+        ("[Test_H_T_CO2_ConstPP_NoFrac] failed to write " + caseCode + " Matlab stub").c_str(),
+        [&](std::ofstream& out) {
+            out << "% " << caseCode << " Matlab script placeholder\n";
+            out << "% Stage: " << CaseCommon::ToString(stage) << "\n";
+            out << "% Output root: " << artifacts.case_dir << "\n";
+        });
+}
+
+TestCaseSpec BuildStageSpec(const TestCaseSpec& base, CaseCommon::CaseStage stage) {
+    TestCaseSpec cfg = base;
+    cfg.allow_full_workflow_comsol_autorun = false;
+    switch (stage) {
+    case CaseCommon::CaseStage::SolveOnly:
+        cfg.enable_grid_convergence_study = false;
+        cfg.enable_time_sensitivity_study = false;
+        cfg.emit_detailed_outputs = false;
+        break;
+    case CaseCommon::CaseStage::ValidateOnly:
+        cfg.enable_grid_convergence_study = false;
+        cfg.enable_time_sensitivity_study = false;
+        cfg.export_vtk = false;
+        cfg.emit_detailed_outputs = true;
+        break;
+    case CaseCommon::CaseStage::PrepareReference:
+        cfg.enable_grid_convergence_study = false;
+        cfg.enable_time_sensitivity_study = false;
+        cfg.export_vtk = false;
+        cfg.emit_detailed_outputs = false;
+        break;
+    case CaseCommon::CaseStage::FullWorkflow:
+        break;
+    default:
+        throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] unsupported stage in BuildStageSpec.");
+    }
+    return cfg;
+}
+
+void PrintRunSummary(const std::string& banner, const TestCaseSummary& summary) {
+    std::cout << "\n============================================\n";
+    std::cout << "[Test_H_T_CO2_ConstPP_NoFrac] " << banner << "\n";
+    std::cout << "  output_dir: " << summary.case_dir << "\n";
+    std::cout << "  engineering_dir: " << summary.engineering_dir << "\n";
+    std::cout << "  grid: " << summary.nx << " x " << summary.ny
+              << " (" << summary.n_cells << " cells)\n";
+    std::cout << "  steps: " << summary.steps
+              << "  rollbacks: " << summary.total_rollbacks << "\n";
+    std::cout << "  Newton iters: avg=" << std::fixed << std::setprecision(2) << summary.avg_iters
+              << "  max=" << summary.max_iters << "\n";
+    std::cout << "  final_time: " << std::scientific << std::setprecision(4) << summary.t_end << " s\n";
+    std::cout << "  validation_status: " << summary.validation_status << "\n";
+    std::cout << "  validation_summary: " << summary.validation_summary_path << "\n";
+    std::cout << "============================================\n";
+}
+
+void PrintPrepareReferenceSummary(const CaseCommon::CaseArtifactPaths& artifacts) {
+    std::cout << "\n============================================\n";
+    std::cout << "[Test_H_T_CO2_ConstPP_NoFrac] prepare_reference completed\n";
+    std::cout << "  output_dir: " << artifacts.reference_dir << "\n";
+    std::cout << "  stage_manifest: " << artifacts.engineering_stage_manifest_path << "\n";
+    std::cout << "  reference_contract: " << artifacts.reference_contract_path << "\n";
+    std::cout << "  status_markdown: " << artifacts.report_status_markdown_path << "\n";
+    std::cout << "============================================\n";
 }
 
 std::string PathToGenericString(const std::filesystem::path& path) {
@@ -1610,47 +1855,11 @@ FIM_Engine::TransientSolverParams BuildSolverParams(const TestCaseSpec& cfg) {
 
 CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& outputDirOverride) {
     CaseRunArtifacts artifacts;
-    artifacts.summary.case_dir = outputDirOverride.empty()
+    const std::string caseDir = outputDirOverride.empty()
         ? (cfg.output_base_dir + "/" + cfg.sub_dir + "/" + cfg.case_name)
         : outputDirOverride;
-    artifacts.summary.engineering_dir = artifacts.summary.case_dir + "/engineering";
-    artifacts.summary.reference_dir = artifacts.summary.case_dir + "/reference";
-    artifacts.summary.analytic_dir = artifacts.summary.reference_dir + "/analytic";
-    artifacts.summary.comsol_input_dir = artifacts.summary.reference_dir + "/comsol_input";
-    artifacts.summary.comsol_output_dir = artifacts.summary.reference_dir + "/comsol";
-    if (!cfg.comsol_reference_case_name.empty()) {
-        artifacts.summary.comsol_output_dir =
-            cfg.output_base_dir + "/" + cfg.sub_dir + "/" + cfg.comsol_reference_case_name + "/reference/comsol";
-    }
-    artifacts.summary.report_dir = artifacts.summary.case_dir + "/report";
-    EnsureDirRecursive(artifacts.summary.case_dir);
-    EnsureDirRecursive(artifacts.summary.engineering_dir);
-    EnsureDirRecursive(artifacts.summary.reference_dir);
-    EnsureDirRecursive(artifacts.summary.analytic_dir);
-    EnsureDirRecursive(artifacts.summary.comsol_input_dir);
-    EnsureDirRecursive(artifacts.summary.comsol_output_dir);
-    EnsureDirRecursive(artifacts.summary.report_dir);
-
-    artifacts.summary.convergence_log_path = artifacts.summary.case_dir + "/convergence.log";
-    artifacts.summary.run_log_path = artifacts.summary.case_dir + "/run.log";
-    artifacts.summary.metrics_csv_path = artifacts.summary.case_dir + "/metrics.csv";
-    artifacts.summary.validation_summary_path = artifacts.summary.report_dir + "/validation_summary.md";
-    artifacts.summary.validation_summary_csv_path = artifacts.summary.case_dir + "/validation_summary.csv";
-    artifacts.summary.reference_spec_path = artifacts.summary.engineering_dir + "/reference_spec.md";
-    artifacts.summary.analytical_note_path = artifacts.summary.analytic_dir + "/pressure_analytical_note.md";
-    artifacts.summary.comsol_reference_spec_path = artifacts.summary.reference_dir + "/comsol_reference_spec.md";
-    artifacts.summary.matlab_script_path = artifacts.summary.case_dir + "/plot_validation_results.m";
-    artifacts.summary.property_table_path = artifacts.summary.engineering_dir + "/property_table.csv";
-    artifacts.summary.comsol_property_table_path = artifacts.summary.comsol_input_dir + "/property_table.csv";
-    artifacts.summary.profile_station_definitions_path = artifacts.summary.engineering_dir + "/profile_station_definitions.csv";
-    artifacts.summary.monitor_point_definitions_path = artifacts.summary.engineering_dir + "/monitor_point_definitions.csv";
-    artifacts.summary.profile_schedule_path = artifacts.summary.engineering_dir + "/profile_report_schedule.csv";
-    artifacts.summary.monitor_schedule_path = artifacts.summary.engineering_dir + "/monitor_sample_schedule.csv";
-    artifacts.summary.eng_monitor_timeseries_path = artifacts.summary.engineering_dir + "/eng_monitor_timeseries.csv";
-    artifacts.summary.grid_convergence_csv_path = artifacts.summary.case_dir + "/grid_convergence.csv";
-    artifacts.summary.time_sensitivity_csv_path = artifacts.summary.case_dir + "/time_sensitivity.csv";
-    artifacts.summary.nx = cfg.nx;
-    artifacts.summary.ny = cfg.ny;
+    ConfigureSummaryPaths(artifacts.summary, cfg, caseDir);
+    EnsureSummaryDirs(artifacts.summary);
 
     std::ofstream convergenceLog(artifacts.summary.convergence_log_path.c_str(), std::ios::out | std::ios::trunc);
     if (!convergenceLog.good()) {
@@ -1745,7 +1954,11 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     co2_props.cp = cfg.co2_cp_const;
     co2_props.cv = cfg.co2_cv_const;
     co2_props.k = cfg.co2_k_const;
-    modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2Constant(co2_props));
+    if (cfg.use_variable_properties) {
+        modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2EOS());
+    } else {
+        modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2Constant(co2_props));
+    }
 
     modules.property_initializer = [&cfg](MeshManager&, FieldManager_2D& fld) {
         const auto rock = PhysicalProperties_string_op::Rock();
@@ -1957,8 +2170,8 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     return artifacts;
 }
 
-TestCaseSummary RunCase(const TestCaseSpec& cfg) {
-    CaseRunArtifacts mainArtifacts = RunSingleCaseCore(cfg, "");
+TestCaseSummary RunCase(const TestCaseSpec& cfg, const std::string& outputDirOverride) {
+    CaseRunArtifacts mainArtifacts = RunSingleCaseCore(cfg, outputDirOverride);
     TestCaseSummary& summary = mainArtifacts.summary;
 
     const bool readyBefore = ReferenceFilesReady(summary, mainArtifacts.snapshots);
@@ -2006,7 +2219,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
                 FilterReconstructedSamples(mainArtifacts.sampled_profile_points, family, snapshot.tag);
             const ProfileReferenceTable reference = LoadProfileReference(
                 summary.comsol_output_dir + "/comsol_profile_" + family + "_" + snapshot.tag + ".csv");
-            const std::string comparePath = summary.case_dir + "/compare_profile_" + family + "_" + snapshot.tag + ".csv";
+            const std::string comparePath = summary.studies_dir + "/compare_profile_" + family + "_" + snapshot.tag + ".csv";
             summary.report_metrics.push_back(EvaluateProfileAgainstReference(
                 sampledProfileRows,
                 reference,
@@ -2037,7 +2250,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
         mainArtifacts.sampled_monitor_points,
         monitorReference,
         cfg,
-        summary.case_dir + "/compare_monitor_timeseries.csv");
+        summary.studies_dir + "/compare_monitor_timeseries.csv");
     summary.final_monitor_pressure_l2_norm = monitorMetrics.first.l2_norm;
     summary.final_monitor_pressure_linf_norm = monitorMetrics.first.linf_norm;
     summary.final_monitor_temperature_l2_norm = monitorMetrics.second.l2_norm;
@@ -2059,7 +2272,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
 
             CaseRunArtifacts sweepArtifacts = RunSingleCaseCore(
                 sweepCfg,
-                summary.case_dir + "/studies/grid_" + std::to_string(sweepCfg.nx) + "x" + std::to_string(sweepCfg.ny));
+                summary.studies_dir + "/grid_" + std::to_string(sweepCfg.nx) + "x" + std::to_string(sweepCfg.ny));
 
             SweepStudyRow row;
             row.label = "grid_" + std::to_string(sweepCfg.nx) + "x" + std::to_string(sweepCfg.ny);
@@ -2127,7 +2340,7 @@ TestCaseSummary RunCase(const TestCaseSpec& cfg) {
 
             CaseRunArtifacts sweepArtifacts = RunSingleCaseCore(
                 sweepCfg,
-                summary.case_dir + "/studies/dt_" + std::to_string(static_cast<int>(std::round(dtInit))) + "s");
+                summary.studies_dir + "/dt_" + std::to_string(static_cast<int>(std::round(dtInit))) + "s");
 
             SweepStudyRow row;
             row.label = "dt_" + std::to_string(static_cast<int>(std::round(dtInit))) + "s";
@@ -2251,6 +2464,29 @@ TestCasePlan BuildGridPlan() {
     return plan;
 }
 
+TestCasePlan BuildVaryPPPlan() {
+    TestCasePlan plan = BuildDefaultPlan();
+    plan.plan_key = "h_t_co2_varypp_nofrac_nowell";
+    plan.spec.case_name = "h_t_co2_varypp_nofrac_nowell";
+    plan.spec.sub_dir = "H_T_CO2_VaryPP";
+    plan.spec.use_variable_properties = true;
+    plan.spec.comsol_wrapper_relpath = "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1";
+    return plan;
+}
+
+TestCasePlan BuildVaryPPSmokePlan() {
+    TestCasePlan plan = BuildVaryPPPlan();
+    plan.plan_key = "h_t_co2_varypp_nofrac_nowell_smoke";
+    plan.spec.case_name = "h_t_co2_varypp_nofrac_nowell_smoke";
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 1.0e3;
+    plan.spec.dt_max = 5.0e3;
+    plan.spec.target_end_time_s = 5.0e4;
+    plan.spec.max_steps = 400;
+    return plan;
+}
+
 TestCasePlan BuildFastPlan() {
     TestCasePlan plan = BuildDefaultPlan();
     plan.plan_key = "h_t_co2_constpp_nofrac_nowell_fast";
@@ -2308,6 +2544,8 @@ using BuilderFn = TestCasePlan(*)();
 const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
     static const std::unordered_map<std::string, BuilderFn> registry = {
         {"h_t_co2_constpp_nofrac_nowell", &BuildDefaultPlan},
+        {"h_t_co2_varypp_nofrac_nowell", &BuildVaryPPPlan},
+        {"h_t_co2_varypp_nofrac_nowell_smoke", &BuildVaryPPSmokePlan},
         {"h_t_co2_constpp_nofrac_nowell_fast", &BuildFastPlan},
         {"h_t_co2_constpp_nofrac_nowell_fast_grid", &BuildFastGridPlan},
         {"h_t_co2_constpp_nofrac_nowell_grid", &BuildGridPlan},
@@ -2319,31 +2557,80 @@ const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
     return registry;
 }
 
-void ExecutePlanByKeyImpl(const std::string& key) {
+void MaterializeB1ReferenceInputs(const TestCaseSpec& cfg, const CaseCommon::CaseArtifactPaths& artifacts) {
+    TestCaseSummary summary;
+    ConfigureSummaryPaths(summary, cfg, artifacts.case_dir);
+    EnsureSummaryDirs(summary);
+    WritePropertyTables(cfg, summary.property_table_path, summary.comsol_property_table_path);
+    WriteReferenceSpec(cfg, summary);
+    WriteAnalyticalNote(cfg, summary.analytical_note_path);
+    WriteComsolReferenceSpec(cfg, summary.case_dir, summary.comsol_reference_spec_path);
+}
+
+void RunStageByKeyImpl(const std::string& key, CaseCommon::CaseStage stage) {
     const auto& registry = GetRegistry();
     const auto it = registry.find(key);
     if (it == registry.end()) {
         throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] unknown registry key: " + key);
     }
+
     const TestCasePlan plan = it->second();
-    const TestCaseSummary summary = RunCase(plan.spec);
-    std::cout << "\n============================================\n";
-    std::cout << "[Test_H_T_CO2_ConstPP_NoFrac] run completed\n";
-    std::cout << "  output_dir: " << summary.case_dir << "\n";
-    std::cout << "  grid: " << summary.nx << " x " << summary.ny
-              << " (" << summary.n_cells << " cells)\n";
-    std::cout << "  steps: " << summary.steps
-              << "  rollbacks: " << summary.total_rollbacks << "\n";
-    std::cout << "  Newton iters: avg=" << std::fixed << std::setprecision(2) << summary.avg_iters
-              << "  max=" << summary.max_iters << "\n";
-    std::cout << "  final_time: " << std::scientific << std::setprecision(4) << summary.t_end << " s\n";
-    std::cout << "  validation_status: " << summary.validation_status << "\n";
-    std::cout << "  pressure cell L2/Linf: "
-              << summary.final_pressure_cell_l2_norm << " / " << summary.final_pressure_cell_linf_norm << "\n";
-    std::cout << "  temperature profile L2/Linf: "
-              << summary.final_temperature_horizontal_l2_norm << " / " << summary.final_temperature_horizontal_linf_norm << "\n";
-    std::cout << "  validation_summary: " << summary.validation_summary_path << "\n";
-    std::cout << "============================================\n";
+    const std::string caseCode = GetNoFracTemplateCaseCode(plan.spec);
+    const CaseCommon::CaseArtifactPaths artifacts = BuildB1ArtifactPaths(plan.spec);
+    EnsureB1ArtifactContractDirs(artifacts);
+    WriteB1StageManifest(artifacts, caseCode, stage, "started", artifacts.case_dir);
+    WriteB1ReferenceContract(plan.spec, artifacts, caseCode, stage);
+    WriteB1StageStatus(plan.spec, artifacts, caseCode, stage, "started", artifacts.case_dir);
+    MaterializeB1ReferenceInputs(plan.spec, artifacts);
+
+    if (stage == CaseCommon::CaseStage::PrepareReference) {
+        WriteB1StageManifest(artifacts, caseCode, stage, "prepared_reference_inputs", artifacts.reference_dir);
+        WriteB1StageStatus(plan.spec, artifacts, caseCode, stage, "prepared_reference_inputs", artifacts.reference_dir);
+        PrintPrepareReferenceSummary(artifacts);
+        return;
+    }
+
+    const TestCaseSpec stageSpec = BuildStageSpec(plan.spec, stage);
+    const std::string defaultOutputDir =
+        (stage == CaseCommon::CaseStage::SolveOnly) ? artifacts.engineering_dir : artifacts.case_dir;
+    try {
+        TestCaseSummary summary;
+        switch (stage) {
+        case CaseCommon::CaseStage::SolveOnly:
+            summary = RunSingleCaseCore(stageSpec, artifacts.case_dir).summary;
+            WriteB1StageManifest(artifacts, caseCode, stage, "completed", artifacts.engineering_dir);
+            WriteB1StageStatus(stageSpec, artifacts, caseCode, stage, "completed", artifacts.engineering_dir);
+            PrintRunSummary("solve_only completed", summary);
+            return;
+        case CaseCommon::CaseStage::ValidateOnly:
+            summary = RunCase(stageSpec, artifacts.case_dir);
+            WriteB1StageManifest(artifacts, caseCode, stage, "completed", artifacts.case_dir);
+            WriteB1StageStatus(stageSpec, artifacts, caseCode, stage, "completed", artifacts.case_dir);
+            PrintRunSummary("validate_only completed", summary);
+            return;
+        case CaseCommon::CaseStage::FullWorkflow:
+            summary = RunCase(stageSpec, artifacts.case_dir);
+            WriteB1StageManifest(artifacts, caseCode, stage, "completed", artifacts.case_dir);
+            WriteB1StageStatus(stageSpec, artifacts, caseCode, stage, "completed", artifacts.case_dir);
+            PrintRunSummary("full_workflow completed", summary);
+            return;
+        default:
+            throw std::runtime_error("[Test_H_T_CO2_ConstPP_NoFrac] unsupported stage in RunStageByKeyImpl.");
+        }
+    } catch (const std::exception& ex) {
+        const std::string message = ex.what();
+        const bool missingReference =
+            message.find("missing") != std::string::npos &&
+            message.find("reference") != std::string::npos;
+        const std::string failureStatus = missingReference ? "missing_reference" : "failed";
+        WriteB1StageManifest(artifacts, caseCode, stage, failureStatus, defaultOutputDir);
+        WriteB1StageStatus(stageSpec, artifacts, caseCode, stage, failureStatus, defaultOutputDir);
+        throw;
+    }
+}
+
+void ExecutePlanByKeyImpl(const std::string& key) {
+    RunStageByKeyImpl(key, CaseCommon::CaseStage::FullWorkflow);
 }
 
 } // namespace
@@ -2356,34 +2643,24 @@ void ExecutePlanByKey(const std::string& key) {
     ExecutePlanByKeyImpl(key);
 }
 
+void RunStageByKey(const std::string& key, CaseCommon::CaseStage stage) {
+    RunStageByKeyImpl(key, stage);
+}
+
 void RunSolveOnly() {
-    TestCasePlan plan = BuildDefaultPlan();
-    plan.spec.enable_grid_convergence_study = false;
-    plan.spec.enable_time_sensitivity_study = false;
-    plan.spec.allow_full_workflow_comsol_autorun = false;
-    RunSingleCaseCore(plan.spec, "");
+    RunStageByKeyImpl("h_t_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::SolveOnly);
 }
 
 void RunPrepareReference() {
-    TestCasePlan plan = BuildDefaultPlan();
-    plan.spec.enable_grid_convergence_study = false;
-    plan.spec.enable_time_sensitivity_study = false;
-    plan.spec.allow_full_workflow_comsol_autorun = false;
-    RunSingleCaseCore(plan.spec, "");
+    RunStageByKeyImpl("h_t_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::PrepareReference);
 }
 
 void RunValidateOnly() {
-    TestCasePlan plan = BuildDefaultPlan();
-    plan.spec.enable_grid_convergence_study = false;
-    plan.spec.enable_time_sensitivity_study = false;
-    plan.spec.allow_full_workflow_comsol_autorun = false;
-    RunCase(plan.spec);
+    RunStageByKeyImpl("h_t_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::ValidateOnly);
 }
 
 void RunFullWorkflow() {
-    TestCasePlan plan = BuildDefaultPlan();
-    plan.spec.allow_full_workflow_comsol_autorun = false;
-    RunCase(plan.spec);
+    RunStageByKeyImpl("h_t_co2_constpp_nofrac_nowell", CaseCommon::CaseStage::FullWorkflow);
 }
 
 } // namespace Test_H_T_CO2_ConstPP_NoFrac

@@ -32,7 +32,11 @@
 #endif
 #include "Test_2D_EDFM_H_CO2_ConstPP_NoFrac_NoWell_.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_VaryPP_NoFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_ConstPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_T_CO2_ConstPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_VaryPP_SingleFrac_NoWell.h"
+#include "Test_2D_EDFM_H_T_CO2_VaryPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_ConstPP_ComplexFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_ConstPP_SingleFrac_NoWell.h"
 #include "Test_2D_EDFM_H_CO2_VaryPP_NoFrac_NoWell.h"
@@ -195,10 +199,14 @@ int main (int argc, char** argv) {
         {"test_h_t_co2_constpp_nofrac_nowell_all", "Standalone validation-chain full study: 2D single-phase CO2 const-property P-T coupled no-fracture no-well", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_all"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_debug_96x12", "Standalone debug case: 96x12 fine-grid detailed-output run for the no-fracture P-T coupled validation case", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_debug_96x12"); return 0; }},
         {"test_h_t_co2_constpp_nofrac_nowell_probe_96x12_dt5000", "Standalone long-time probe: 96x12, dt_init=5000 s no-fracture P-T coupled validation case", []() { Test_H_T_CO2_ConstPP_NoFrac::ExecutePlanByKey("h_t_co2_constpp_nofrac_nowell_probe_96x12_dt5000"); return 0; }},
+        {"test_h_t_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) P-T coupled no-fracture no-well", []() { Test_H_T_CO2_VaryPP_NoFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled single-fracture no-well", []() { Test_H_T_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_prepare_reference", "Standalone validation-chain prepare phase: export engineering reference inputs for the N=2 single-fracture CO2 P-T case", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_prepare_reference"); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_validate_reference", "Standalone validation-chain validate phase: compare the N=2 single-fracture CO2 P-T case against prepared reference data", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_validate_reference"); return 0; }},
         {"test_h_t_co2_constpp_singlefrac_nowell_full_comsol", "Standalone validation-chain full COMSOL mode: auto-prepare and validate the N=2 single-fracture CO2 P-T case", []() { Test_H_T_CO2_ConstPP_SingleFrac::ExecutePlanByKey("h_t_co2_constpp_singlefrac_nowell_full_comsol"); return 0; }},
+        {"test_h_t_co2_varypp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) P-T coupled single-fracture no-well", []() { Test_H_T_CO2_VaryPP_SingleFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_t_co2_constpp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 const-property P-T coupled complex-fracture no-well", []() { Test_H_T_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0; }},
+        {"test_h_t_co2_varypp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) P-T coupled complex-fracture no-well", []() { Test_H_T_CO2_VaryPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_constpp_singlefrac_nowell", "Standalone test: 2D single-phase CO2 const-property single-fracture no-well", []() { Test_H_CO2_ConstPP_SingleFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_constpp_complexfrac_nowell", "Standalone test: 2D single-phase CO2 const-property complex-fracture no-well", []() { Test_H_CO2_ConstPP_ComplexFrac::RunFullWorkflow(); return 0; }},
         {"test_h_co2_varypp_nofrac_nowell", "Standalone test: 2D single-phase CO2 variable-property (EOS) no-fracture no-well", []() { Test_H_CO2_VaryPP::RunFullWorkflow(); return 0; }},

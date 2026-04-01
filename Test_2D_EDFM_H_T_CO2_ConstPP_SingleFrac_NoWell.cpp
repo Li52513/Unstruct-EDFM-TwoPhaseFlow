@@ -174,6 +174,8 @@ struct TestCaseSpec {
     std::string case_name = "h_t_co2_constpp_singlefrac_nowell";
     std::string output_base_dir = "Test/Transient/FullCaseTest";
     std::string sub_dir = "H_T_CO2_ConstPP";
+    bool use_variable_properties = false;
+    bool use_complex_fractures = false;
     double lx = 400.0;
     double ly = 40.0;
     int nx = 48;
@@ -488,6 +490,19 @@ FractureGeometry BuildFractureGeometry(const TestCaseSpec& cfg) {
     return geom;
 }
 
+void AddConfiguredFractures(MeshManager& mgr, const TestCaseSpec& cfg) {
+    const FractureGeometry primary = BuildFractureGeometry(cfg);
+    mgr.addFracture(primary.start, primary.end);
+    if (!cfg.use_complex_fractures) {
+        return;
+    }
+
+    mgr.addFracture(Vector(0.18 * cfg.lx, 0.80 * cfg.ly, 0.0),
+                    Vector(0.52 * cfg.lx, 0.38 * cfg.ly, 0.0));
+    mgr.addFracture(Vector(0.58 * cfg.lx, 0.82 * cfg.ly, 0.0),
+                    Vector(0.88 * cfg.lx, 0.58 * cfg.ly, 0.0));
+}
+
 std::vector<FractureBlockSample> BuildFractureBlockSamples(const MeshManager& mgr) {
     const auto& ordered = mgr.fracture_network().getOrderedFractureElements();
     const auto& fractures = mgr.fracture_network().fractures;
@@ -790,46 +805,49 @@ void WritePropertyTables(const TestCaseSpec& cfg,
                          const std::string& engineeringPath,
                          const std::string& comsolInputPath) {
     const auto writeOne = [&](const std::string& path) {
-        std::ofstream out(path.c_str(), std::ios::out | std::ios::trunc);
-        if (!out.good()) throw std::runtime_error("[Test_H_T_CO2_ConstPP_SingleFrac] failed to write property table: " + path);
-        out << "key,value,unit\n";
-        out << "lx," << std::setprecision(12) << cfg.lx << ",m\n";
-        out << "ly," << cfg.ly << ",m\n";
-        out << "frac_x0_ratio," << cfg.frac_x0_ratio << ",1\n";
-        out << "frac_y0_ratio," << cfg.frac_y0_ratio << ",1\n";
-        out << "frac_x1_ratio," << cfg.frac_x1_ratio << ",1\n";
-        out << "frac_y1_ratio," << cfg.frac_y1_ratio << ",1\n";
-        out << "p_init," << cfg.p_init << ",Pa\n";
-        out << "p_left," << cfg.p_left << ",Pa\n";
-        out << "p_right," << cfg.p_right << ",Pa\n";
-        out << "t_init," << cfg.t_init << ",K\n";
-        out << "t_left," << cfg.t_left << ",K\n";
-        out << "t_right," << cfg.t_right << ",K\n";
-        out << "dt_init," << cfg.dt_init << ",s\n";
-        out << "target_end_time_s," << cfg.target_end_time_s << ",s\n";
-        out << "matrix_phi," << cfg.matrix_phi << ",1\n";
-        out << "matrix_perm," << cfg.matrix_perm << ",m^2\n";
-        out << "matrix_ct," << cfg.matrix_ct << ",1/Pa\n";
-        out << "matrix_rho_r," << cfg.matrix_rho_r << ",kg/m^3\n";
-        out << "matrix_cp_r," << cfg.matrix_cp_r << ",J/(kg*K)\n";
-        out << "matrix_lambda_r," << cfg.matrix_lambda_r << ",W/(m*K)\n";
-        out << "fracture_phi," << cfg.fracture_phi << ",1\n";
-        out << "fracture_kt," << cfg.fracture_kt << ",m^2\n";
-        out << "fracture_kn," << cfg.fracture_kn << ",m^2\n";
-        out << "fracture_ct," << cfg.fracture_ct << ",1/Pa\n";
-        out << "fracture_rho_r," << cfg.fracture_rho_r << ",kg/m^3\n";
-        out << "fracture_cp_r," << cfg.fracture_cp_r << ",J/(kg*K)\n";
-        out << "fracture_lambda_r," << cfg.fracture_lambda_r << ",W/(m*K)\n";
-        out << "co2_rho_const," << cfg.co2_rho_const << ",kg/m^3\n";
-        out << "co2_mu_const," << cfg.co2_mu_const << ",Pa*s\n";
-        out << "co2_cp_const," << cfg.co2_cp_const << ",J/(kg*K)\n";
-        out << "co2_cv_const," << cfg.co2_cv_const << ",J/(kg*K)\n";
-        out << "co2_k_const," << cfg.co2_k_const << ",W/(m*K)\n";
-        out << "gravity_x," << cfg.gravity_vector.m_x << ",m/s^2\n";
-        out << "gravity_y," << cfg.gravity_vector.m_y << ",m/s^2\n";
-        out << "gravity_z," << cfg.gravity_vector.m_z << ",m/s^2\n";
-        out << "fracture_aperture_m," << kFractureApertureM << ",m\n";
-        out << "comsol_thin_band_width," << kComsolThinBandWidthM << ",m\n";
+        Case2DReferenceIO::WriteAsciiFile(
+            path,
+            "[Test_H_T_CO2_ConstPP_SingleFrac] failed to write property table",
+            [&](std::ofstream& out) {
+                out << "key,value,unit\n";
+                out << "lx," << std::setprecision(12) << cfg.lx << ",m\n";
+                out << "ly," << cfg.ly << ",m\n";
+                out << "frac_x0_ratio," << cfg.frac_x0_ratio << ",1\n";
+                out << "frac_y0_ratio," << cfg.frac_y0_ratio << ",1\n";
+                out << "frac_x1_ratio," << cfg.frac_x1_ratio << ",1\n";
+                out << "frac_y1_ratio," << cfg.frac_y1_ratio << ",1\n";
+                out << "p_init," << cfg.p_init << ",Pa\n";
+                out << "p_left," << cfg.p_left << ",Pa\n";
+                out << "p_right," << cfg.p_right << ",Pa\n";
+                out << "t_init," << cfg.t_init << ",K\n";
+                out << "t_left," << cfg.t_left << ",K\n";
+                out << "t_right," << cfg.t_right << ",K\n";
+                out << "dt_init," << cfg.dt_init << ",s\n";
+                out << "target_end_time_s," << cfg.target_end_time_s << ",s\n";
+                out << "matrix_phi," << cfg.matrix_phi << ",1\n";
+                out << "matrix_perm," << cfg.matrix_perm << ",m^2\n";
+                out << "matrix_ct," << cfg.matrix_ct << ",1/Pa\n";
+                out << "matrix_rho_r," << cfg.matrix_rho_r << ",kg/m^3\n";
+                out << "matrix_cp_r," << cfg.matrix_cp_r << ",J/(kg*K)\n";
+                out << "matrix_lambda_r," << cfg.matrix_lambda_r << ",W/(m*K)\n";
+                out << "fracture_phi," << cfg.fracture_phi << ",1\n";
+                out << "fracture_kt," << cfg.fracture_kt << ",m^2\n";
+                out << "fracture_kn," << cfg.fracture_kn << ",m^2\n";
+                out << "fracture_ct," << cfg.fracture_ct << ",1/Pa\n";
+                out << "fracture_rho_r," << cfg.fracture_rho_r << ",kg/m^3\n";
+                out << "fracture_cp_r," << cfg.fracture_cp_r << ",J/(kg*K)\n";
+                out << "fracture_lambda_r," << cfg.fracture_lambda_r << ",W/(m*K)\n";
+                out << "co2_rho_const," << cfg.co2_rho_const << ",kg/m^3\n";
+                out << "co2_mu_const," << cfg.co2_mu_const << ",Pa*s\n";
+                out << "co2_cp_const," << cfg.co2_cp_const << ",J/(kg*K)\n";
+                out << "co2_cv_const," << cfg.co2_cv_const << ",J/(kg*K)\n";
+                out << "co2_k_const," << cfg.co2_k_const << ",W/(m*K)\n";
+                out << "gravity_x," << cfg.gravity_vector.m_x << ",m/s^2\n";
+                out << "gravity_y," << cfg.gravity_vector.m_y << ",m/s^2\n";
+                out << "gravity_z," << cfg.gravity_vector.m_z << ",m/s^2\n";
+                out << "fracture_aperture_m," << kFractureApertureM << ",m\n";
+                out << "comsol_thin_band_width," << kComsolThinBandWidthM << ",m\n";
+            });
     };
     writeOne(engineeringPath);
     writeOne(comsolInputPath);
@@ -1474,7 +1492,7 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     mgr.BuildSolidMatrixGrid_2D(NormalVectorCorrectionMethod::OverRelaxed);
 
     const FractureGeometry geom = BuildFractureGeometry(cfg);
-    mgr.addFracture(geom.start, geom.end);
+    AddConfiguredFractures(mgr, cfg);
     mgr.DetectAndSubdivideFractures(IntersectionSearchStrategy_2D::GridIndexing_BasedOn8DOP_DDA);
     mgr.BuildGlobalSystemIndexing();
     mgr.BuildFracturetoFractureTopology();
@@ -1562,7 +1580,11 @@ CaseRunArtifacts RunSingleCaseCore(const TestCaseSpec& cfg, const std::string& o
     co2_props.cp = cfg.co2_cp_const;
     co2_props.cv = cfg.co2_cv_const;
     co2_props.k = cfg.co2_k_const;
-    modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2Constant(co2_props));
+    if (cfg.use_variable_properties) {
+        modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2EOS());
+    } else {
+        modules.SetFluidModelConfig(FIM_Engine::UnifiedFluidModelConfig::MakeSinglePhaseCO2Constant(co2_props));
+    }
 
     modules.property_initializer = [&cfg](MeshManager&, FieldManager_2D& fld) {
         const auto rock = PhysicalProperties_string_op::Rock();
@@ -2049,37 +2071,284 @@ TestCasePlan BuildDefaultPlan() {
     return plan;
 }
 
-TestCasePlan BuildPrepareReferencePlan() {
+TestCasePlan BuildVariantPlan(const std::string& planKey,
+                              const std::string& caseName,
+                              const std::string& subDir,
+                              bool useVariableProperties,
+                              bool useComplexFractures,
+                              WorkflowMode workflowMode,
+                              ReferenceMode referenceMode,
+                              const std::string& comsolWrapperRelpath) {
     TestCasePlan plan = BuildDefaultPlan();
-    plan.plan_key = "h_t_co2_constpp_singlefrac_nowell_prepare_reference";
-    plan.spec.workflow_mode = WorkflowMode::PrepareReference;
+    plan.plan_key = planKey;
+    plan.spec.case_name = caseName;
+    plan.spec.sub_dir = subDir;
+    plan.spec.use_variable_properties = useVariableProperties;
+    plan.spec.use_complex_fractures = useComplexFractures;
+    plan.spec.workflow_mode = workflowMode;
+    plan.spec.reference_mode = referenceMode;
+    plan.spec.comsol_wrapper_relpath = comsolWrapperRelpath;
     return plan;
 }
 
-TestCasePlan BuildValidateReferencePlan() {
-    TestCasePlan plan = BuildDefaultPlan();
-    plan.plan_key = "h_t_co2_constpp_singlefrac_nowell_validate_reference";
-    plan.spec.reference_mode = ReferenceMode::Comsol;
-    plan.spec.workflow_mode = WorkflowMode::ValidateAgainstReference;
+TestCasePlan BuildVaryPPSingleFracPrepareReferencePlan();
+TestCasePlan BuildConstPPComplexFracPrepareReferencePlan();
+TestCasePlan BuildVaryPPComplexFracPrepareReferencePlan();
+
+TestCasePlan BuildConstSingleFracPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_singlefrac_nowell",
+        "h_t_co2_constpp_singlefrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        false,
+        WorkflowMode::Full,
+        ReferenceMode::Auto,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstSingleFracPrepareReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_singlefrac_nowell_prepare_reference",
+        "h_t_co2_constpp_singlefrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        false,
+        WorkflowMode::PrepareReference,
+        ReferenceMode::Auto,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstSingleFracValidateReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_singlefrac_nowell_validate_reference",
+        "h_t_co2_constpp_singlefrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        false,
+        WorkflowMode::ValidateAgainstReference,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstSingleFracFullComsolPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_singlefrac_nowell_full_comsol",
+        "h_t_co2_constpp_singlefrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        false,
+        WorkflowMode::Full,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPSingleFracPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_singlefrac_nowell",
+        "h_t_co2_varypp_singlefrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        false,
+        WorkflowMode::Full,
+        ReferenceMode::Auto,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPSingleFracSmokePlan() {
+    TestCasePlan plan = BuildVaryPPSingleFracPrepareReferencePlan();
+    plan.plan_key = "h_t_co2_varypp_singlefrac_nowell_smoke";
+    plan.spec.case_name = "h_t_co2_varypp_singlefrac_nowell_smoke";
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 5.0e2;
+    plan.spec.dt_max = 5.0e3;
+    plan.spec.target_end_time_s = 2.0e4;
+    plan.spec.max_steps = 300;
     return plan;
 }
 
-TestCasePlan BuildFullComsolPlan() {
-    TestCasePlan plan = BuildDefaultPlan();
-    plan.plan_key = "h_t_co2_constpp_singlefrac_nowell_full_comsol";
-    plan.spec.reference_mode = ReferenceMode::Comsol;
-    plan.spec.workflow_mode = WorkflowMode::Full;
+TestCasePlan BuildVaryPPSingleFracPrepareReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_singlefrac_nowell_prepare_reference",
+        "h_t_co2_varypp_singlefrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        false,
+        WorkflowMode::PrepareReference,
+        ReferenceMode::Auto,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPSingleFracValidateReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_singlefrac_nowell_validate_reference",
+        "h_t_co2_varypp_singlefrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        false,
+        WorkflowMode::ValidateAgainstReference,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPSingleFracFullComsolPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_singlefrac_nowell_full_comsol",
+        "h_t_co2_varypp_singlefrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        false,
+        WorkflowMode::Full,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstPPComplexFracPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_complexfrac_nowell",
+        "h_t_co2_constpp_complexfrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        true,
+        WorkflowMode::Full,
+        ReferenceMode::Auto,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstPPComplexFracSmokePlan() {
+    TestCasePlan plan = BuildConstPPComplexFracPrepareReferencePlan();
+    plan.plan_key = "h_t_co2_constpp_complexfrac_nowell_smoke";
+    plan.spec.case_name = "h_t_co2_constpp_complexfrac_nowell_smoke";
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 5.0e2;
+    plan.spec.dt_max = 5.0e3;
+    plan.spec.target_end_time_s = 2.0e4;
+    plan.spec.max_steps = 300;
     return plan;
+}
+
+TestCasePlan BuildConstPPComplexFracPrepareReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_complexfrac_nowell_prepare_reference",
+        "h_t_co2_constpp_complexfrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        true,
+        WorkflowMode::PrepareReference,
+        ReferenceMode::Auto,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstPPComplexFracValidateReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_complexfrac_nowell_validate_reference",
+        "h_t_co2_constpp_complexfrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        true,
+        WorkflowMode::ValidateAgainstReference,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildConstPPComplexFracFullComsolPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_constpp_complexfrac_nowell_full_comsol",
+        "h_t_co2_constpp_complexfrac_nowell",
+        "H_T_CO2_ConstPP",
+        false,
+        true,
+        WorkflowMode::Full,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/H_T_CO2_ConstPP_SingleFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPComplexFracPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_complexfrac_nowell",
+        "h_t_co2_varypp_complexfrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        true,
+        WorkflowMode::Full,
+        ReferenceMode::Auto,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPComplexFracSmokePlan() {
+    TestCasePlan plan = BuildVaryPPComplexFracPrepareReferencePlan();
+    plan.plan_key = "h_t_co2_varypp_complexfrac_nowell_smoke";
+    plan.spec.case_name = "h_t_co2_varypp_complexfrac_nowell_smoke";
+    plan.spec.nx = 24;
+    plan.spec.ny = 3;
+    plan.spec.dt_init = 5.0e2;
+    plan.spec.dt_max = 5.0e3;
+    plan.spec.target_end_time_s = 2.0e4;
+    plan.spec.max_steps = 300;
+    return plan;
+}
+
+TestCasePlan BuildVaryPPComplexFracPrepareReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_complexfrac_nowell_prepare_reference",
+        "h_t_co2_varypp_complexfrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        true,
+        WorkflowMode::PrepareReference,
+        ReferenceMode::Auto,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPComplexFracValidateReferencePlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_complexfrac_nowell_validate_reference",
+        "h_t_co2_varypp_complexfrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        true,
+        WorkflowMode::ValidateAgainstReference,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
+}
+
+TestCasePlan BuildVaryPPComplexFracFullComsolPlan() {
+    return BuildVariantPlan(
+        "h_t_co2_varypp_complexfrac_nowell_full_comsol",
+        "h_t_co2_varypp_complexfrac_nowell",
+        "H_T_CO2_VaryPP",
+        true,
+        true,
+        WorkflowMode::Full,
+        ReferenceMode::Comsol,
+        "tools/COMSOL/VaryPP_NoFrac_NoWell/run_comsol_reference.ps1");
 }
 
 using BuilderFn = TestCasePlan(*)();
 
 const std::unordered_map<std::string, BuilderFn>& GetRegistry() {
     static const std::unordered_map<std::string, BuilderFn> registry = {
-        {"h_t_co2_constpp_singlefrac_nowell", &BuildDefaultPlan},
-        {"h_t_co2_constpp_singlefrac_nowell_prepare_reference", &BuildPrepareReferencePlan},
-        {"h_t_co2_constpp_singlefrac_nowell_validate_reference", &BuildValidateReferencePlan},
-        {"h_t_co2_constpp_singlefrac_nowell_full_comsol", &BuildFullComsolPlan}
+        {"h_t_co2_constpp_singlefrac_nowell", &BuildConstSingleFracPlan},
+        {"h_t_co2_constpp_singlefrac_nowell_prepare_reference", &BuildConstSingleFracPrepareReferencePlan},
+        {"h_t_co2_constpp_singlefrac_nowell_validate_reference", &BuildConstSingleFracValidateReferencePlan},
+        {"h_t_co2_constpp_singlefrac_nowell_full_comsol", &BuildConstSingleFracFullComsolPlan},
+        {"h_t_co2_varypp_singlefrac_nowell", &BuildVaryPPSingleFracPlan},
+        {"h_t_co2_varypp_singlefrac_nowell_smoke", &BuildVaryPPSingleFracSmokePlan},
+        {"h_t_co2_varypp_singlefrac_nowell_prepare_reference", &BuildVaryPPSingleFracPrepareReferencePlan},
+        {"h_t_co2_varypp_singlefrac_nowell_validate_reference", &BuildVaryPPSingleFracValidateReferencePlan},
+        {"h_t_co2_varypp_singlefrac_nowell_full_comsol", &BuildVaryPPSingleFracFullComsolPlan},
+        {"h_t_co2_constpp_complexfrac_nowell", &BuildConstPPComplexFracPlan},
+        {"h_t_co2_constpp_complexfrac_nowell_smoke", &BuildConstPPComplexFracSmokePlan},
+        {"h_t_co2_constpp_complexfrac_nowell_prepare_reference", &BuildConstPPComplexFracPrepareReferencePlan},
+        {"h_t_co2_constpp_complexfrac_nowell_validate_reference", &BuildConstPPComplexFracValidateReferencePlan},
+        {"h_t_co2_constpp_complexfrac_nowell_full_comsol", &BuildConstPPComplexFracFullComsolPlan},
+        {"h_t_co2_varypp_complexfrac_nowell", &BuildVaryPPComplexFracPlan},
+        {"h_t_co2_varypp_complexfrac_nowell_smoke", &BuildVaryPPComplexFracSmokePlan},
+        {"h_t_co2_varypp_complexfrac_nowell_prepare_reference", &BuildVaryPPComplexFracPrepareReferencePlan},
+        {"h_t_co2_varypp_complexfrac_nowell_validate_reference", &BuildVaryPPComplexFracValidateReferencePlan},
+        {"h_t_co2_varypp_complexfrac_nowell_full_comsol", &BuildVaryPPComplexFracFullComsolPlan}
     };
     return registry;
 }
